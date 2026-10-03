@@ -10,6 +10,10 @@ PKG_URL="https://github.com/ikemen-engine/Ikemen-GO.git"
 PKG_GIT_SKIP_SUBMODULE="yes"
 # retroarch: il suo libretro.h per il core lanciatore (launcher/)
 PKG_DEPENDS_TARGET="toolchain golang-bin:host ikemen-sdl2 libxmp ffmpeg ${OPENGLES} ikemen-screenpack retroarch"
+# ...letto dalla cartella di build di RetroArch: con AUTOREMOVE=yes (la CI)
+# quella cartella sparisce appena RetroArch e' fatto, a meno che qualcuno la
+# dichiari qui. Senza, il lanciatore non compila e --keep-going toglie IKEMEN.
+PKG_DEPENDS_UNPACK="retroarch"
 PKG_LONGDESC="IKEMEN GO 1.0, motore di picchiaduro compatibile MUGEN, con renderer OpenGL ES 3.2 (predefinito) e OpenGL 3.3."
 PKG_TOOLCHAIN="manual"
 

@@ -4857,6 +4857,19 @@ container (`RF35H_CONTAINER`) per fermarlo da fuori; passa `RF35H_VERSION` e
   esterni: `PKG_IS_KERNEL_PKG` lo mette in `PKG_DEPENDS_UNPACK`); ccache fra
   una build e l'altra nella cache delle actions, 6 GB con
   `CCACHE_COMPILERCHECK=content` (la toolchain ricostruita ha un'altra data).
+- **AUTOREMOVE e ikemen-go**: LibreELEC toglie la cartella di build di un
+  pacchetto quando nessun job del piano la dichiara piu' in
+  `PKG_DEPENDS_UNPACK`. ikemen-go compila il suo core lanciatore con
+  `-I$(get_build_dir retroarch)/libretro-common/include` e dipendeva da
+  RetroArch solo in `PKG_DEPENDS_TARGET`: in CI la cartella di RetroArch
+  spariva appena fatto RetroArch, il lanciatore non compilava e
+  `--keep-going` toglieva IKEMEN dall'immagine. A mano non succedeva (senza
+  AUTOREMOVE le cartelle restano). Ora `PKG_DEPENDS_UNPACK="retroarch"`; nel
+  piano non c'e' nessun altro caso (cercati `get_build_dir` e `kernel_path`
+  in tutti i 297 pacchetti), e verify-claims controlla che ogni
+  `get_build_dir <nome>` dei nostri pacchetti abbia `<nome>` in
+  `PKG_DEPENDS_UNPACK` (162 verifiche). La prima build di prova in CI e'
+  partita prima della correzione: la sua immagine non avra' IKEMEN.
 - La release la crea un job a parte, l'unico con `contents: write`: bozza,
   file, poi pubblicata. File: `.img.gz`, `.tar`, `update.txt` (versione,
   nome, url, sha256 e dimensione del `.tar`), `SHA256SUMS`. Prima di

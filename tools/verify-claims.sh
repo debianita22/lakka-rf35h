@@ -240,6 +240,19 @@ chk "versione della release in os-release"      "grep -q 'CUSTOM_VERSION=\"\${RF
 chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '$O/tools/ci-build.sh'"
 chk "CI: un solo job con contents: write"       "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 1 ]"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
+# AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
+# nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
+# <nome> dei nostri pacchetti deve avere <nome> li'. ikemen-go leggeva
+# libretro.h dalla build di RetroArch senza dichiararla.
+unpack_ok() {
+	local f n
+	for f in "$O"/packages/*/package.mk; do
+		for n in $(grep -o 'get_build_dir [A-Za-z0-9_.+-]*' "$f" | awk '{print $2}' | sort -u); do
+			grep -qE "^PKG_DEPENDS_UNPACK\+?=\"(.* )?${n}( .*)?\"" "$f" || return 1
+		done
+	done
+}
+chk "AUTOREMOVE: ogni get_build_dir dichiarato" "unpack_ok"
 
 echo "== kernel"
 chk "GPU 600 MHz a 1,15 V"                   "grep -A2 opp-600000000 '$Z010' | grep -q 1150000"
