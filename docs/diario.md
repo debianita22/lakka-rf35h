@@ -4856,7 +4856,9 @@ container (`RF35H_CONTAINER`) per fermarlo da fuori; passa `RF35H_VERSION` e
   `AUTOREMOVE=yes` per lo spazio (il kernel resta finche' servono i moduli
   esterni: `PKG_IS_KERNEL_PKG` lo mette in `PKG_DEPENDS_UNPACK`); ccache fra
   una build e l'altra nella cache delle actions, 6 GB con
-  `CCACHE_COMPILERCHECK=content` (la toolchain ricostruita ha un'altra data).
+  `CCACHE_COMPILERCHECK=content` (la toolchain ricostruita ha un'altra data),
+  salvata alla fine di ogni parte, anche fallita: una build ripartita dopo
+  un errore non ricomincia da una cache vuota.
 - **AUTOREMOVE e ikemen-go**: LibreELEC toglie la cartella di build di un
   pacchetto quando nessun job del piano la dichiara piu' in
   `PKG_DEPENDS_UNPACK`. ikemen-go compila il suo core lanciatore con

@@ -191,11 +191,17 @@ cmd_pack() {
 }
 
 cmd_unpack() {
-	local n="${1:?parte}"
+	local n="${1:?parte}" f
 	: "${W:?}"
 	say "Riprendo lo stato della parte ${n}"
-	tar -C "${W}" -I zstd -xf "${W}/state-${n}.tar.zst"
-	rm -f "${W}/state-${n}.tar.zst"
+	# download-artifact salva un artifact non zip col nome che gli da' il
+	# server (Content-Disposition), "artifact" se non ne da': si prende il
+	# file che c'e' nella cartella del download
+	f="${W}/dl/state-${n}.tar.zst"
+	[ -f "${f}" ] || f="$(find "${W}/dl" -maxdepth 1 -type f | head -1)"
+	[ -n "${f}" ] && [ -f "${f}" ] || die "stato della parte ${n} non scaricato in ${W}/dl"
+	tar -C "${W}" -I zstd -xf "${f}"
+	rm -rf "${W}/dl"
 	du -sh "${W}/${TREE_NAME}"
 }
 

@@ -67,7 +67,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: state-${{ env.PREV }}.tar.zst
-          path: ${{ env.W }}
+          path: ${{ env.W }}/dl
 
       - name: Estrai lo stato
         if: inputs.stage > 1
@@ -84,7 +84,7 @@ jobs:
           path: |
             ${{ env.W }}/lakka-rf35h-build/build.*/.ccache
             ${{ env.W }}/lakka-rf35h-build/build.*/.ccache-local
-          key: ccache-rf35h-${{ github.run_id }}
+          key: ccache-rf35h-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
           restore-keys: ccache-rf35h-
 
       - name: Build
@@ -139,10 +139,14 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+      # La ccache alla fine di ogni parte, anche fallita: una build nuova (o
+      # una ripresa dopo un errore) riparte dall'ultima, non da zero. Le
+      # chiavi sono uniche (le cache non si sovrascrivono); quando si supera
+      # il limite di 10 GB del repository GitHub toglie le piu' vecchie.
       - uses: actions/cache/save@v6
-        if: steps.build.outputs.result == 'done'
+        if: always() && steps.build.outcome != 'skipped'
         with:
           path: |
             ${{ env.W }}/lakka-rf35h-build/build.*/.ccache
             ${{ env.W }}/lakka-rf35h-build/build.*/.ccache-local
-          key: ccache-rf35h-${{ github.run_id }}
+          key: ccache-rf35h-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.stage }}
