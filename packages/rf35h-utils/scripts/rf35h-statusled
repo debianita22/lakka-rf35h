@@ -1,0 +1,79 @@
+#!/bin/sh
+# rd FILE [DEFAULT]: prima riga del file senza spawn di cat (read e' builtin);
+# stampa DEFAULT se il file manca o e' vuoto.
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+# rf35h-statusled - i due LED di stato (rosso e blu, gpio-leds).
+#
+#   rf35h-statusled            mostra il modo corrente
+#   rf35h-statusled charge     rosso = indicatore di carica, blu spento
+#   rf35h-statusled red        rosso fisso
+#   rf35h-statusled blue       blu fisso
+#   rf35h-statusled both       entrambi
+#   rf35h-statusled off        spenti
+#   rf35h-statusled --restore  rimette il modo salvato (default: charge)
+#
+# "charge" usa il trigger battery-charging-or-full che il power supply core
+# registra (vedi rf35h-led). Gli altri modi mettono il trigger a "none" e
+# pilotano brightness a mano.
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/statusled"
+RED="${RF35H_LED_RED:-/sys/class/leds/red}"
+BLUE="${RF35H_LED_BLUE:-/sys/class/leds/blue}"
+TRIG="${RF35H_CHARGE_TRIGGER:-battery-charging-or-full}"
+DEFAULT="charge"
+MODES="charge red blue both off battery heartbeat activity"
+
+set_led() {   # led on|off
+	[ -d "$1" ] || return 0
+	echo none > "$1/trigger" 2>/dev/null
+	echo "$([ "$2" = on ] && echo 1 || echo 0)" > "$1/brightness" 2>/dev/null
+}
+
+apply() {
+	case "$1" in
+		charge)
+			# scrivere un trigger inesistente fallisce con EINVAL: allora rosso spento
+			{ [ -w "${RED}/trigger" ] && echo "${TRIG}" > "${RED}/trigger"; } 2>/dev/null || set_led "${RED}" off
+			set_led "${BLUE}" off ;;
+		red)    set_led "${RED}" on;  set_led "${BLUE}" off ;;
+		blue)   set_led "${RED}" off; set_led "${BLUE}" on ;;
+		both)   set_led "${RED}" on;  set_led "${BLUE}" on ;;
+		off)    set_led "${RED}" off; set_led "${BLUE}" off ;;
+		# trigger del kernel: nessun demone. Il rosso resta indicatore di carica.
+		heartbeat|activity)
+			{ [ -w "${RED}/trigger" ] && echo "${TRIG}" > "${RED}/trigger"; } 2>/dev/null || set_led "${RED}" off
+			{ echo "$1" > "${BLUE}/trigger"; } 2>/dev/null || set_led "${BLUE}" off ;;
+		# battery: rosso sotto il 20%, lampeggia sotto il 10%, blu in carica.
+		# Lo anima rf35h-ledd, che legge il file di stato con inotify. Qui NON
+		# si tocca nulla: il demone reagisce al salvataggio e puo' accendere i
+		# LED prima che lo script arrivi a spegnerli — e poi non li riaccende,
+		# perche' crede di averlo gia' fatto. Con i modi dinamici l'unico che
+		# scrive dev'essere il demone.
+		battery)
+			: ;;
+		*) return 1 ;;
+	esac
+}
+
+save() { mkdir -p "${STATE}" 2>/dev/null && printf '%s\n' "$1" > "${SAVED}" 2>/dev/null || true; }
+
+case "${1:-}" in
+	"")
+		echo "modo salvato: $(cat "${SAVED}" 2>/dev/null || echo "(nessuno, default ${DEFAULT})")"
+		echo "modi:         ${MODES}"
+		[ -r "${RED}/trigger" ] && echo "rosso:        trigger $(sed -n 's/.*\[\(.*\)\].*/\1/p' "${RED}/trigger"), brightness $(cat "${RED}/brightness")"
+		[ -r "${BLUE}/trigger" ] && echo "blu:          trigger $(sed -n 's/.*\[\(.*\)\].*/\1/p' "${BLUE}/trigger"), brightness $(cat "${BLUE}/brightness")"
+		;;
+	--restore)
+		apply "$(rd "${SAVED}" "${DEFAULT}")" || apply "${DEFAULT}"
+		;;
+	*)
+		# prima il salvataggio (rf35h-ledd legge il file via inotify e, se il
+		# modo non e' battery, smette di toccare i LED), poi lo si applica.
+		case " ${MODES} " in *" $1 "*) ;; *) echo "rf35h-statusled: modo sconosciuto '$1' (modi: ${MODES})" >&2; exit 1 ;; esac
+		save "$1"
+		# Come per rf35h-led: se il demone gira, i LED li tocca lui.
+		[ -e "${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}" ] || apply "$1"
+		;;
+esac

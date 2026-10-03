@@ -1,0 +1,37 @@
+Subject: Rockchip: sull RF35H installare nel SYSTEM il loader known-good
+
+bootloader/update.sh, applicando un aggiornamento .tar, riscrive a 32K quello
+che trova in ${SYSTEM_ROOT}/usr/share/bootloader/u-boot-rockchip.bin. Con
+l u-boot compilato da Lakka li dentro, ogni aggiornamento sostituiva il loader
+AURKNIX funzionante con uno mai verificato su questa board, e il device non
+ripartiva. Installando il known-good, quel dd riscrive byte identici.
+
+---
+--- a/projects/Rockchip/bootloader/install
++++ b/projects/Rockchip/bootloader/install
+@@ -59,7 +59,24 @@
+   fi
+ fi
+ 
+-if [ -f "${UBOOT_FIT_IMAGE}" ]; then
++# devaOS RF35H: nel SYSTEM deve finire il loader known-good, non quello appena
++# compilato. Non e' una rifinitura: bootloader/update.sh, applicando un
++# aggiornamento .tar, fa
++#     dd if=${SYSTEM_ROOT}/usr/share/bootloader/u-boot-rockchip.bin \
++#        of=${BOOT_DISK} bs=32k seek=1
++# cioe' riscrive a 32K quello che trova nel SYSTEM. Con l'u-boot di Lakka li'
++# dentro, un aggiornamento sostituisce il loader AURKNIX funzionante con uno
++# mai verificato su questa board e il device non riparte piu' - successo
++# davvero. Mettendoci il known-good, quel dd riscrive byte identici: operazione
++# nulla e ripetibile quante volte si vuole.
++if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++  RF35H_LOADER="${PROJECT_DIR}/${PROJECT}/devices/${DEVICE}/bootloader/rf35h-loader.bin"
++  if [ ! -f "${RF35H_LOADER}" ]; then
++    echo "install: ${RF35H_LOADER} does not exist."
++    exit 1
++  fi
++  cp -av "${RF35H_LOADER}" "${INSTALL}/usr/share/bootloader/${UBOOT_FIT_IMAGE}" || exit 1
++elif [ -f "${UBOOT_FIT_IMAGE}" ]; then
+   cp -av "${UBOOT_FIT_IMAGE}" "${INSTALL}/usr/share/bootloader"
+ else
+   echo "install: bootloader ${UBOOT_FIT_IMAGE} was not built."

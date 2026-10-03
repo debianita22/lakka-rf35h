@@ -1,0 +1,22 @@
+From c314d9af9d774c052bea324e1a140ccdba0ca070 Mon Sep 17 00:00:00 2001
+From: Stefan Saraev <stefan@saraev.ca>
+Date: Tue, 8 Apr 2014 14:02:53 +0300
+Subject: [PATCH] pm: disable async suspend/resume by default
+
+---
+ kernel/power/main.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). La originale di Lakka applicava con fuzz 2.
+
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -180,7 +180,7 @@
+ }
+ 
+ /* If set, devices may be suspended and resumed asynchronously. */
+-int pm_async_enabled = 1;
++int pm_async_enabled = 0;
+ 
+ static int __init pm_async_setup(char *str)
+ {

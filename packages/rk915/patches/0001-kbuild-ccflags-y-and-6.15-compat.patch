@@ -1,0 +1,86 @@
+--- a/Makefile	2026-09-14 18:37:19.675059494 +0000
++++ b/Makefile	2026-09-14 18:36:49.701225098 +0000
+@@ -11,10 +11,13 @@
+ 
+ NAME     = rk915
+ 
+-EXTRA_CFLAGS += -I$(src)/inc \
++# devaOS: vendor code with no prototypes for its globals; 6.15 warns on
++# every one and buries real diagnostics. Silence for this driver only.
++ccflags-y += -Wno-missing-prototypes -Wno-missing-declarations
++ccflags-y += -include $(src)/inc/compat_6_15.h -I$(src)/inc \
+                 -I$(src)/shared
+ 
+-EXTRA_CFLAGS += -DDEBUG
++ccflags-y += -DDEBUG
+ 
+ OBJS        =   src/main.o \
+ 		src/hal.o \
+@@ -38,31 +41,31 @@
+ ## To enable sleep functionality
+ ## we need to enable ROM
+ ifeq ($(ROM),true)
+-EXTRA_CFLAGS += -DRPU_SLEEP_ENABLE
++ccflags-y += -DRPU_SLEEP_ENABLE
+ #EXTRA_CFLAGS += -DPS_SLEEP_TEST
+ #EXTRA_CFLAGS += -DRPU_NO_SLEEP_FLAG
+ #EXTRA_CFLAGS += -DRPU_ENABLE_PS
+ else
+-EXTRA_CFLAGS += -DNO_HP_READY_WAR
++ccflags-y += -DNO_HP_READY_WAR
+ endif
+ # BUSIF
+ ifeq ($(BUSIF),SDIO)
+-EXTRA_CFLAGS += -DHAL_SDIO
++ccflags-y += -DHAL_SDIO
+ OBJS	   +=	src/sdio.o
+ endif
+ 
+ #EXTRA_CFLAGS += -DSKIP_DL_FW
+ ifeq ($(CHIP),RK915)
+-EXTRA_CFLAGS += -DRK915
++ccflags-y += -DRK915
+ endif
+ 
+ #EXTRA_CFLAGS += -DRK3036_DONGLE
+ #EXTRA_CFLAGS += -DSTA_AP_COEXIST
+-EXTRA_CFLAGS += -DSDIO_CLOCK_SWITCH
++ccflags-y += -DSDIO_CLOCK_SWITCH
+ 
+ GCC_VER_49 := $(shell echo `$(CC) -dumpversion | cut -f1-2 -d.` \>= 4.9 | bc )
+ ifeq ($(GCC_VER_49),1)
+-EXTRA_CFLAGS += -Wno-date-time  # Fix compile error && warning on gcc 4.9 and later
++ccflags-y += -Wno-date-time  # Fix compile error && warning on gcc 4.9 and later
+ #EXTRA_CFLAGS += -Wno-error=date-time
+ endif
+ 
+--- a/src/init.c	2026-09-14 18:37:19.689318331 +0000
++++ b/src/init.c	2026-09-14 18:32:39.888580031 +0000
+@@ -294,6 +294,9 @@
+ MODULE_AUTHOR("Rockchips");
+ MODULE_DESCRIPTION("Driver for Rockchips RK915 SDIO WiFi Devices");
+ MODULE_LICENSE("GPL");
+-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
++/* devaOS: since 6.13 MODULE_IMPORT_NS takes a string literal. */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
++MODULE_IMPORT_NS("VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver");
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+ MODULE_IMPORT_NS(VFS_internal_I_am_really_a_filesystem_and_am_NOT_a_driver);
+ #endif
+--- a/inc/compat_6_15.h	2026-09-14 15:02:02.066464576 +0000
++++ b/inc/compat_6_15.h	2026-09-14 18:32:39.888680951 +0000
+@@ -0,0 +1,14 @@
++/* devaOS: API renames between the kernel this driver was written for (6.12)
++ * and 6.15. del_timer/del_timer_sync were dropped in 6.15 in favour of
++ * timer_delete/timer_delete_sync (same semantics). Included from every
++ * translation unit via ccflags-y -include, so the driver sources stay
++ * unmodified and a future upstream rename is a one-line change here. */
++#ifndef RK915_COMPAT_6_15_H
++#define RK915_COMPAT_6_15_H
++#include <linux/version.h>
++#include <linux/timer.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
++#define del_timer(t)       timer_delete(t)
++#define del_timer_sync(t)  timer_delete_sync(t)
++#endif
++#endif

@@ -1,0 +1,240 @@
+Subject: Lakka: workspace with the libretro core only
+
+The SDL frontend, the web build and xeentool pull crates from crates.io
+(sdl2, png, flate2...). Cargo resolves the whole workspace even for
+"-p openxeenng-libretro", so an offline build failed on them. With only
+formats, engine and libretro the core builds with --offline --locked:
+no network, no vendored crates (the three have no external dependency).
+
+---
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2,110 +2,6 @@
+ # It is not intended for manual editing.
+ version = 4
+ 
+-[[package]]
+-name = "adler2"
+-version = "2.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+-
+-[[package]]
+-name = "bitflags"
+-version = "1.3.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
+-
+-[[package]]
+-name = "cc"
+-version = "1.5.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f360145194ee8e21db5ee7f3fcd4fe52210864c75c985dae33218202c8bbe040"
+-dependencies = [
+- "find-msvc-tools",
+- "shlex",
+-]
+-
+-[[package]]
+-name = "cfg-if"
+-version = "1.0.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+-
+-[[package]]
+-name = "cmake"
+-version = "0.1.58"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+-dependencies = [
+- "cc",
+-]
+-
+-[[package]]
+-name = "crc32fast"
+-version = "1.5.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
+-dependencies = [
+- "cfg-if",
+-]
+-
+-[[package]]
+-name = "fdeflate"
+-version = "0.3.7"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
+-dependencies = [
+- "simd-adler32",
+-]
+-
+-[[package]]
+-name = "find-msvc-tools"
+-version = "0.1.14"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
+-
+-[[package]]
+-name = "flate2"
+-version = "1.1.10"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+-dependencies = [
+- "crc32fast",
+- "miniz_oxide 0.9.1",
+- "zlib-rs",
+-]
+-
+-[[package]]
+-name = "lazy_static"
+-version = "1.5.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+-
+-[[package]]
+-name = "libc"
+-version = "0.2.189"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
+-
+-[[package]]
+-name = "miniz_oxide"
+-version = "0.8.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+-dependencies = [
+- "adler2",
+- "simd-adler32",
+-]
+-
+-[[package]]
+-name = "miniz_oxide"
+-version = "0.9.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
+-dependencies = [
+- "adler2",
+- "simd-adler32",
+-]
+-
+ [[package]]
+ name = "openxeenng-engine"
+ version = "0.1.0"
+@@ -123,89 +19,3 @@ version = "0.1.0"
+ dependencies = [
+  "openxeenng-engine",
+ ]
+-
+-[[package]]
+-name = "openxeenng-sdl"
+-version = "0.1.0"
+-dependencies = [
+- "openxeenng-engine",
+- "openxeenng-formats",
+- "sdl2",
+-]
+-
+-[[package]]
+-name = "openxeenng-tool"
+-version = "0.1.0"
+-dependencies = [
+- "openxeenng-engine",
+- "openxeenng-formats",
+- "png",
+-]
+-
+-[[package]]
+-name = "openxeenng-web"
+-version = "0.1.0"
+-dependencies = [
+- "openxeenng-engine",
+-]
+-
+-[[package]]
+-name = "png"
+-version = "0.17.16"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+-dependencies = [
+- "bitflags",
+- "crc32fast",
+- "fdeflate",
+- "flate2",
+- "miniz_oxide 0.8.9",
+-]
+-
+-[[package]]
+-name = "sdl2"
+-version = "0.38.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2d42407afc6a8ab67e36f92e80b8ba34cbdc55aaeed05249efe9a2e8d0e9feef"
+-dependencies = [
+- "bitflags",
+- "lazy_static",
+- "libc",
+- "sdl2-sys",
+-]
+-
+-[[package]]
+-name = "sdl2-sys"
+-version = "0.38.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3ff61407fc75d4b0bbc93dc7e4d6c196439965fbef8e4a4f003a36095823eac0"
+-dependencies = [
+- "cfg-if",
+- "cmake",
+- "libc",
+- "version-compare",
+-]
+-
+-[[package]]
+-name = "shlex"
+-version = "2.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+-
+-[[package]]
+-name = "simd-adler32"
+-version = "0.3.10"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+-
+-[[package]]
+-name = "version-compare"
+-version = "0.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "579a42fc0b8e0c63b76519a339be31bed574929511fa53c1a3acae26eb258f29"
+-
+-[[package]]
+-name = "zlib-rs"
+-version = "0.6.8"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
+diff --git a/Cargo.toml b/Cargo.toml
+index 8a5f90f..93250ad 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,20 +1,17 @@
+ [workspace]
+ resolver = "3"
++# Lakka: only the libretro core and what it needs. The other members (SDL
++# frontend, web, xeentool) bring crates from crates.io; without them the
++# build needs no network and no vendored crates.
+ members = [
+     "crates/formats",
+     "crates/engine",
+-    "crates/sdl",
+     "crates/libretro",
+-    "crates/web",
+-    "crates/tool",
+ ]
+-# The SDL frontend needs the SDL2 development libraries. Build the portable
+-# parts alone with: cargo build -p openxeenng-engine -p openxeenng-tool ...
+ default-members = [
+     "crates/formats",
+     "crates/engine",
+     "crates/libretro",
+-    "crates/tool",
+ ]
+ 
+ [workspace.package]

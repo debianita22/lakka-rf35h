@@ -1,0 +1,31 @@
+Subject: iwd: non avviare il servizio quando si usa wpa_supplicant
+
+connman ha un ramo per WIRELESS_DAEMON=wpa_supplicant, ma tiene iwd fra le
+PKG_DEPENDS_TARGET in ogni caso e iwd abilita il proprio servizio senza
+condizioni. I due daemon finirebbero accesi insieme e iwd si prende phy0.
+
+Qui non si toglie iwd dallimmagine: si decide solo se farlo partire.
+Riguarda anche projects/L4T, che usa lo stesso ramo.
+
+---
+diff --git a/packages/network/iwd/package.mk b/packages/network/iwd/package.mk
+index 12860a5f..3780d8cd 100644
+--- a/packages/network/iwd/package.mk
++++ b/packages/network/iwd/package.mk
+@@ -37,5 +37,16 @@ post_makeinstall_target() {
+ }
+ 
+ post_install() {
++  # devaOS: con WIRELESS_DAEMON=wpa_supplicant connman parla al supplicant via
++  # D-Bus (fi.w1.wpa_supplicant1, attivato su richiesta) e iwd non serve.
++  # Lasciarlo attivo sarebbe peggio che inutile: si prende phy0 e il
++  # supplicant non trova piu' il device.
++  #
++  # Il binario resta comunque nell'immagine, perche' connman tiene iwd fra le
++  # sue PKG_DEPENDS_TARGET in ogni caso; qui si decide solo se farlo partire.
++  if [ "${WIRELESS_DAEMON}" = "wpa_supplicant" ]; then
++    return 0
++  fi
++
+   enable_service iwd.service
+ }

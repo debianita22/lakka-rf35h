@@ -1,0 +1,83 @@
+#!/bin/sh
+# rf35h-ntp on|off|status|server <host> - ora di rete.
+#
+# Non e' un client nuovo: systemd-timesyncd c'e' gia' nell'immagine, con i
+# server configurabili in /storage/.config/timesyncd.conf.d (LibreELEC ci mette
+# un symlink apposta). Era pero' disattivato da una condizione della sua unit,
+#   ConditionPathExists=/dev/.kernel_ipconfig
+# che vale solo per chi configura la rete dal kernel (netboot): sul device quel
+# file non esiste, quindi timesyncd veniva saltato a ogni avvio e l'orologio lo
+# sistemava connman molto piu' tardi. Nel frattempo wait-time-sync.service
+# restava in attesa per oltre due minuti.
+#
+# La condizione la togliamo con un drop-in (rf35h-timesyncd.conf); qui si
+# accende, si spegne e si sceglie il server.
+set -u
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+CONFD="${RF35H_TIMESYNCD_CONFD:-/storage/.config/timesyncd.conf.d}"
+CONF="${CONFD}/rf35h.conf"
+UNIT="systemd-timesyncd.service"
+DEFAULT_SERVER="it.pool.ntp.org"
+
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+
+write_conf() {   # $1 = server
+	mkdir -p "${CONFD}" 2>/dev/null || true
+	{
+		echo "# scritto da rf35h-ntp"
+		echo "[Time]"
+		echo "NTP=$1"
+		# FallbackNTP: se il server scelto non risponde, non si resta senza ora
+		echo "FallbackNTP=pool.ntp.org time.cloudflare.com"
+	} > "${CONF}" 2>/dev/null || { echo "rf35h-ntp: non riesco a scrivere ${CONF}" >&2; return 1; }
+}
+
+case "${1:-status}" in
+	on)
+		s="$(rd "${STATE}/ntp-server" "${DEFAULT_SERVER}")"
+		write_conf "${s}" || exit 1
+		mkdir -p "${STATE}" 2>/dev/null || true
+		printf 'on\n' > "${STATE}/ntp" 2>/dev/null || true
+		# Solo se serve, e senza --reload: "systemctl enable" fa ricaricare a
+		# systemd tutte le unit, e al boot (via "boot") il ricaricamento fermava
+		# ogni altro job per ~5 s, RetroArch compreso. L'abilitazione vale dal
+		# boot successivo; ora la unit la riavvia comunque la riga sotto.
+		systemctl is-enabled --quiet "${UNIT}" 2>/dev/null \
+			|| systemctl --no-reload enable "${UNIT}" >/dev/null 2>&1 || true
+		systemctl restart "${UNIT}" >/dev/null 2>&1 || { echo "rf35h-ntp: ${UNIT} non parte" >&2; exit 1; }
+		echo "ora di rete accesa (server ${s})"
+		;;
+	off)
+		mkdir -p "${STATE}" 2>/dev/null || true
+		printf 'off\n' > "${STATE}/ntp" 2>/dev/null || true
+		systemctl stop "${UNIT}" >/dev/null 2>&1 || true
+		systemctl is-enabled --quiet "${UNIT}" 2>/dev/null \
+			&& { systemctl --no-reload disable "${UNIT}" >/dev/null 2>&1 || true; }
+		echo "ora di rete spenta (resta quella di connman)"
+		;;
+	server)
+		s="${2:-}"
+		case "${s}" in
+			"" ) echo "uso: rf35h-ntp server <host>" >&2; exit 2 ;;
+			*[!a-zA-Z0-9.-]* ) echo "rf35h-ntp: nome server non valido: ${s}" >&2; exit 2 ;;
+		esac
+		mkdir -p "${STATE}" 2>/dev/null || true
+		printf '%s\n' "${s}" > "${STATE}/ntp-server" 2>/dev/null || true
+		# se era acceso, riapplica subito
+		case "$(rd "${STATE}/ntp" on)" in on) exec "$0" on ;; esac
+		echo "server impostato: ${s} (accendi l'ora di rete per usarlo)"
+		;;
+	boot)
+		case "$(rd "${STATE}/ntp" on)" in on) exec "$0" on ;; *) echo "ora di rete: spenta dal menu"; exit 0 ;; esac
+		;;
+	status)
+		echo "stato salvato:  $(rd "${STATE}/ntp" on)"
+		echo "server scelto:  $(rd "${STATE}/ntp-server" "${DEFAULT_SERVER}")"
+		printf 'timesyncd:      '; systemctl is-active "${UNIT}" 2>/dev/null || echo "non attivo"
+		[ -r "${CONF}" ] && { echo "--- ${CONF}"; sed 's/^/  /' "${CONF}"; }
+		command -v timedatectl >/dev/null 2>&1 && timedatectl 2>/dev/null | grep -iE "synchronized|Time zone|Universal" | sed 's/^/  /'
+		;;
+	*)
+		echo "uso: rf35h-ntp on|off|status|server <host>|boot" >&2; exit 2 ;;
+esac

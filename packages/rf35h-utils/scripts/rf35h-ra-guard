@@ -1,0 +1,69 @@
+#!/bin/sh
+# rf35h-ra-guard pre|post - ripiego automatico da Vulkan a OpenGL (ES) per RetroArch.
+#
+# Vulkan sulla RF35H e' Mesa PanVK su Mali-G31 (Bifrost), che Mesa stessa
+# marca "non conforme". Si sceglie da Impostazioni > Driver > Video; se non
+# parte, RetroArch esce subito e retroarch.service (Restart=always) lo
+# riavvierebbe all'infinito con lo schermo nero. Qui, da drop-in su
+# retroarch.service:
+#   pre   (ExecStartPre)  annota l'ora di avvio
+#   post  (ExecStopPost)  se video_driver e' "vulkan" e RetroArch e' morto
+#                         (non fermato) entro WINDOW secondi dall'avvio per
+#                         LIMIT volte di fila, rimette video_driver = "gl" e
+#                         lascia una nota in /storage/rf35h-logs.
+# Un'uscita normale, uno stop di systemd o una morte dopo WINDOW secondi
+# azzerano il conto: si interviene solo sul "non parte proprio".
+set -u
+CFG="${RA_CFG:-/storage/.config/retroarch/retroarch.cfg}"
+RUN="${RF35H_RUN:-/run/rf35h}"
+LOGDIR="${RF35H_LOGDIR:-/storage/rf35h-logs}"
+WINDOW="${RA_GUARD_WINDOW:-30}"
+LIMIT="${RA_GUARD_LIMIT:-2}"
+
+driver() {
+	[ -r "${CFG}" ] || return 0
+	# la prima occorrenza, come la legge RetroArch (config_file: vince la prima)
+	sed -n 's/^[[:space:]]*video_driver[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/p' "${CFG}" | head -n 1
+}
+
+case "${1:-}" in
+	pre)
+		mkdir -p "${RUN}" && date +%s > "${RUN}/ra-start"
+		;;
+	post)
+		if [ "$(driver)" != vulkan ]; then
+			rm -f "${RUN}/ra-vkfail"; exit 0
+		fi
+		start=0; [ -r "${RUN}/ra-start" ] && read -r start < "${RUN}/ra-start"
+		case "${start}" in ''|*[!0-9]*) start=0 ;; esac
+		el=$(($(date +%s) - start))
+		# SERVICE_RESULT lo passa systemd agli ExecStopPost: "success" per un'uscita
+		# normale e per uno stop (TERM), altro per un'uscita con errore o un crash
+		if [ "${SERVICE_RESULT:-success}" = success ] || [ "${el}" -ge "${WINDOW}" ]; then
+			rm -f "${RUN}/ra-vkfail"; exit 0
+		fi
+		n=0; [ -r "${RUN}/ra-vkfail" ] && read -r n < "${RUN}/ra-vkfail"
+		case "${n}" in ''|*[!0-9]*) n=0 ;; esac
+		n=$((n + 1))
+		if [ "${n}" -lt "${LIMIT}" ]; then
+			echo "${n}" > "${RUN}/ra-vkfail"; exit 0
+		fi
+		rm -f "${RUN}/ra-vkfail"
+		tmp="${CFG}.rf35h-guard.$$"
+		sed 's/^\([[:space:]]*video_driver[[:space:]]*=[[:space:]]*\).*/\1"gl"/' "${CFG}" > "${tmp}" \
+			&& mv -f "${tmp}" "${CFG}" || { rm -f "${tmp}"; exit 1; }
+		sync
+		mkdir -p "${LOGDIR}" 2>/dev/null
+		{
+			echo "RetroArch con video_driver=vulkan e' morto ${LIMIT} volte di fila entro ${WINDOW} s dall'avvio"
+			echo "(ultimo: ${SERVICE_RESULT:-?} ${EXIT_CODE:-?} ${EXIT_STATUS:-?} dopo ${el} s)."
+			echo "video_driver rimesso a \"gl\". Vulkan si riprova da Impostazioni > Driver > Video."
+			echo "--- journal di retroarch.service ---"
+			journalctl -u retroarch.service -n 60 --no-pager 2>/dev/null
+		} > "${LOGDIR}/vulkan-fallback-$(date +%Y%m%d-%H%M%S).txt"
+		echo "rf35h-ra-guard: Vulkan non parte, video_driver rimesso a gl" >&2
+		;;
+	*)
+		echo "uso: rf35h-ra-guard pre|post" >&2; exit 2
+		;;
+esac

@@ -1,0 +1,43 @@
+Subject: rk915: Linux 7.2 ha rimosso strncpy - memcpy e strscpy_pad, equivalenti byte per byte
+
+---
+--- a/src/procfs.c
++++ b/src/procfs.c
+@@ -1877,7 +1877,11 @@
+ 	sprintf(def, "%02x", default_phy_threshold);
+ 
+ 	for (i = 0; i < 14; i++) {
+-		strncpy(&rf_params[(len - i)*2 - 2], def, 2);
++		/* Linux 7.2 ha rimosso strncpy. Qui si scrivono 2 cifre esadecimali in
++		 * mezzo al buffer, senza terminatore: memcpy e' l'equivalente esatto
++		 * (def viene da "%02x", ha sempre almeno 2 caratteri). strscpy invece
++		 * scriverebbe una cifra sola piu' il terminatore. */
++		memcpy(&rf_params[(len - i)*2 - 2], def, 2);
+ 	}
+ }
+ 
+@@ -1910,7 +1914,10 @@
+ 	//	(94 * 2));
+ 	//strncpy(rf_params,"00204000240210020403040404050406040704080409040A040B040C040CF80b0C04FEF8ECEC0000000000000000000000000000000000000000000000000000000008080808080808080808080808088C8C8C8C8C8C8C8C8C8C8C8C8C8C",
+ 	//	(94 * 2));
+-        strncpy(rf_params,"00204000240210020403040404050406040704080409040A040B040C040CF80B0C04FFFAF2EC0000000000000000000000000000000000000000000000000000000008080808080808080808080808088C8C8C8C8C8C8C8C8C8C8C8C8C8C",
++        /* Linux 7.2: niente strncpy. La costante e' lunga esattamente 94*2 = 188
++         * caratteri, quindi strncpy copiava 188 byte senza terminatore ne'
++         * riempimento: memcpy e' l'equivalente esatto. */
++        memcpy(rf_params,"00204000240210020403040404050406040704080409040A040B040C040CF80B0C04FFFAF2EC0000000000000000000000000000000000000000000000000000000008080808080808080808080808088C8C8C8C8C8C8C8C8C8C8C8C8C8C",
+                 (94 * 2)); 
+ 	set_default_phy_thresh(rf_params, 94);
+ 
+--- a/src/umac_if.c
++++ b/src/umac_if.c
+@@ -2498,7 +2498,9 @@
+ 	priv->txpower = DEFAULT_TX_POWER;
+ 	priv->tx_antenna = DEFAULT_TX_ANT_SELECT;
+ 	priv->rts_threshold = DEFAULT_RTS_THRESHOLD;
+-	strncpy(priv->name, RPU_DRIVER_NAME, 11);
++	/* Linux 7.2: niente strncpy. strncpy(.., 11) + name[11] = 0 dava il nome
++	 * riempito di zeri fino a 12 byte: strscpy_pad(.., 12) e' identico. */
++	strscpy_pad(priv->name, RPU_DRIVER_NAME, 12);
+ 	priv->name[11] = '\0';
+ 
+ 	for (i = 0; i < wifi->params.num_vifs; i++)

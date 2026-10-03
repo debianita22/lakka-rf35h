@@ -1,0 +1,34 @@
+Subject: RK3326 (opzionale): RetroArch su KMS/GBM senza compositore
+
+ATTENZIONE: si applica DOPO apply.sh, non sul sorgente pulito - tocca lo
+stesso file options che l'overlay modifica.
+
+---
+--- a/projects/Rockchip/devices/RK3326/options
++++ b/projects/Rockchip/devices/RK3326/options
+@@ -45,9 +45,25 @@
+ 
+   # Displayserver to use (wl / x11 / no)
+     DISPLAYSERVER="wl"
++  # devaOS RF35H (opzionale): torna al default del progetto Rockchip, cioe'
++  # RetroArch direttamente su KMS/GBM senza compositore.
++  #
++  # Perche' ha senso qui: il driver video OGA e' commentato via da
++  # retroarch-0002, quindi il percorso RGA + plane DRM diretto non esiste
++  # comunque; sotto sway si paga un blit di composizione per frame su quattro
++  # A35 a 1.3 GHz senza avere nulla in cambio. devaOS gira su questa stessa
++  # board con video_driver = "gl" e nessun compositore, quindi il percorso
++  # KMS e' provato sull'hardware. E DISPLAYSERVER="no" e' il valore piu'
++  # diffuso in Lakka, non una configurazione esotica: Rockchip/options lo usa
++  # come default e solo il device RK3326 lo sovrascrive.
++  #
++  # Non applicata di default: al primo boot conviene restare sul percorso che
++  # Lakka collauda su RK3326, per non debuggare due incognite insieme.
++    [ "${UBOOT_SYSTEM}" = "rf35h" ] && DISPLAYSERVER="no"
+ 
+   # Windowmanager to use (fluxbox / sway / weston / no)
+     WINDOWMANAGER="sway"
++    [ "${UBOOT_SYSTEM}" = "rf35h" ] && WINDOWMANAGER="no"
+ 
+   # additional packages to install
+   # devaOS RF35H: i due servizi OGA non valgono su questo device.

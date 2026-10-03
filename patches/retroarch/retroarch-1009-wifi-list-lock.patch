@@ -1,0 +1,264 @@
+Subject: wifi: lock sulla lista delle reti fra menu e task, e rete scelta per id
+
+I task Wi-Fi (scansione, attivazione, connessione) ricostruiscono
+wifi_network_scan_t.net_list in un altro thread, mentre il menu la legge dal
+thread principale: nessun lock. driver_wifi_list_lock() la protegge nel driver
+connmanctl e nei tre punti del menu che la leggono; il menu lavora su una copia
+presa sotto lock e rilascia il lock prima di accodare il task. Mutex POSIX
+inizializzato staticamente, solo su Linux.
+
+La finestra della password ritrovava la rete per indice: se nel frattempo una
+scansione riordinava la lista, la password andava a un'altra rete, e se la
+connessione falliva connect_ssid cancellava la configurazione salvata di
+quella. Ora la ritrova per id di connman.
+
+---
+--- a/network/wifi_driver.h
++++ b/network/wifi_driver.h
+@@ -108,6 +108,14 @@
+ 
+ wifi_network_scan_t* driver_wifi_get_ssids(void);
+ 
++/* devaOS RF35H: la lista delle reti (wifi_network_scan_t.net_list) e' letta
++ * dal menu nel thread principale e ricostruita dai task Wi-Fi in un altro:
++ * chi la legge o la modifica tiene questo lock, per il minimo indispensabile
++ * e senza chiamare altre funzioni del driver Wi-Fi nel frattempo. */
++void driver_wifi_list_lock(void);
++
++void driver_wifi_list_unlock(void);
++
+ bool driver_wifi_ssid_is_online(unsigned i);
+ 
+ bool driver_wifi_connect_ssid(const wifi_network_info_t *netinfo);
+--- a/network/wifi_driver.c
++++ b/network/wifi_driver.c
+@@ -99,6 +99,29 @@
+    return false;
+ }
+ 
++/* devaOS RF35H: vedi wifi_driver.h. Mutex inizializzato staticamente: esiste
++ * prima di qualunque task e non viene mai distrutto, quindi un task ancora
++ * in corso alla chiusura non puo' trovarlo liberato. Solo Linux: altrove non
++ * ci sono driver Wi-Fi che ricostruiscono la lista in un altro thread. */
++#if defined(HAVE_THREADS) && defined(__linux__)
++#include <pthread.h>
++static pthread_mutex_t wifi_list_mutex = PTHREAD_MUTEX_INITIALIZER;
++#endif
++
++void driver_wifi_list_lock(void)
++{
++#if defined(HAVE_THREADS) && defined(__linux__)
++   pthread_mutex_lock(&wifi_list_mutex);
++#endif
++}
++
++void driver_wifi_list_unlock(void)
++{
++#if defined(HAVE_THREADS) && defined(__linux__)
++   pthread_mutex_unlock(&wifi_list_mutex);
++#endif
++}
++
+ wifi_network_scan_t* driver_wifi_get_ssids(void)
+ {
+    wifi_driver_state_t *wifi_st = &wifi_driver_st;
+--- a/network/drivers_wifi/connmanctl.c
++++ b/network/drivers_wifi/connmanctl.c
+@@ -51,8 +51,10 @@
+ static void connmanctl_free(void *data)
+ {
+    connman_t *connman = (connman_t*)data;
++   driver_wifi_list_lock();
+    if (connman->scan.net_list)
+       RBUF_FREE(connman->scan.net_list);
++   driver_wifi_list_unlock();
+    if (data)
+       free(data);
+ }
+@@ -88,9 +90,9 @@
+    /* devaOS RF35H: la lista e' letta anche dal thread del menu. Prima veniva
+     * liberata subito e ricostruita mentre si leggeva l'output di connmanctl:
+     * centinaia di ms in cui il menu trovava NULL o una lista a meta'. Ora si
+-    * costruisce a parte e si scambia alla fine, e la finestra scende a poche
+-    * istruzioni (per azzerarla servirebbe un lock anche nel menu). Se popen
+-    * fallisce si tiene la lista vecchia. */
++    * costruisce a parte e si scambia alla fine, sotto driver_wifi_list_lock(),
++    * che anche il menu prende quando la legge. Se popen fallisce si tiene la
++    * lista vecchia. */
+    if (!serv_file)
+       return;
+ 
+@@ -148,8 +150,10 @@
+ 
+    pclose(serv_file);
+ 
++   driver_wifi_list_lock();
+    old_list               = connman->scan.net_list;
+    connman->scan.net_list = net_list;
++   driver_wifi_list_unlock();
+    RBUF_FREE(old_list);
+ }
+ 
+@@ -306,30 +310,34 @@
+ static bool connmanctl_ssid_is_online(void *data, unsigned i)
+ {
+    connman_t *connman = (connman_t*)data;
+-   if (!connman->scan.net_list || i >= RBUF_LEN(connman->scan.net_list))
+-      return false;
+-   return connman->scan.net_list[i].connected;
++   bool online        = false;
++   driver_wifi_list_lock();
++   if (connman->scan.net_list && i < RBUF_LEN(connman->scan.net_list))
++      online = connman->scan.net_list[i].connected;
++   driver_wifi_list_unlock();
++   return online;
+ }
+ 
+ static bool connmanctl_connection_info(void *data, wifi_network_info_t *netinfo)
+ {
+    connman_t *connman = (connman_t*)data;
+    unsigned i;
++   bool found         = false;
+ 
+-   if (!connman->scan.net_list)
+-      return false;
+-
+-   for (i = 0; i < RBUF_LEN(connman->scan.net_list); i++)
++   driver_wifi_list_lock();
++   for (i = 0; connman->scan.net_list && i < RBUF_LEN(connman->scan.net_list); i++)
+    {
+       if (connman->scan.net_list[i].connected)
+       {
+          if (netinfo)
+             memcpy(netinfo, &connman->scan.net_list[i], sizeof(*netinfo));
+-         return true;
++         found = true;
++         break;
+       }
+    }
++   driver_wifi_list_unlock();
+ 
+-   return false;
++   return found;
+ }
+ 
+ static bool connmanctl_disconnect_ssid(void *data,
+@@ -519,6 +527,7 @@
+    connmanctl_refresh_services(connman);
+ 
+    /* connman is a PITA, return code is not meaningful at all :( */
++   driver_wifi_list_lock();
+    for (i = 0; i < RBUF_LEN(connman->scan.net_list); i++)
+    {
+       if (!strcmp(netid, connman->scan.net_list[i].netid))
+@@ -531,6 +540,7 @@
+          }
+       }
+    }
++   driver_wifi_list_unlock();
+ 
+ #ifdef HAVE_GFX_WIDGETS
+    if (!widgets_active)
+--- a/menu/menu_displaylist.c
++++ b/menu/menu_displaylist.c
+@@ -7905,6 +7905,9 @@
+             else
+             {
+                unsigned i;
++               /* devaOS RF35H: i task Wi-Fi ricostruiscono la lista in un altro
++                * thread: la si legge sotto lock (menu_entries_append copia) */
++               driver_wifi_list_lock();
+                for (i = 0; i < RBUF_LEN(scan->net_list); i++)
+                {
+                   const char *ssid = scan->net_list[i].ssid;
+@@ -7915,6 +7918,7 @@
+                            MENU_WIFI, 0, 0, NULL))
+                      count++;
+                }
++               driver_wifi_list_unlock();
+             }
+          }
+ #endif
+--- a/menu/cbs/menu_cbs_ok.c
++++ b/menu/cbs/menu_cbs_ok.c
+@@ -3243,19 +3243,50 @@
+ 
+ #ifdef HAVE_NETWORKING
+ #ifdef HAVE_WIFI
++/* devaOS RF35H: la rete scelta, per id di connman. I task Wi-Fi ricostruiscono
++ * la lista mentre si digita la password (una scansione ogni 30 s, e connman
++ * ordina per segnale): l'indice salvato all'apertura della finestra poteva
++ * indicare un'altra rete, che riceveva la password - e se la connessione
++ * falliva, connect_ssid cancellava la sua configurazione salvata. */
++static char menu_wifi_dialog_netid[160];
++
++/* Copia, sotto lock, la voce con quell'id (o, se l'id e' NULL, con quell'indice).
++ * Si lavora sulla copia: il lock non resta preso mentre si accoda il task. */
++static bool menu_wifi_snapshot(size_t idx, const char *netid,
++      wifi_network_info_t *out)
++{
++   size_t i;
++   bool found                = false;
++   wifi_network_scan_t *scan = driver_wifi_get_ssids();
++
++   if (!scan)
++      return false;
++
++   driver_wifi_list_lock();
++   for (i = 0; i < RBUF_LEN(scan->net_list); i++)
++   {
++      if (netid ? string_is_equal(scan->net_list[i].netid, netid) : (i == idx))
++      {
++         memcpy(out, &scan->net_list[i], sizeof(*out));
++         found = true;
++         break;
++      }
++   }
++   driver_wifi_list_unlock();
++
++   return found;
++}
++
+ static void menu_input_wifi_cb(void *userdata, const char *passphrase)
+ {
+-   struct menu_state *menu_st   = menu_state_get_ptr();
+-   unsigned idx                 = menu_st->input_dialog_kb_idx;
+-   wifi_network_scan_t *scan    = driver_wifi_get_ssids();
+-   wifi_network_info_t *netinfo = &scan->net_list[idx];
++   wifi_network_info_t netinfo;
+ 
+-   if (     (idx < RBUF_LEN(scan->net_list))
+-         && passphrase)
++   if (     passphrase
++         && menu_wifi_snapshot(0, menu_wifi_dialog_netid, &netinfo))
+    {
+       /* Need to fill in the passphrase that we got from the user! */
+-      strlcpy(netinfo->passphrase, passphrase, sizeof(netinfo->passphrase));
+-      task_push_wifi_connect(NULL, netinfo);
++      strlcpy(netinfo.passphrase, passphrase, sizeof(netinfo.passphrase));
++      task_push_wifi_connect(NULL, &netinfo);
+    }
+ 
+    menu_input_dialog_end();
+@@ -3265,15 +3296,17 @@
+       unsigned type, size_t idx, size_t entry_idx)
+ {
+    menu_input_ctx_line_t line;
+-   wifi_network_scan_t* scan = driver_wifi_get_ssids();
+-   if (idx >= RBUF_LEN(scan->net_list))
++   wifi_network_info_t netinfo;
++   if (!menu_wifi_snapshot(idx, NULL, &netinfo))
+       return -1;
+ 
+    /* No need to ask for a password, should be stored */
+-   if (scan->net_list[idx].saved_password)
+-      task_push_wifi_connect(NULL, &scan->net_list[idx]);
++   if (netinfo.saved_password)
++      task_push_wifi_connect(NULL, &netinfo);
+    else
+    {
++      strlcpy(menu_wifi_dialog_netid, netinfo.netid,
++            sizeof(menu_wifi_dialog_netid));
+       /* Show password input dialog */
+       line.label         = "Passphrase";
+       line.label_setting = label_setting;

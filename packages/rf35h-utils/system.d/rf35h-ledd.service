@@ -1,0 +1,26 @@
+[Unit]
+Description=XiFan RF35H LED effects (stick MCU sequences, battery-driven status LEDs)
+# Event-driven: inotify sui file di stato in /storage/.config/rf35h, sveglia
+# solo per i frame delle animazioni o per rileggere la batteria; con modi
+# statici non si sveglia mai. Gli script rf35h-led / rf35h-statusled scrivono
+# il modo, il demone lo anima se e' uno dei suoi.
+After=rf35h-state.service
+Wants=rf35h-state.service
+
+# Questo servizio scrive in /storage, e fs-resize si rifiuta di espandere la
+# partizione se trova gia' /storage/.config, .cache o .kodi.
+# In realta' non potrebbe succedere: libreelec-target-generator, trovando
+# /storage/.please_resize_me, punta default.target su fs-resize.target, e quel
+# boot esegue SOLO il ridimensionamento - multi-user.target non viene
+# raggiunto, quindi noi non partiamo affatto. La condizione resta come rete di
+# sicurezza se un domani quel meccanismo cambia: costa una stat.
+ConditionPathExists=!/storage/.please_resize_me
+[Service]
+Type=simple
+ExecStart=/usr/bin/rf35h-ledd
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

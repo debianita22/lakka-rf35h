@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: devaOS RF35H <devaos@rf35h>
+Date: Fri, 25 Sep 2026 20:10:00 +0200
+Subject: [PATCH] IKEMEN_DISABLE_VULKAN: hide the Vulkan renderer and fall back
+ to OpenGL
+
+For systems where a Vulkan driver loads but cannot run this renderer.
+Mesa PanVK on Mali Bifrost (Mali-G31) exposes Vulkan 1.0: with the
+version forced to 1.3 the renderer initialises without errors and then
+shows a black screen, with no way back from the console.
+
+With IKEMEN_DISABLE_VULKAN set (any non-empty value):
+- rendererAvailable("Vulkan 1.3") is false, so the options menu does not
+  offer it (isRendererAvailable, options.lua);
+- RenderMode "Vulkan 1.3" falls back to OpenGL ES 3.2 when compiled in,
+  otherwise to OpenGL 3.3, and says so on stdout.
+Without the variable nothing changes.
+---
+ src/util_desktop.go | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/util_desktop.go b/src/util_desktop.go
+index 2fa1b54..bc0a742 100644
+--- a/src/util_desktop.go
++++ b/src/util_desktop.go
+@@ -58,6 +58,16 @@ func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+ 		gfx = &Renderer_GL33{}
+ 		gfxFont = &FontRenderer_GL33{}
+ 	case "Vulkan 1.3":
++		if vulkanDisabled() {
++			// Same order as the options menu: OpenGL ES when it is compiled
++			// in, otherwise OpenGL 3.3.
++			if gfx, gfxFont = newRendererGLES32(); gfx == nil {
++				gfx = &Renderer_GL33{}
++				gfxFont = &FontRenderer_GL33{}
++			}
++			fmt.Printf("RenderMode '%s' is disabled (IKEMEN_DISABLE_VULKAN). Using %s.\n", cfgVal, gfx.GetName())
++			break
++		}
+ 		gfx = &Renderer_VK{}
+ 		gfxFont = &FontRenderer_VK{}
+ 	case "OpenGL ES 3.2":
+@@ -80,8 +90,10 @@ func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+ // binary. The options menu uses it to hide renderers that cannot be selected.
+ func rendererAvailable(name string) bool {
+ 	switch name {
+-	case "OpenGL 3.3", "Vulkan 1.3":
++	case "OpenGL 3.3":
+ 		return true
++	case "Vulkan 1.3":
++		return !vulkanDisabled()
+ 	case "OpenGL ES 3.2":
+ 		gfx, _ := newRendererGLES32()
+ 		return gfx != nil
+@@ -89,6 +101,15 @@ func rendererAvailable(name string) bool {
+ 	return false
+ }
+ 
++// vulkanDisabled reports whether IKEMEN_DISABLE_VULKAN is set (any non-empty
++// value). It hides the Vulkan renderer from the options menu and makes
++// RenderMode "Vulkan 1.3" fall back to OpenGL, for systems where a Vulkan
++// driver loads but cannot run this renderer: Mesa PanVK on Mali Bifrost
++// (e.g. Mali-G31) exposes Vulkan 1.0, and forcing 1.3 gives a black screen.
++func vulkanDisabled() bool {
++	return os.Getenv("IKEMEN_DISABLE_VULKAN") != ""
++}
++
+ func Logcat(s string) {
+ 	fmt.Println(s)
+ }

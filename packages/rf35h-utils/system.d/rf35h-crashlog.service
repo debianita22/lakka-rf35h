@@ -1,0 +1,8 @@
+[Unit]
+Description=XiFan RF35H crash log (fired when retroarch.service fails)
+# non ha senso prima che /storage sia scrivibile
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rf35h-crashlog crash

@@ -1,0 +1,17 @@
+[Unit]
+Description=XiFan RF35H thumbnail scraper (ScreenScraper + ArcadeDB)
+# Non si abilita: la avvia e la ferma il menu di RetroArch (Device Settings >
+# Scrape Thumbnails) con systemctl start/stop. Una unit e non un "&" da
+# RetroArch perche' un figlio di RetroArch muore con lui a ogni restart, e
+# perche' "sta girando?" lo chiediamo a systemd, non a un file di stato che
+# dopo un crash puo' restare a "running".
+After=network-online.target
+
+[Service]
+Type=simple
+# scritto dal menu prima dello start: SCRAPE_ARGS="--region eu" oppure "--region eu --all"
+EnvironmentFile=-/storage/.config/rf35h/scraper.args
+ExecStart=/usr/bin/rf35h-scrape $SCRAPE_ARGS
+Nice=10
+IOSchedulingClass=idle
+TimeoutStopSec=10

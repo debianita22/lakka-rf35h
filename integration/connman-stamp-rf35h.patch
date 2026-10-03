@@ -1,0 +1,27 @@
+Subject: connman: PKG_STAMP dipende da WIRELESS_DAEMON
+
+calculate_stamp() hasha PKG_DIR, le patch e PKG_STAMP, non lambiente.
+Cambiare WIRELESS_DAEMON non ricostruiva connman: limmagine teneva il
+plugin iwd con iwd spento, e "connmanctl scan wifi" dava "Not supported"
+mentre wpa_supplicant, da solo, si associava alla rete.
+
+---
+diff --git a/packages/network/connman/package.mk b/packages/network/connman/package.mk
+index c4f09a77..3206c170 100644
+--- a/packages/network/connman/package.mk
++++ b/packages/network/connman/package.mk
+@@ -52,6 +52,14 @@ else
+   PKG_CONFIGURE_OPTS_TARGET+=" --disable-wireguard"
+ fi
+ 
++# devaOS: le opzioni di configure qui sotto dipendono da WIRELESS_DAEMON, ma
++# calculate_stamp() hasha solo la cartella del package e PKG_STAMP, non
++# l'ambiente. Cambiare la variabile nelle options del device non faceva
++# ricostruire connman: l'immagine finiva col plugin iwd anche quando iwd era
++# spento, e "connmanctl scan wifi" rispondeva "Not supported". Il valore va
++# nello stamp.
++PKG_STAMP="${WIRELESS_DAEMON:-iwd}"
++
+ if [ "${WIRELESS_DAEMON}" = "wpa_supplicant" ]; then
+   PKG_CONFIGURE_OPTS_TARGET="${PKG_CONFIGURE_OPTS_TARGET//--disable-wifi/}"
+   PKG_CONFIGURE_OPTS_TARGET="${PKG_CONFIGURE_OPTS_TARGET//--enable-iwd/}"

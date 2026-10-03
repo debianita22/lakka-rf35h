@@ -1,0 +1,78 @@
+Subject: odroidgo2-utils: parametrizzare headphone-sense e non abilitarlo su rf35h
+
+Il binario commuta "Playback Mux" fra HP e SPK con i comandi scritti nel
+codice. Su questa board l amplificatore esterno e alimentato da HPOL/HPOR,
+quindi SPK spegne l audio invece di accendere lo speaker: i due comandi vanno
+presi dalla riga di comando, cosi ogni device passa quello che la sua scheda
+vuole. Senza argomenti extra il comportamento storico resta identico.
+
+Il servizio non viene abilitato su rf35h: qui la commutazione la fa il kernel
+(simple-audio-card + pin-switch + route DAPM), come su AURKNIX che non ha alcun
+demone equivalente. Il binario resta installato.
+
+---
+--- a/projects/Rockchip/devices/RK3326/packages/odroidgo2-utils/sources/headphone-sense.c
++++ b/projects/Rockchip/devices/RK3326/packages/odroidgo2-utils/sources/headphone-sense.c
+@@ -21,11 +21,18 @@
+   return !memcmp("event", dir->d_name, 5);
+ }
+ 
++// devaOS RF35H: not every RK3326 handheld switches speaker/headphone the same
++// way. On this board the external amplifier is fed from HPOL/HPOR, so setting
++// the mux to SPK silences the speaker instead of enabling it. Take both
++// commands from the command line instead of hardcoding them, so each device
++// can pass what its own card needs:
++//   headphone-sense <jack-name> <cmd-when-plugged> <cmd-when-unplugged>
++// With no extra arguments the historical behaviour is kept.
++static const char *cmd_plugged   = "amixer cset name='Playback Mux' HP";
++static const char *cmd_unplugged = "amixer cset name='Playback Mux' SPK";
++
+ static void update_alsa(int state) {
+-  if (state)
+-    system("amixer cset name='Playback Mux' HP");
+-  else
+-    system("amixer cset name='Playback Mux' SPK");
++  if (system(state ? cmd_plugged : cmd_unplugged)) { /* ignore */ }
+ }
+ 
+ int main(int argc, char **argv) {
+@@ -36,6 +43,11 @@
+     return 1;
+   }
+ 
++  if (argc > 2)
++    cmd_plugged = argv[2];
++  if (argc > 3)
++    cmd_unplugged = argv[3];
++
+   while (1) {
+     // Scan devices to find relevant devices
+     struct dirent **namelist;
+--- a/projects/Rockchip/devices/RK3326/packages/odroidgo2-utils/package.mk
++++ b/projects/Rockchip/devices/RK3326/packages/odroidgo2-utils/package.mk
+@@ -8,5 +8,25 @@
+ PKG_LONGDESC="Support scripts for the ODROID-GO Advance"
+ 
+ post_install() {  
++	# devaOS RF35H: su questa board il servizio non va abilitato - commuta
++	# "Playback Mux" su SPK quando stacchi le cuffie, e qui l'amplificatore e'
++	# alimentato da HPOL/HPOR: SPK spegne l'audio invece di accendere lo
++	# speaker.
++	#
++	# Non lo rimpiazza nulla: su questo hardware la commutazione la fa il
++	# KERNEL da solo (simple-audio-card registra il jack da hp-det-gpio, e il
++	# pin-switch su "Internal Speakers" piu' le route DAPM fanno il resto),
++	# come su AURKNIX che non ha alcun demone equivalente. Il binario
++	# headphone-sense resta installato - qui si salta solo enable_service - e
++	# rf35h-audio.service e' presente ma disabilitato, per chi volesse
++	# riattivarlo.
++	#
++	# La guardia sta qui e non in un "rm" dentro rf35h-utils: ${INSTALL} e'
++	# l'albero condiviso, ma con il builder multithread (MTWITHLOCKS=yes)
++	# scripts/install non installa le dipendenze prima del dipendente, quindi
++	# quel rm potrebbe girare prima che il file esista.
++	if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++		return 0
++	fi
+ 	enable_service odroidgoa-utils.service
+ }

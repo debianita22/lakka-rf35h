@@ -1,0 +1,53 @@
+Subject: SDL: non ereditare le opzioni del target nella build host
+
+PKG_CONFIGURE_OPTS_HOST uguale a PKG_CONFIGURE_OPTS_TARGET porta nella build
+host anche --with-alsa-inc-prefix=${SYSROOT_PREFIX}/usr/include, che punta al
+sysroot aarch64. Il configure lo traduce in un -I verso gli header ARM e
+host-gcc fallisce su __Float32x4_t e sugli altri tipi NEON/SVE.
+
+Si manifesta solo quando un core richiede SDL per il target (chailove,
+dosbox_core, ecwolf, nxengine, tic80 e altri), quindi con una lista ristretta
+di core il difetto resta latente: emerge alla prima build con --all-cores.
+
+SDL:host serve solo a fornire sdl-config agli altri pacchetti: si costruisce
+col minimo indispensabile.
+
+---
+--- a/packages/lakka/lakka_depends/SDL/package.mk
++++ b/packages/lakka/lakka_depends/SDL/package.mk
+@@ -76,7 +76,34 @@
+                            --disable-video-x11-xshape \
+                            --disable-video-x11-vm --without-x"
+ 
+-PKG_CONFIGURE_OPTS_HOST="${PKG_CONFIGURE_OPTS_TARGET}"
++# devaOS RF35H: la build host NON puo' ereditare le opzioni del target. Fra
++# quelle c'e' --with-alsa-inc-prefix=${SYSROOT_PREFIX}/usr/include, che punta
++# al sysroot aarch64: il configure la traduce in un -I verso gli header ARM e
++# host-gcc (x86_64) fallisce su __Float32x4_t e gli altri tipi NEON/SVE.
++#
++# Il difetto e' latente: SDL:host entra in gioco solo quando un core richiede
++# SDL per il target (chailove, dosbox_core, ecwolf, nxengine, tic80 e altri),
++# quindi con una lista ristretta di core non si vede. Emerge alla prima build
++# con --all-cores.
++#
++# SDL:host serve solo a fornire sdl-config agli altri pacchetti: non deve
++# suonare ne' disegnare nulla, quindi si costruisce col minimo indispensabile.
++PKG_CONFIGURE_OPTS_HOST="--enable-static \
++                         --disable-shared \
++                         --disable-alsa \
++                         --disable-pulseaudio \
++                         --disable-esd \
++                         --disable-arts \
++                         --disable-nas \
++                         --disable-diskaudio \
++                         --disable-video \
++                         --disable-video-x11 \
++                         --disable-video-opengl \
++                         --disable-joystick \
++                         --disable-cdrom \
++                         --disable-directx \
++                         --disable-rpath \
++                         --without-x"
+ 
+ 
+ if [ "${OPENGL_SUPPORT}" = "yes" ]; then

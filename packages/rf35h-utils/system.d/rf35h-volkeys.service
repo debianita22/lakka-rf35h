@@ -1,0 +1,31 @@
+[Unit]
+Description=XiFan RF35H volume keys and brightness combo (L1 + vol)
+Before=retroarch.target
+StartLimitIntervalSec=0
+
+[Service]
+Environment=HOME=/storage
+# Due device, perche' il combo li attraversa entrambi: vol+/vol- sono
+# "adc-keys" (saradc 2), Select e' sul joypad. spkeys-service accetta gia' una
+# lista di nomi e apre fino a 8 device, quindi basta elencarli.
+#
+# "adc-keys" e' il nome esatto, non un tentativo:
+#   adc-keys.c:151        input->name = pdev->name
+#   of/platform.c:51      ofdev->name = dev_name(&ofdev->dev)
+#   of/device.c:310       nodo senza reg -> kbasename(node->full_name)
+# Confermato sul device: "input: adc-keys as /devices/platform/adc-keys/input/input1".
+#
+# 310 = BTN_TL (L1, 0x136). Non Select: Select e' la hotkey di RetroArch e
+# tenerlo premuto oltre 5 frame lo toglie al gioco; L1 non ha doppi ruoli. Tenendolo premuto, i tasti volume regolano la
+# retroilluminazione invece del volume - a RetroArch non arriva niente, quindi
+# non cambiano tutti e due. Senza Select il comportamento e' quello di sempre.
+ExecStart=/usr/bin/spkeys-service \
+  --mod 310 \
+  --mod-up   "/usr/bin/rf35h-brightness +5" \
+  --mod-down "/usr/bin/rf35h-brightness -5" \
+  adc-keys retrogame_joypad
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

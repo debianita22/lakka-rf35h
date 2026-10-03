@@ -1,0 +1,184 @@
+#!/bin/sh
+# rf35h-diag - stato del port Lakka sull'XiFan RF35H, in un colpo solo.
+#
+# Non e' un dump generico: ogni sezione corrisponde a una cosa che l'overlay
+# da' per vera. Se qualcosa non torna, e' qui che si vede.
+#
+#   rf35h-diag                 a schermo
+#   rf35h-diag > /storage/diag.txt
+
+set -u
+sec() { printf '\n=== %s\n' "$1"; }
+
+# --full aggiunge i dump grezzi: servono quando il device non parte e l'unica
+# cosa che hai e' la SD tolta e infilata in un PC. Il riassunto da solo dice
+# "input devices: ok", il dump dice QUALI bit ha quel device - che e' cio' che
+# serve per capire perche' un pulsante e' sbagliato.
+FULL="no"
+[ "${1:-}" = "--full" ] && FULL="yes"
+full() { [ "${FULL}" = "yes" ]; }
+
+printf '=== rf35h-diag  %s  uptime %s\n' "$(date 2>/dev/null)" "$(cut -d' ' -f1 /proc/uptime)"
+sec "os";          cat /etc/os-release 2>/dev/null | head -3
+sec "cmdline";     cat /proc/cmdline
+sec "console";     cat /proc/consoles
+
+# I quattro nomi su cui si reggono l'autoconfig del pad, rf35h-audio.service,
+# rf35h-volkeys.service e la patch logind del tasto power.
+sec "input devices"
+cat /proc/bus/input/devices 2>/dev/null | grep -E '^N:|^H:|^B: (KEY|ABS|FF)='
+echo "--- rumble (B: FF= sul retrogame_joypad = motore registrato; prova: rf35h-rumble)"
+awk '/Name="retrogame_joypad"/{f=1} f&&/^B: FF=/{print "  FF dichiarato: " $0; f=0} f&&/^$/{if(f){print "  FF dichiarato: NO (il driver non ha registrato il motore)"}; f=0}' /proc/bus/input/devices 2>/dev/null
+
+sec "audio"
+cat /proc/asound/cards 2>/dev/null
+amixer -c 0 controls 2>/dev/null | grep -iE "speaker|playback mux|master"
+for c in "Internal Speakers Switch" "Playback Mux"; do
+	printf '%-26s ' "${c}"
+	amixer -c 0 cget name="${c}" 2>/dev/null | grep -E '^  : values' || echo "(assente)"
+done
+
+sec "tasto power"
+grep -E '^HandlePowerKey' /etc/systemd/logind.conf 2>/dev/null || echo "(non impostato)"
+grep -q "rk805 pwrkey" /proc/bus/input/devices 2>/dev/null \
+	&& echo "driver pwrkey: presente" || echo "driver pwrkey: ASSENTE"
+
+sec "cpu / gpu"
+printf 'governor    %s\n' "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
+printf 'corrente    %s\n' "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null)"
+printf 'disponibili %s\n' "$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies 2>/dev/null)"
+printf 'boost       %s\n' "$(cat /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || echo '(non esposto)')"
+for d in /sys/class/devfreq/*; do
+	[ -e "${d}/cur_freq" ] && printf 'gpu %-12s %s di [%s]\n' "$(basename "${d}")" \
+		"$(cat "${d}/cur_freq")" "$(cat "${d}/available_frequencies" 2>/dev/null)"
+done
+
+sec "display"
+for d in /sys/class/drm/*/status; do [ -e "${d}" ] && echo "$(basename "$(dirname "${d}")"): $(cat "${d}")"; done
+for d in /sys/class/drm/*/modes; do [ -s "${d}" ] && { echo "modi $(basename "$(dirname "${d}")"):"; head -3 "${d}"; }; done
+for b in /sys/class/backlight/*; do
+	[ -d "${b}" ] && echo "backlight $(basename "${b}"): $(cat "${b}/brightness")/$(cat "${b}/max_brightness")"
+done
+
+sec "moduli out-of-tree"
+# lsmod vede solo i moduli: un driver =y (come panfrost in Lakka) non c'e', ma
+# ha la sua cartella sotto /sys/bus/*/drivers. Si guarda li' prima.
+for m in rk915 rocknix_singleadc_joypad panfrost; do
+	if [ -d "/sys/bus/platform/drivers/${m}" ] || [ -d "/sys/bus/sdio/drivers/${m}" ] || [ -d "/sys/module/${m}" ]; then
+		st="ok"; [ -d "/sys/module/${m}/sections" ] || st="ok (builtin)"
+	else
+		st="NON CARICATO"
+	fi
+	printf '%-28s %s\n' "${m}" "${st}"
+done
+
+sec "tempi di caricamento dei moduli (s dal boot; con modules-load.d sotto i 10)"
+dmesg 2>/dev/null | grep -E "rk915: loading|Launching Wi-Fi|rocknix.*joypad|new high speed SDIO" | sed -n 's/^\[ *\([0-9.]*\)\] \(.*\)/  \1  \2/p' | head -4
+
+sec "wi-fi"
+ls /lib/firmware/rk915_*.bin 2>/dev/null || echo "(firmware rk915 assente)"
+ls /lib/firmware/regulatory.db 2>/dev/null || echo "(regulatory.db assente)"
+iw reg get 2>/dev/null | head -3
+ip -br link 2>/dev/null
+echo "--- alimentazione LED stick (GPIO2_A1, LED class joyled-power)"
+if [ -r /sys/class/leds/joyled-power/brightness ]; then
+	echo "joyled-power: $([ "$(cat /sys/class/leds/joyled-power/brightness)" != 0 ] && echo on || echo off)"
+else
+	echo "joyled-power: ASSENTE (DTB senza z-014: gli stick restano spenti)"
+fi
+echo "--- chi gestisce la radio"
+for s in wpa_supplicant iwd connman; do
+	printf '%-16s %s\n' "${s}" "$(systemctl is-active "${s}.service" 2>/dev/null || echo '-')"
+done
+echo "--- connman"
+connmanctl technologies 2>/dev/null | grep -A5 "wifi" | grep -E "Powered|Connected|Tethering" | sed 's/^ *//'
+connmanctl services 2>/dev/null | head -8
+[ -z "$(connmanctl services 2>/dev/null)" ] && echo "(connmanctl services: vuoto)"
+# Il test che separa driver da userspace: si chiede al KERNEL, via nl80211,
+# saltando qualunque daemon. Se qui compaiono SSID e il daemon non li vede,
+# il problema e' sopra; se qui non c'e' niente, e' il driver.
+echo "--- scansione diretta dal kernel (iw, senza daemon)"
+if iw dev wlan0 info >/dev/null 2>&1; then
+	iw dev wlan0 scan 2>&1 | grep -E "^BSS|SSID:|freq:|signal:|capability" | head -40
+	echo "--- cache di scansione del kernel (scan dump)"
+	iw dev wlan0 scan dump 2>&1 | grep -E "^BSS|SSID:|freq:|signal:" | head -40
+	[ -z "$(iw dev wlan0 scan dump 2>/dev/null)" ] && echo "(scan dump: vuoto - il driver non ha consegnato nessun BSS al kernel)"
+else
+	echo "(wlan0 non esiste)"
+fi
+
+sec "servizi del device"
+echo "--- zram: $(/usr/bin/rf35h-zram status 2>/dev/null | head -1)"
+echo "--- ssh: flag del menu $([ -e /storage/.cache/services/sshd.conf ] && echo presente || echo ASSENTE), 'ssh' in cmdline: $(grep -qw ssh /proc/cmdline && echo si || echo no) (devono essere: presente / no)"
+for s in rf35h-audio rf35h-volkeys rf35h-state rf35h-idle odroidgoa-utils odroidgoa-volkeys sshd; do
+	printf '%-20s %s\n' "${s}" "$(systemctl is-active "${s}.service" 2>/dev/null || echo '-')"
+done
+
+sec "termica"; for t in /sys/class/thermal/thermal_zone*/temp; do [ -e "${t}" ] && echo "$(cat "${t}")"; done
+sec "memoria";  free -m 2>/dev/null | head -2
+sec "storage";  df -h /storage /flash 2>/dev/null
+
+if full; then
+	sec "input devices, dump completo"
+	# Le righe B: sono le bitmap dei tasti e degli assi. Sono la fonte di
+	# verita' per gli indici dell'autoconfig: senza queste, gli indici si
+	# possono solo calcolare dal device tree.
+	cat /proc/bus/input/devices 2>/dev/null
+
+	sec "controlli ALSA, tutti"
+	amixer -c 0 contents 2>/dev/null
+
+	sec "cpufreq"
+	for f in scaling_available_frequencies scaling_governor scaling_cur_freq \
+	         cpuinfo_min_freq cpuinfo_max_freq; do
+		v="$(cat /sys/devices/system/cpu/cpu0/cpufreq/${f} 2>/dev/null)"
+		[ -n "${v}" ] && printf '  %-32s %s\n' "${f}" "${v}"
+	done
+	echo "  time_in_state:"
+	sed 's/^/    /' /sys/devices/system/cpu/cpu0/cpufreq/stats/time_in_state 2>/dev/null
+
+	sec "gpu devfreq"
+	for d in /sys/class/devfreq/*; do
+		[ -d "${d}" ] || continue
+		echo "  $(basename "${d}"): $(cat "${d}/cur_freq" 2>/dev/null)"
+		echo "    disponibili: $(cat "${d}/available_frequencies" 2>/dev/null)"
+	done
+
+	sec "alimentazione"
+	for ps in /sys/class/power_supply/*; do
+		[ -d "${ps}" ] || continue
+		echo "  $(basename "${ps}"): type=$(cat "${ps}/type" 2>/dev/null) status=$(cat "${ps}/status" 2>/dev/null) capacity=$(cat "${ps}/capacity" 2>/dev/null)"
+	done
+
+	sec "trigger dei LED"
+	for l in /sys/class/leds/*; do
+		[ -d "${l}" ] || continue
+		echo "  $(basename "${l}"): $(cat "${l}/trigger" 2>/dev/null)"
+	done
+
+	sec "device tree: cosa ha davvero enumerato il kernel"
+	if [ -d /proc/device-tree ]; then
+		echo "  modello: $(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
+		echo "  compatible: $(tr '\0' ' ' < /proc/device-tree/compatible 2>/dev/null)"
+	fi
+
+	sec "moduli caricati"
+	lsmod 2>/dev/null
+
+	sec "unita' systemd fallite"
+	systemctl --failed --no-legend --no-pager 2>/dev/null
+
+	sec "journal di questo boot"
+	journalctl -b --no-pager 2>/dev/null | tail -400
+
+	sec "dmesg completo"
+	dmesg 2>/dev/null
+fi
+
+sec "journal wi-fi (wpa_supplicant, connman, iwd)"
+journalctl --no-pager -u wpa_supplicant -u connman -u iwd 2>/dev/null | tail -60
+
+sec "errori nel dmesg"
+dmesg 2>/dev/null | grep -iE "error|fail|warn|denied|timeout" \
+	| grep -viE "supply .* failed|Looking up|dependency cycle|not found, using dummy|staging directory" \
+	| tail -20

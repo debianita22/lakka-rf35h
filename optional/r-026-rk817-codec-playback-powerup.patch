@@ -1,0 +1,90 @@
+Subject: ASoC: rk817: re-arm the I2S receiver on every playback start
+
+The Rockchip vendor driver stops, resets and restarts the codec I2S receiver
+on every playback power-up, re-arms DDAC_POPD_DACST and clears
+DDAC_MUTE_MIXCTL bit 5 (reset value 0xa0; with the bit set a 440 Hz sine comes
+out as broadband noise on the XiFan RF35H). Mainline does none of this.
+
+Do it from .prepare, which runs on every stream start and may sleep - the codec
+sits on I2C and these writes do sleep.
+
+Two other hooks were tried on the device and both were wrong. .trigger runs
+under the stream spinlock, so sleeping there oopsed in the caller context and
+killed the player as soon as a core started audio. A DAPM PRE_PMU event fires
+only on an off->on transition of the supply, and on this board the playback
+path never powers down - the card routes both amplifier channels, which keeps
+the amplifier and the path enabled after the stream ends - so from the second
+stream onwards the re-arm never ran and playback was silent. Measured: with
+the player masked, the first stream after boot always played, every later one
+was silent.
+
+---
+--- a/sound/soc/codecs/rk817_codec.c
++++ b/sound/soc/codecs/rk817_codec.c
+@@ -42,6 +42,15 @@
+ 	snd_soc_component_write(component, RK817_CODEC_DDAC_SR_LMT0, 0x02);
+ 	snd_soc_component_write(component, RK817_CODEC_DADC_SR_ACL0, 0x02);
+ 	snd_soc_component_write(component, RK817_CODEC_DTOP_VUCTIME, 0xf4);
++	/*
++	 * Clear bit 5 of DDAC_MUTE_MIXCTL. Its reset value is 0xa0 and the
++	 * Rockchip vendor driver writes 0x00 here on every playback power-up;
++	 * mainline never touched it. With the bit set, a 440 Hz sine from
++	 * speaker-test comes out as broadband noise on the XiFan RF35H, and
++	 * clearing it live over I2C fixes it instantly.
++	 */
++	snd_soc_component_update_bits(component, RK817_CODEC_DDAC_MUTE_MIXCTL,
++				      BIT(5), 0);
+ 	if (rk817->mic_in_differential) {
+ 		snd_soc_component_update_bits(component, RK817_CODEC_AMIC_CFG0, MIC_DIFF_MASK,
+ 			MIC_DIFF_EN);
+@@ -109,6 +118,42 @@
+ static const struct snd_kcontrol_new dac_mux =
+ 	SOC_DAPM_ENUM("Playback Mux", dac_enum);
+ 
++/*
++ * Re-arm the I2S receiver the way the vendor driver's playback_power_up_list
++ * does: stop, reset and restart it, then re-arm DDAC_POPD_DACST and clear
++ * DDAC_MUTE_MIXCTL bit 5 (reset value 0xa0; with the bit set a 440 Hz sine
++ * comes out as broadband noise on the XiFan RF35H).
++ *
++ * This lives in .prepare, which runs on every stream start and is allowed to
++ * sleep - the codec is on I2C and these writes do sleep. Two hooks were tried
++ * first and both were wrong. .trigger runs under the stream spinlock, so
++ * sleeping there oopsed in the caller's context and killed RetroArch as soon
++ * as a core started playing. A DAPM PRE_PMU event only fires on an off->on
++ * transition of the supply, and on this board the playback path never powers
++ * down - the sound card routes both amplifier channels, which keeps the
++ * amplifier (and the path) enabled after the stream ends - so from the second
++ * stream onwards the re-arm never ran and playback was silent. Measured on the
++ * device: with RetroArch masked, the first stream after boot always played;
++ * every later one was silent.
++ */
++static int rk817_pcm_prepare(struct snd_pcm_substream *substream,
++			     struct snd_soc_dai *dai)
++{
++	struct snd_soc_component *component = dai->component;
++
++	if (substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++		return 0;
++
++	snd_soc_component_write(component, RK817_CODEC_DI2S_RXCMD_TSD, 0x00);
++	snd_soc_component_write(component, RK817_CODEC_DI2S_RSD, 0x00);
++	snd_soc_component_write(component, RK817_CODEC_DI2S_RXCR1, 0x00);
++	snd_soc_component_write(component, RK817_CODEC_DI2S_RXCMD_TSD, 0x20);
++	snd_soc_component_write(component, RK817_CODEC_DDAC_POPD_DACST, 0x02);
++	snd_soc_component_update_bits(component, RK817_CODEC_DDAC_MUTE_MIXCTL,
++				      BIT(5), 0);
++	return 0;
++}
++
+ static const struct snd_soc_dapm_widget rk817_dapm_widgets[] = {
+ 
+ 	/* capture/playback common */
+@@ -384,6 +429,7 @@
+ 
+ static const struct snd_soc_dai_ops rk817_dai_ops = {
+ 	.hw_params	= rk817_hw_params,
++	.prepare	= rk817_pcm_prepare,
+ 	.set_fmt	= rk817_set_dai_fmt,
+ 	.set_sysclk	= rk817_set_dai_sysclk,
+ 	.mute_stream	= rk817_digital_mute,

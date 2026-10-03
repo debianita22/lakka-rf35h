@@ -1,0 +1,70 @@
+#!/bin/sh
+# rf35h-dac-volume [0-100|--raw N|--restore|status] - volume dell'altoparlante,
+# in percentuale, sul volume digitale del DAC rk817 (controllo ALSA "Master
+# Playback Volume", registro DDAC_VOLL/R).
+#
+# Scala: 0-100 % di VOLUME. Il registro DDAC_VOLL/R e' un'ATTENUAZIONE: 0 e' il
+# massimo e 255 il minimo. Il controllo ALSA di mainline e' dichiarato
+# invertito - SOC_DOUBLE_R_RANGE_TLV(..., 0x00, 0xff, 1, ...) - quindi
+# soc_mixer_ctl_to_reg() scrive "registro = 255 - valore", e passare ad amixer
+# un valore alto da' un registro basso, cioe' piu' volume. La percentuale va
+# quindi direttamente sul controllo, senza ulteriori inversioni.
+#
+# Errore mio, corretto dopo averlo misurato su ArkOS: avevo dedotto la scala
+# dal fatto che a "50 %" e "100 %" non si sentiva nulla, ma quei test erano
+# viziati dal difetto del riarmo I2S, per cui suonava solo la prima
+# riproduzione dopo il boot. Avevo letto un bug come se fosse una scala, e la
+# "correzione" aveva reso il 100 % silenzioso.
+#
+# Default 28 % = registro 184, il livello di FABBRICA di ArkOS4Clone su questo
+# hardware: il suo controllo vale 10 di default, e a controllo 13 il registro
+# del codec misurava 183. Un valore letto a 137 era una regolazione manuale,
+# non il default - averlo preso per tale mi aveva portato prima a 72 % e poi a
+# 62 %, entrambi molto piu' alti del vero.
+# --raw N scrive il registro N direttamente, per le prove.
+set -u
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/dac-volume"
+DEFAULT=28
+CTL="Master Playback Volume"
+AMIXER="${RF35H_AMIXER:-amixer}"
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+pct_to_ctl() { echo $(( ($1 * 255 + 50) / 100 )); }   # volume% -> valore amixer
+ctl_to_reg() { echo $(( 255 - $1 )); }                # solo per stampare il registro
+apply_ctl() {
+	is_num "$1" && [ "$1" -le 255 ] || { echo "rf35h-dac-volume: valore non valido: $1" >&2; return 2; }
+	${AMIXER} -q -c 0 cset name="${CTL}" "$1,$1" 2>/dev/null || { echo "rf35h-dac-volume: amixer fallito (scheda assente?)" >&2; return 1; }
+}
+case "${1:-status}" in
+	--restore)
+		# Senza un valore salvato si applica comunque il DEFAULT: il registro
+		# di reset dell'hardware e' 0x00, cioe' attenuazione nulla, cioe'
+		# volume MASSIMO nell'amplificatore esterno. Non fare nulla qui
+		# significherebbe lasciarlo li'.
+		p="$(rd "${SAVED}" "${DEFAULT}")"; is_num "$p" && [ "$p" -le 100 ] || p="${DEFAULT}"
+		apply_ctl "$(pct_to_ctl "$p")" ;;
+	--raw)
+		# l'utente indica il REGISTRO: il valore da passare ad amixer e' 255-N
+		is_num "${2:-}" && [ "${2:-256}" -le 255 ] || { echo "uso: --raw 0-255 (0 = massimo volume)" >&2; exit 2; }
+		apply_ctl "$(( 255 - $2 ))" && echo "registro DAC = $2/255 (0 = massimo; ArkOS usa ~184). Non salvato." ;;
+	status)
+		p="$(rd "${SAVED}" "")"
+		echo "salvato: ${p:-nessuno (default ${DEFAULT} %)}"
+		# Solo la riga del valore (": values=71,71"), non quella dei metadati
+		# ("; type=...,values=2,...", dove 2 e' il numero di canali). E il
+		# valore e' il CONTROLLO ALSA, non il registro: il registro e' 255 meno
+		# il controllo. Etichettarli male e' stato l'errore che per mezza
+		# giornata ha fatto ragionare all'incontrario sulla scala del volume.
+		c="$(${AMIXER} -c 0 cget name="${CTL}" 2>/dev/null | sed -n 's/^ *: values=\([0-9]*\).*/\1/p')"
+		if is_num "${c}"; then
+			echo "attuale: $(( (c * 100 + 127) / 255 )) % (controllo ${c}, registro $(( 255 - c ))/255, dove 0 = massimo)"
+		else
+			echo "attuale: scheda audio non disponibile"
+		fi ;;
+	*)
+		is_num "$1" && [ "$1" -le 100 ] || { echo "uso: rf35h-dac-volume 0-100 | --raw 0-255 | --restore | status" >&2; exit 2; }
+		mkdir -p "${STATE}" 2>/dev/null
+		_c="$(pct_to_ctl "$1")"
+		apply_ctl "${_c}" && { printf '%s\n' "$1" > "${SAVED}"; echo "volume altoparlante = $1 % (registro $(ctl_to_reg "${_c}")/255, ArkOS usa ~184)"; } ;;
+esac

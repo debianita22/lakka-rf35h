@@ -1,0 +1,274 @@
+#!/bin/bash
+# verify-claims.sh - controlla che ogni modifica dichiarata sia DAVVERO presente.
+#
+# Nato da un incidente: diverse modifiche al README, fatte con un replace che
+# non verificava l'ancora, stampavano "ok" anche quando non cambiavano nulla, e
+# meta' della documentazione di tre giorni non e' mai arrivata. Il codice in
+# quel caso era integro, ma nulla lo garantiva: questo script lo garantisce.
+#
+# Uso: tools/verify-claims.sh <albero-lakka-con-overlay-applicato> [overlay]
+#      (l'albero deve essere passato per apply.sh)
+set -u
+W="${1:?uso: $0 <albero-lakka> [overlay]}"
+O="${2:-$(cd "$(dirname "$0")/.." && pwd)}"
+P="${O}/packages/rf35h-utils"
+K="${W}/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf"
+RA="${W}/packages/lakka/retroarch_base/retroarch/package.mk"
+SDL="${W}/packages/lakka/lakka_depends/SDL/package.mk"
+SWAY="${W}/packages/wayland/compositor/sway/config/config"
+Z010="${O}/patches/linux/z-010-add-rf35h-dts.patch"
+bad=0; n=0
+
+chk() {
+	n=$((n + 1))
+	if eval "$2" >/dev/null 2>&1; then
+		printf '  ok     %s\n' "$1"
+	else
+		printf '  MANCA  %s\n' "$1"; bad=$((bad + 1))
+	fi
+}
+
+echo "== integrazione (albero dopo apply.sh)"
+chk "sway: niente barra di stato"            "! grep -q status_command '$SWAY'"
+chk "sway: sfondo nero"                      "grep -q 'bg #000000 solid_color' '$SWAY'"
+# La copia in /storage non si aggiorna da sola: senza migrazione chi aveva gia'
+# la configurazione di serie continuava a vedere barra e sfondo.
+chk "sway: migrazione della vecchia copia"   "grep -q 'rf35h-backup' '${W}/packages/wayland/compositor/sway/scripts/sway-config'"
+chk "RetroArch: PKG_STAMP su DISPLAYSERVER"  "grep -q 'PKG_STAMP=\"\${DISPLAYSERVER}\"' '$RA'"
+chk "RetroArch: audio_out_rate 44100"        "grep -q 'audio_out_rate = \"44100\"' '$RA'"
+chk "RetroArch: resampler quality 2"         "grep -q 'audio_resampler_quality = \"2\"' '$RA'"
+chk "SDL: host senza sysroot del target"     "! sed -n '/PKG_CONFIGURE_OPTS_HOST=/,/without-x\"/p' '$SDL' | grep -q SYSROOT_PREFIX"
+chk "SDL: target conserva ALSA"              "sed -n '/PKG_CONFIGURE_OPTS_TARGET=/,/^\$/p' '$SDL' | grep -qE -- '--enable-alsa([[:space:]]|\\\\\\\\|\$)'"
+chk "applewin: xxd:host"                     "grep -q 'xxd:host' '${W}/packages/lakka/libretro_cores/applewin/package.mk'"
+chk "uae4arm: rinomina numbers"              "grep -q td_numbers '${W}/packages/lakka/libretro_cores/uae4arm/package.mk'"
+chk "cannonball: -std=gnu++11"               "grep -q 'std=gnu++11' '${W}/packages/lakka/libretro_cores/cannonball/package.mk'"
+# SND_SOC_ROCKCHIP non esiste come simbolo (7.0.1 e 7.2.7): portarlo a =y era
+# una riga morta. Conta l'I2S; e l'opzione morta non deve tornare.
+chk "kconfig: I2S built-in"                   "grep -q '^CONFIG_SND_SOC_ROCKCHIP_I2S=y' '$K'"
+chk "kconfig: niente opzione morta ROCKCHIP"  "! grep -q '^CONFIG_SND_SOC_ROCKCHIP=y' '$K'"
+chk "kconfig: amplificatore modulo"          "grep -q '^CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m' '$K'"
+chk "kconfig: debug spento"                  "grep -q '^# CONFIG_DEBUG_PREEMPT is not set' '$K' && grep -q '^# CONFIG_DEBUG_GPIO is not set' '$K'"
+
+# Tasti volume su scala cubica a passi del 5 %. Storia: prima passi da 2 dB
+# (fondo risolto, cima a salti 94->74->59->47 %), prima ancora 0,5 dB (160
+# pressioni). Il widget deve mostrare la STESSA scala, arrotondare invece di
+# troncare (0,9499 -> 95, non 94), e mostrare 0 al muto (in cubica varrebbe 5 %).
+chk "RetroArch: tasti volume su scala cubica"   "grep -q 'cbrtf(powf(10.0f, cur / 20.0f))' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+chk "RetroArch: griglia del 5 %"                "grep -q 'x \* 20.0f + 1e-4f' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+chk "RetroArch: widget sulla stessa scala"      "grep -q 'cbrt(pow(10, new_volume/20))' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+chk "RetroArch: widget arrotonda"               "grep -q '100.0f + 0.5f' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+chk "RetroArch: widget 0 al muto"               "grep -q 'new_volume <= -79.9f) ? 0.0f' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+chk "RetroArch: niente residui dei passi in dB" "! grep -q -- 'set_volume(settings, -2.0f' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch' && ! grep -q 'new_volume < -40.0f' '${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1006-volume-steps.patch'"
+
+# free() all'uscita: config_string_options() marca i values con SD_FREE_FLAG_VALUES
+# e menu_setting_free() li libera. Passando costanti, RetroArch moriva di SIGABRT
+# ("free(): invalid pointer") a ogni uscita: 4 crash su 4 uscite registrate.
+M1003="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1003-rf35h-settings-menu.patch"
+# 7 tendine, tutte del device (IKEMEN GO sta in Core senza contenuto)
+chk "RetroArch: le 7 opzioni del menu sono allocate" "[ \"\$(grep -cE '^\+ +strdup\(RF35H_[A-Z_]+\),\$' '$M1003')\" = 7 ]"
+chk "RetroArch: nessuna costante passata come values" "! grep -qE '^\+ +RF35H_[A-Z_]+(MODES|SPEEDS|SERVERS|OUTS|REGIONS),\$' '$M1003'"
+chk "generatore del menu: stessi 7 strdup"          "[ \"\$(grep -cE '^ +strdup\(RF35H_[A-Z_]+\),\$' '$O/tools/gen-retroarch-rf35h-menu.py')\" = 7 ]"
+
+M1005="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1005-wifi-connect-wait.patch"
+M1008="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1008-connmanctl-hardening.patch"
+# connmanctl: popen() mai controllato (un fallimento e' un SEGV) e lista delle
+# reti svuotata mentre il menu la legge da un altro thread. Vedi il SEGV del 22/9.
+chk "connmanctl: la 1008 arriva nell'albero"         "[ -f '$M1008' ]"
+chk "connmanctl: refresh_services controlla popen"  "grep -q '^+   if (!serv_file)' '$M1008'"
+chk "connmanctl: lista scambiata alla fine"          "grep -q '^+   connman->scan.net_list = net_list;' '$M1008'"
+chk "connmanctl: tolti tutti e 5 i pclose(popen())" "[ \"\$(grep -c '^-.*pclose(popen(' '$M1008')\" = 5 ]"
+# La riga del refresh finale diff la allinea con quella originale (contesto,
+# non "+"): si controllano le proprieta', non il conteggio delle righe aggiunte.
+chk "attese Wi-Fi: lettura privata di connmanctl"   "grep -q '^+static bool connmanctl_service_state' '$M1005'"
+chk "attese Wi-Fi: nessun refresh dentro le attese" "awk '/^[+ ]static bool connmanctl_wait_(for_service|connected)\\(/{f=1} f && /refresh_services/{bad=1} f && /^[+ ]}/{f=0} END{exit bad}' '$M1005'"
+chk "attese Wi-Fi: un refresh alla fine"            "grep -A4 '^+   success = connmanctl_wait_connected(netid, 15);' '$M1005' | grep -q 'connmanctl_refresh_services(connman);'"
+
+M1009="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1009-wifi-list-lock.patch"
+M1010="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1010-config-atomic-write.patch"
+chk "connmanctl: i 4 cicli su popen protetti"       "[ \"\$(grep -c '^+.*while (command_file && fgets' '$M1008')\" = 4 ]"
+chk "connmanctl: tmp liberato, AP inizializzato"     "grep -q '^+   free(tmp);' '$M1008' && grep -q '^+      if (!\*ap_name || !\*pass_key)' '$M1008'"
+chk "lista Wi-Fi: 7 regioni sotto lock"              "[ \"\$(grep -c '^+.*driver_wifi_list_lock();' '$M1009')\" = 7 ]"
+chk "lista Wi-Fi: password alla rete per id"         "grep -q '^+static char menu_wifi_dialog_netid' '$M1009'"
+chk "config: scrittura atomica (fsync + rename)"     "grep -q 'fsync(fileno(file))' '$M1010' && grep -q '^+            if (ok && rename(tmp_path, path) != 0)' '$M1010'"
+
+M1003B="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1003-rf35h-settings-menu.patch"
+# Tendine del menu: per gli array handle decide se la chiave si rilegge dal file.
+chk "menu: le 7 tendine si rileggono (handle=true)"  "[ \"\$(grep -cE '^\+   SETTING_ARRAY\(\"rf35h_[a-z_]+\",.*, true\);$' '$M1003B')\" = 7 ]"
+chk "menu: chiave vuota -> stato reale del device"   "grep -q '^+static void rf35h_arrays_fill(settings_t \*settings)' '$M1003B' && grep -q '^+   rf35h_arrays_fill(settings);' '$M1003B'"
+chk "generatore: handle=true per le 7 tendine"       "[ \"\$(grep -cE 'SETTING_ARRAY\(\"rf35h_.*DEFAULT_RF35H_[A-Z_]+, true\);' '$O/tools/gen-retroarch-rf35h-menu.py')\" = 7 ]"
+
+echo "== Vulkan accanto a OpenGL ES, IKEMEN GO"
+OPT="${W}/projects/Rockchip/devices/RK3326/options"
+IK="${O}/packages/ikemen-go"
+IKP="${IK}/patches"
+L1="${IK}/scripts/rf35h-ikemen"
+chk "options: Vulkan acceso ma spegnibile (RF35H_VULKAN)"  "grep -q 'RF35H_VULKAN:-yes' '$OPT' && grep -q 'VULKAN=\"vulkan-loader\"' '$OPT'"
+chk "options: IKEMEN GO spegnibile (RF35H_IKEMEN)"       "grep -q 'RF35H_IKEMEN:-yes' '$OPT' && grep -q 'ADDITIONAL_PACKAGES+=\" ikemen-go\"' '$OPT'"
+chk "wlroots: niente renderer Vulkan sull'RF35H"         "grep -q 'UBOOT_SYSTEM}\" != \"rf35h\"' '${W}/packages/wayland/lib/wlroots/package.mk'"
+# stamp su VULKAN: Mesa, RetroArch e ogni core che legge VULKAN_SUPPORT
+chk "stamp su VULKAN: Mesa e RetroArch"                  "grep -q 'PKG_STAMP+=\" VULKAN=' '${W}/packages/graphics/mesa/package.mk' && grep -q 'PKG_STAMP+=\" VULKAN=' '$RA'"
+chk "stamp su VULKAN: tutti i core che lo leggono"       "[ \"\$(grep -lE 'VULKAN_SUPPORT' '${W}'/packages/lakka/libretro_cores/*/package.mk | wc -l)\" = \"\$(grep -l 'PKG_STAMP+=\" VULKAN=' '${W}'/packages/lakka/libretro_cores/*/package.mk | wc -l)\" ]"
+chk "RetroArch: PanVK sbloccato nel servizio"            "grep -qx 'Environment=PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1' '$P/retroarch.service.d/rf35h-vulkan.conf'"
+chk "RetroArch: ripiego automatico su gl"                "grep -q 'rf35h-ra-guard pre' '$P/retroarch.service.d/rf35h-vulkan.conf' && grep -q 'rf35h-ra-guard post' '$P/retroarch.service.d/rf35h-vulkan.conf' && [ -x '$P/scripts/rf35h-ra-guard' ]"
+chk "rf35h-utils installa drop-in e profile.d"           "grep -q 'rf35h-vulkan.conf' '$P/package.mk' && grep -q '99-rf35h-vulkan.conf' '$P/package.mk'"
+LC="${IK}/launcher/ikemen_libretro.c"; LI="${IK}/launcher/ikemen_libretro.info"
+chk "IKEMEN GO in Core senza contenuto (filtro Monouso)"  "grep -qx 'supports_no_game = \"true\"' '$LI' && grep -qx 'single_purpose = \"true\"' '$LI' && grep -q 'RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME' '$LC'"
+chk "core lanciatore: avvio via systemd, niente blocco"  "grep -q \"start %s >/dev/null 2>&1\" '$LC' && grep -q 'systemctl --no-block start rf35h-ikemen.service' '$L1'"
+chk "core lanciatore: renderer nelle opzioni, dallo stato" "grep -q 'ikemen_renderer' '$LC' && grep -q 'RETRO_ENVIRONMENT_SET_VARIABLE' '$LC' && grep -q 'renderer 2>/dev/null' '$LC'"
+chk "core lanciatore: compilato e installato col .info"   "grep -q 'launcher/ikemen_libretro.c' '$IK/package.mk' && grep -q 'ikemen_libretro.info' '$IK/package.mk' && grep -q 'IKEMEN GO.png' '$IK/package.mk'"
+chk "IKEMEN GO fuori da Impostazioni dispositivo (1003)" "! grep -qi ikemen '$M1003'"
+chk "core lanciatore: tempo di gioco vero nel .lrtl"     "grep -q 'IKEMEN GO/IKEMEN GO.lrtl' '$L1' && grep -q 'runtime_add \"\${el}\"' '$L1'"
+chk "retroarch.cfg letto come RetroArch (prima chiave)"  "grep -q 'head -n 1' '$P/scripts/rf35h-ra-guard' && grep -q 'head -n 1' '$L1'"
+chk "IKEMEN: tag egl gles nodialog e arenas"             "grep -q 'go build -tags \"egl gles nodialog\"' '$IK/package.mk' && grep -q 'GOEXPERIMENT=arenas' '$IK/package.mk'"
+chk "IKEMEN: sorgenti fissati per commit"                "grep -q '^PKG_VERSION=\"81c6da71d689625e20db79586815b695da00dd6d\"' '$IK/package.mk' && grep -q '^PKG_VERSION=\"11d6ea7223fc15209664730503412841045f7939\"' '${O}/packages/ikemen-screenpack/package.mk'"
+chk "IKEMEN: GLES su Linux (render_gles32 con tag gles)" "grep -q '^+//go:build android || gles' '$IKP/ikemen-go-0001-linux-gles-renderer-nodialog.patch'"
+chk "IKEMEN: menu col renderer solo se compilato"        "grep -q 'isRendererAvailable' '$IKP/ikemen-go-0001-linux-gles-renderer-nodialog.patch'"
+chk "IKEMEN: FBO di post-processing RGBA8 su GLES"       "grep -q '^+			gl.RGBA8,' '$IKP/ikemen-go-0002-gles-vulkan-fixes.patch'"
+chk "IKEMEN: shader esterni GLES con precision, senza crash" "grep -q 'esPostHeader' '$IKP/ikemen-go-0002-gles-vulkan-fixes.patch' && grep -q 'skipped' '$IKP/ikemen-go-0002-gles-vulkan-fixes.patch'"
+chk "IKEMEN: Vulkan, limiti della GPU integrata e scissor" "grep -q 'Limits of the GPU actually used' '$IKP/ikemen-go-0002-gles-vulkan-fixes.patch' && grep -q 'Clamp to the render target' '$IKP/ikemen-go-0002-gles-vulkan-fixes.patch'"
+chk "IKEMEN: lanciatore con override Mesa per renderer"  "grep -q 'MESA_GLES_VERSION_OVERRIDE=3.2' '$L1' && grep -q 'MESA_GL_VERSION_OVERRIDE=3.3' '$L1'"
+chk "IKEMEN: ombre 3D sempre spente, ripiego su opengles" "grep -q 'ini_set \"\${CFG}\" Video EnableModelShadow 0' '$L1' && grep -q 'ikemen-fallback-' '$L1'"
+chk "IKEMEN: uno stop non e' un errore di renderer"      "grep -q 'STOPPING=1' '$L1' && grep -q 'STOPPING}\" = 1' '$L1'"
+# Vulkan in IKEMEN: PanVK sul Mali-G31 e' Vulkan 1.0, il renderer di IKEMEN
+# vuole la 1.3; forzata, schermo nero (provato sulla console il 25/9/2026).
+chk "IKEMEN: Vulkan spento anche nel suo menu (0003)"   "grep -q 'export IKEMEN_DISABLE_VULKAN=1' '$L1' && grep -q 'return !vulkanDisabled()' '$IKP/ikemen-go-0003-disable-vulkan.patch'"
+chk "IKEMEN: vulkan non si sceglie ne' si eredita"      "grep -q \"Vulkan non e' disponibile per IKEMEN\" '$L1' && ! grep -q '\"Vulkan 1.3\") echo vulkan' '$L1' && ! grep -q '{ \"vulkan\"' '$LC'"
+chk "IKEMEN: servizio in conflitto con RetroArch"        "grep -qx 'Conflicts=retroarch.service' '$IK/system.d/rf35h-ikemen.service' && grep -q 'rf35h-ikemen back' '$IK/system.d/rf35h-ikemen.service'"
+chk "IKEMEN: icone PNG installate (senza, panic)"        "grep -q 'rm -f \${share}/external/icons/\*.ico' '$IK/package.mk' && ! grep -q 'icons/\*.png' '$IK/package.mk'"
+chk "Go per l'host: checksum per amd64 e arm64"          "grep -q '990e6b4bbba816dc3ee129eaeaf4b42f17c2800b88a2166c265ac1a200262282' '${O}/packages/golang-bin/package.mk' && grep -q 'c958a1fe1b361391db163a485e21f5f228142d6f8b584f6bef89b26f66dc5b23' '${O}/packages/golang-bin/package.mk'"
+chk "SDL2 di IKEMEN: privata e con controllo delle feature" "grep -q 'libdir=/usr/lib/ikemen-sdl2' '${O}/packages/ikemen-sdl2/package.mk' && grep -q 'non abilitato dal configure' '${O}/packages/ikemen-sdl2/package.mk'"
+chk "libxmp: statica, solo nel sysroot"                  "grep -q 'BUILD_SHARED=OFF' '${O}/packages/libxmp/package.mk' && grep -q 'DESTDIR=\${SYSROOT_PREFIX} ninja install' '${O}/packages/libxmp/package.mk'"
+chk "build: --no-vulkan e --no-ikemen arrivano a make"   "grep -q 'RF35H_VULKAN=\"\${WITH_VULKAN}\"' '$O/build-lakka-rf35h.sh' && grep -q 'RF35H_IKEMEN=\"\${WITH_IKEMEN}\"' '$O/build-lakka-rf35h.sh'"
+
+echo "== giochi: GTA SA, GTA III (re3), OpenXeenNG, Deva's Awesome Adventures"
+RKP="${W}/projects/Rockchip/devices/RK3326/packages"
+GT="${O}/packages/gtasa"; R3="${RKP}/re3"; OX="${O}/packages/openxeenng"; DV="${O}/packages/deva_adventures"
+chk "options: i quattro giochi, ognuno spegnibile"      "( for g in GTASA:gtasa RE3:re3 OPENXEENNG:openxeenng DEVA_ADVENTURES:deva_adventures; do grep -q \"RF35H_\${g%%:*}:-yes\" '$OPT' && grep -q \"ADDITIONAL_PACKAGES+=\\\" \${g#*:}\\\"\" '$OPT' || exit 1; done )"
+chk "apply: i pacchetti dei giochi nell'albero"        "( for d in gtasa openxeenng rust-bin rust-std-aarch64 deva_adventures; do [ -f '$RKP'/\$d/package.mk ] || exit 1; done )"
+# re3 non ha licenza: fuori dall'overlay, in un repository privato; nell'albero
+# e nell'immagine solo con --re3 (le options lo aggiungono se il pacchetto c'e')
+chk "re3: fuori dall'overlay, nell'immagine solo con --re3" "[ ! -e '$O/packages/re3' ] && grep -q 'packages/re3/package.mk\" \]; then' '$OPT' && grep -q 'RF35H_RE3_PKG=\"\${RE3_PKG}\"' '$O/build-lakka-rf35h.sh'"
+chk "build: --no-gtasa/re3/openxeenng/deva arrivano a make" "grep -q 'RF35H_GTASA=\"\${WITH_GTASA}\"' '$O/build-lakka-rf35h.sh' && grep -q 'RF35H_RE3=\"\${WITH_RE3}\"' '$O/build-lakka-rf35h.sh' && grep -q 'RF35H_OPENXEENNG=\"\${WITH_OPENXEENNG}\"' '$O/build-lakka-rf35h.sh' && grep -q 'RF35H_DEVA_ADVENTURES=\"\${WITH_DEVA}\"' '$O/build-lakka-rf35h.sh'"
+# --keep-going: un gioco che non compila toglie il gioco, non ferma tutto;
+# openal-soft e mpg123 (di due giochi) restano pacchetti di sistema
+chk "keep-going: un gioco rotto si toglie dall'immagine" "grep -q 'drop_extra \"\${EXTRA}\"' '$O/build-lakka-rf35h.sh' && grep -q 'openxeenng|rust-bin|rust-std-aarch64' '$O/build-lakka-rf35h.sh' && ! sed -n '/^extra_of()/,/^}/p' '$O/build-lakka-rf35h.sh' | grep -q 'openal-soft'"
+chk "re3: avviso uso personale alla build"              "grep -q 're3 incluso: il suo codice non ha licenza' '$O/build-lakka-rf35h.sh'"
+# GTA SA e GTA III: lanciatore/core in Core senza contenuto, nessun dato del gioco
+chk "GTA SA: lanciatore in Core senza contenuto"        "grep -qx 'supports_no_game = \"true\"' '$GT/launcher/gtasa_libretro.info' && grep -qx 'single_purpose = \"true\"' '$GT/launcher/gtasa_libretro.info'"
+chk "GTA SA: servizio in conflitto con RetroArch"       "grep -qx 'Conflicts=retroarch.service' '$GT/system.d/rf35h-gtasa.service' && grep -q 'rf35h-gtasa run' '$GT/system.d/rf35h-gtasa.service'"
+chk "GTA SA: nessun file del gioco nel pacchetto"       "[ -f '$GT/package.mk' ] && ! find '$GT' -iname '*.so' -o -iname '*.apk' -o -iname '*.obb' | grep -q ."
+if [ -f "$R3/package.mk" ]; then
+	chk "re3 (--re3): commit fissato, 33 patch, mirror"   "grep -q '^PKG_VERSION=\"3233ffe1c4b99e8efb4c41c6794b4fce880cf503\"' '$R3/package.mk' && [ \$(ls '$R3'/patches/*.patch | wc -l) = 33 ] && grep -q 'hottabxp/re3' '$R3/package.mk'"
+	chk "re3 (--re3): core in Core senza contenuto"       "grep -qx 'single_purpose = \"true\"' '$R3/files/re3_libretro.info' && grep -q 'gamefiles' '$R3/package.mk'"
+	chk "re3 (--re3): RE3_PGO non obbligatoria"            "grep -q 'case \"\${RE3_PGO:-}\" in' '$R3/package.mk'"
+fi
+# Deva e OpenXeenNG dai loro repository, a un commit fissato: niente archivi
+# nell'overlay, niente segnaposto del proprietario rimasti
+chk "Deva: dal suo repository, commit della 1.0.0"      "grep -qx 'PKG_VERSION=\"1e93ae98d9cd2cb0b8f6039e48e92aa362460424\"' '$DV/package.mk' && grep -q '^PKG_URL=\"\${PKG_SITE}.git\"' '$DV/package.mk' && grep -q '^PKG_SITE=\"https://github.com/[^/]*/deva-adventures\"' '$DV/package.mk' && [ ! -e '$DV/archive' ]"
+chk "Deva: dati in /usr/share"                          "grep -q 'DATA_DIR=/usr/share/deva_adventures' '$DV/package.mk' && grep -q 'cp -PR data/deva_adventures/.' '$DV/package.mk'"
+chk "OpenXeenNG: dal suo repository, commit afe41a1"    "grep -qx 'PKG_VERSION=\"afe41a19bb74e7dc81984f00504c40758efee5b2\"' '$OX/package.mk' && grep -q '^PKG_URL=\"\${PKG_SITE}.git\"' '$OX/package.mk' && grep -q '^PKG_SITE=\"https://github.com/[^/]*/OpenXeenNG\"' '$OX/package.mk' && [ ! -e '$OX/archive' ]"
+chk "nessun segnaposto @GH_OWNER@"                      "! grep -rq '@GH_OWNER@' '$O/packages' '$O/apply.sh' '$O/integration'"
+chk "OpenXeenNG: build senza rete (workspace ridotto)"    "grep -q 'cargo build --release --offline --locked -p openxeenng-libretro' '$OX/package.mk' && grep -q '^-    \"crates/tool\",' '$OX/patches/openxeenng-0001-lakka-libretro-only-workspace.patch'"
+chk "OpenXeenNG: triple ufficiale, link col gcc di LibreELEC" "grep -q 'triple=\"aarch64-unknown-linux-gnu\"' '$OX/package.mk' && grep -q 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=\"\${CC}\"' '$OX/package.mk'"
+# Rust ufficiale: stessa versione di rust di Lakka (i *-snapshot la seguono),
+# libreria per aarch64 col checksum del manifest del canale 1.95.0
+chk "rust-bin: versione = rust di Lakka = rust-std-aarch64" "v=\$(sed -n 's/^PKG_VERSION=\"\\(.*\\)\"/\\1/p' '${W}/packages/rust/rust/package.mk'); grep -q \"^PKG_VERSION=\\\"\$v\\\"\" '${O}/packages/rust-bin/package.mk' && grep -q \"^PKG_VERSION=\\\"\$v\\\"\" '${O}/packages/rust-std-aarch64/package.mk'"
+chk "rust-bin: binari ufficiali, std aarch64 verificata" "grep -q 'PKG_DEPENDS_UNPACK=\"rustc-snapshot cargo-snapshot rust-std-snapshot rust-std-aarch64\"' '${O}/packages/rust-bin/package.mk' && grep -q '3a21b271b1ff973b94d69b25e7a39992f9fbcae1ab6d9475844a23e6ad3908ac' '${O}/packages/rust-std-aarch64/package.mk'"
+
+echo "== pacchetto rf35h-utils"
+chk "DAC: default 28% applicato sempre"      "grep -q '^DEFAULT=28' '$P/scripts/rf35h-dac-volume' && ! grep -q '^ConditionPathExists' '$P/system.d/rf35h-dacvol.service'"
+chk "headphone-sense non abilitato"          "! grep -q 'enable_service rf35h-audio.service' '$P/package.mk'"
+chk "servizi rk915-load, overrides, dacvol"  "grep -q 'enable_service rf35h-rk915-load.service' '$P/package.mk' && grep -q 'enable_service rf35h-overrides.service' '$P/package.mk' && grep -q 'enable_service rf35h-dacvol.service' '$P/package.mk'"
+chk "override: 10 .cfg e 1 .opt"             "[ \$(find '$P/overrides' -name '*.cfg' | wc -l) = 10 ] && [ \$(find '$P/overrides' -name '*.opt' | wc -l) = 1 ]"
+chk "rf35h-i2c rifiuta scritture al codec"   "grep -q RF35H_I2C_FORCE '$P/sources/rf35h-i2c.c'"
+chk "timesyncd: nessun ordinamento"          "! grep -qE '^(After|Wants|Requires)=' '$P'/system.d/systemd-timesyncd.service.d/*.conf"
+
+# revisione del codice: difetti corretti, che non devono tornare
+chk "dac-volume status: controllo e registro distinti" "grep -q 'registro \$(( 255 - c ))' '$P/scripts/rf35h-dac-volume' && ! grep -q 'attuale (registro): values' '$P/scripts/rf35h-dac-volume'"
+chk "rk915-load: fallimento non nascosto"     "grep -q 'modprobe rk915 fallito' '$P/scripts/rf35h-rk915-load' && ! grep -q 'modprobe rk915 2>/dev/null || exit 0' '$P/scripts/rf35h-rk915-load'"
+chk "rumble: durata limitata a 1-10000 ms"    "grep -q 'ms > 10000' '$P/sources/rf35h-rumble.c'"
+chk "ledd: fallimento inotify nel journal"    "grep -q 'inotify_init1 fallito' '$P/sources/rf35h-ledd.c'"
+chk "brightness: lettura arrotondata"         "grep -q 'CUR \* 100 + MAX / 2' '$P/scripts/rf35h-brightness' && grep -q 'MAX=255 ;; esac' '$P/scripts/rf35h-brightness'"
+chk "zram: percentuale validata (1-150)"      "grep -q 'PCT fuori da 1-150' '$P/scripts/rf35h-zram' && grep -q 'SIZE_PCT%\"%\"' '$P/scripts/rf35h-zram'"
+chk "menu: descrizione LED 'charging' completa" "grep -q 'verde fisso a carica completa' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch' && grep -q 'solid green when full' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
+chk "check-menu-labels definisce HAVE_LAKKA"     "grep -q 'flags.append(\"-DHAVE_LAKKA=1\")' '${O}/tools/check-menu-labels.py'"
+chk "led raw: validazione stretta"            "grep -q '(0-255 o 0x00-0xFF)' '$P/scripts/rf35h-led' && ! grep -q '0x\[0-9a-fA-F\]\*|\[0-9\]\*) ;;' '$P/scripts/rf35h-led'"
+
+# sicurezza: punto d'accesso e toggle dei servizi
+chk "AP: nessuna password pubblica di default" "grep -q 'gen_pass()' '$P/scripts/rf35h-ap' && ! grep 'printf' '$P/scripts/rf35h-ap' | grep -q 'PASSWORD=RetroArch'"
+chk "AP: converte la password pubblica"       "grep -q \"grep -qx 'PASSWORD=RetroArch'\" '$P/scripts/rf35h-ap'"
+chk "AP: il menu mostra le credenziali"       "grep -q 'rf35h-ap prepare' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch' && grep -q 'password: %s' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
+chk "toggle servizi: non svuota la config"    "grep -q 'if (!filestream_exists(path))' '${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch'"
+
+# Kernel 7.2.7, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
+LPK="${W}/packages/linux/package.mk"; RKP="${W}/projects/Rockchip/devices/RK3326/patches/linux"; DEF="${W}/packages/linux/patches/default"
+chk "kernel 7.2.7 con il suo SHA256"           "grep -q 'PKG_VERSION=\"7.2.7\"' '$LPK' && grep -q '4ac34c47db2540ffb2713943f8d891ff1702e0ba6934525a493b7d1cad43145a' '$LPK'"
+chk "pila snella: 6 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 6 ]"
+chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
+chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
+chk "z-001 e 0002-input-polldev fuori"         "[ ! -e '$RKP/z-001-st7703-xifan-xf35h-panel.patch' ] && [ ! -e '$RKP/0002-add-input-polldev.patch' ]"
+chk "r-024 portata (dw_mmc senza slot)"        "grep -q 'host->mmc->caps2 & MMC_CAP2_WIFI_RK912' '$RKP/r-024-mainline-linux-hacks-for-rk915.patch'"
+chk "z-002 portata (devm_drm_panel_alloc)"     "grep -q 'devm_drm_panel_alloc' '$RKP/z-002-panel-generic-dsi.patch' && ! grep -q '^+.*drm_panel_init(&ctx' '$RKP/z-002-panel-generic-dsi.patch'"
+chk "rk915: strncpy sostituita (7.2)"          "grep -q 'strscpy_pad(priv->name, RPU_DRIVER_NAME, 12)' '${W}/projects/Rockchip/devices/RK3326/packages/rk915/patches/0003-rk915-linux-7.2-strncpy.patch'"
+chk "joypad: of_gpio ricostruito (7.2)"        "grep -q 'gpio_device_find_by_fwnode' '${W}/projects/Rockchip/devices/RK3326/packages/rocknix-joypad/patches/0003-rocknix-joypad-linux-7.2-of-gpio.patch'"
+chk "perf senza strumenti dell'host (Rust)"   "[ \$(grep -c 'NO_RUST=1' '$LPK') -eq 2 ]"
+chk "perf senza strumenti dell'host (shellck)" "[ \$(grep -c 'NO_SHELLCHECK=1' '$LPK') -eq 2 ]"
+chk "hash dei pacchetti: nomi con spazi"       "grep 'xargs -d' '${W}/config/functions' | grep -q 'sha256sum'"
+chk "audiotest: giri letti con validazione"    "grep -q 'ignorato:' '$P/scripts/rf35h-audiotest' && grep -q '^set -f$' '$P/scripts/rf35h-audiotest'"
+chk "verify-kernel sceglie il kernel piu' alto" "grep -q \"sort -V | tail -1\" '${O}/verify-kernel.sh'"
+chk "joypad: niente flag legacy nella build"   "! grep -qE '^[^#]*-DROCKNIX_OF_GPIO_LEGACY_PRESENT' '${W}/projects/Rockchip/devices/RK3326/packages/rocknix-joypad/package.mk'"
+
+# L'orologio della console non e' affidabile: uno snapshot datato 29/9 era del 23.
+chk "crashlog: boot id e build in ogni file"         "grep -q 'random/boot_id' '$P/scripts/rf35h-crashlog' && grep -q 'BUILD_ID' '$P/scripts/rf35h-crashlog'"
+chk "crashlog: dichiara se l'orologio e' affidabile" "grep -q 'timesync/synchronized' '$P/scripts/rf35h-crashlog'"
+chk "RetroArch: niente core dump"                    "grep -qx 'LimitCORE=0' '$P/retroarch.service.d/rf35h-crashlog.conf'"
+# systemctl enable a ogni boot faceva ricaricare systemd: ~5 s di boot fermo.
+chk "rf35h-ntp: niente ricaricamento di systemd"    "grep -q -- '--no-reload enable' '$P/scripts/rf35h-ntp' && ! grep -qE '^[[:space:]]*systemctl (enable|disable) ' '$P/scripts/rf35h-ntp'"
+
+echo "== kernel"
+chk "GPU 600 MHz a 1,15 V"                   "grep -A2 opp-600000000 '$Z010' | grep -q 1150000"
+chk "GPU: un solo blocco OPP"                "[ \$(grep -c '&gpu_opp_table' '$Z010') = 1 ]"
+chk "DSI: celle dichiarate"                  "grep -q '#address-cells = <1>' '$Z010'"
+chk "z-010 crea tre file"                    "[ \$(grep -c '^+++ ' '$Z010') = 3 ]"
+# Il pannello a 58,5 Hz (primo modo di AURKNIX) rallentava del 2,5% tutto cio'
+# che va col vsync: predefinito il 60,000 Hz, un solo modo con default=1.
+chk "pannello: predefinito il 60,000 Hz"      "grep -q '^+.*\"M clock=31080 horizontal=640,150,60,150 vertical=480,20,6,12 default=1\",' '$Z010' && [ \$(grep -c '^+.*\"M .*default=1' '$Z010') = 1 ]"
+
+# Debug del kernel acceso in produzione: REGULATOR_DEBUG era l'ultimo dei 40
+# simboli che aggiungono -DDEBUG a una directory. E niente fotocamera nel DTS.
+chk "kconfig: REGULATOR_DEBUG spenta"                "grep -qx '# CONFIG_REGULATOR_DEBUG is not set' '$K'"
+chk "DTS: nessun nodo della fotocamera attivato"     "! grep -qE '^\+&(isp|csi_dphy) \{' '$Z010'"
+echo "== build script e opzionali"
+chk "--keep-going e --skip-core"             "grep -q -- '--keep-going)' '$O/build-lakka-rf35h.sh' && grep -q -- '--skip-core)' '$O/build-lakka-rf35h.sh'"
+chk "keep-going: log del thread"             "grep -q 'threads/logs' '$O/build-lakka-rf35h.sh'"
+chk "keep-going: niente ripetizioni a vuoto"  "grep -q 'gia.* escluso ma fallisce ancora' '$O/build-lakka-rf35h.sh'"
+chk "KMS resta opzionale"                    "[ -f '$O/optional/kms-no-compositor.patch' ] && ! grep -q kms-no-compositor '$O/apply.sh'"
+# Tre difetti visti alla prima build nel container: verify-kernel prendeva
+# build.*/install_pkg/linux-7.2.7 (20 falsi MANCA), la verifica dell'immagine
+# cercava lo script in ${RK}/tools (mai eseguita) e nel container mancava
+# unsquashfs; la firma dell'overlay cambiava fra host e container.
+chk "verify-kernel: sorgente solo da build/"  "grep -qF '/build.*/build/linux-7.' '$O/verify-kernel.sh'"
+chk "fine build: verify-image dall'overlay"   "grep -qF 'OVERLAY}/tools/verify-image.sh' '$O/build-lakka-rf35h.sh' && ! grep -qF 'RK}/tools/' '$O/build-lakka-rf35h.sh'"
+chk "container con unsquashfs"                "grep -qE '^ +default-jre-headless .*squashfs-tools' '$O/build-in-docker.sh'"
+chk "firma dell'overlay senza percorsi"       "grep -q 'overlay-sig2' '$O/build-lakka-rf35h.sh' && grep -qF 'cd \"\${OVERLAY}\" && find' '$O/build-lakka-rf35h.sh'"
+chk "--verify-only e --sh in ogni posizione"  "grep -q -- '--verify-only) VERIFY_ONLY=' '$O/build-lakka-rf35h.sh' && grep -q 'SHMODE=yes' '$O/build-in-docker.sh'"
+# con --workdir relativo il log finiva in ${WORKDIR}/${WORKDIR}/ dopo il cd
+chk "--workdir reso assoluto (log della build)" "grep -qF 'pwd)/\$(basename \"\${WORKDIR}\")' '$O/build-lakka-rf35h.sh'"
+
+echo "== documentazione allineata ai file"
+# Il riassunto in cima al README e' la prima cosa che si legge, ed e' stato
+# trovato fermo a numeri di giorni prima (7 patch kernel invece di 5, 18 di
+# integrazione invece di 27). Qui si confronta con i file veri.
+R="${O}/docs/diario.md"
+readme_n() { sed -n '/^## Cosa contiene/,/^## /p' "$R" | grep -oE "[0-9]+ $1" | head -1 | grep -oE '^[0-9]+'; }
+chk "README: patch kernel"      "[ \"\$(readme_n 'patch kernel')\" = \"\$(ls '$O/patches/linux' | wc -l)\" ]"
+chk "README: patch integrazione" "[ \"\$(readme_n \"patch all'albero\")\" = \"\$(ls '$O/integration' | wc -l)\" ]"
+chk "README: patch RetroArch"   "[ \"\$(readme_n 'patch a RetroArch')\" = \"\$(ls '$O/patches/retroarch' | wc -l)\" ]"
+chk "README: script rf35h-utils" "[ \"\$(readme_n 'script e')\" = \"\$(ls '$P/scripts' | wc -l)\" ]"
+
+echo
+if [ "$bad" -eq 0 ]; then
+	echo "tutte le $n verifiche passano"
+else
+	echo "$bad verifiche su $n FALLITE"; exit 1
+fi

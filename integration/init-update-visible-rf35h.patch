@@ -1,0 +1,43 @@
+Subject: init: durante un aggiornamento mostrare l avanzamento sullo schermo
+
+Su SD un aggiornamento muove oltre 1,7 GB fra estrazione del .tar, verifica
+md5 di KERNEL e SYSTEM e scrittura di entrambi, e dura minuti. Il cmdline di
+questa board elenca "console=tty0 console=ttyS1": con piu console= lo stdout
+dei processi segue l ULTIMA, quindi ogni messaggio esce dalla seriale e sullo
+schermo resta il solo logo - indistinguibile da un blocco.
+
+Quando un aggiornamento viene rilevato, e solo allora, lo stdout passa a
+/dev/tty0, dopo una riga di avviso sulla console originale. Il boot normale
+non e toccato: a quel punto la funzione e gia uscita con return 0.
+
+La prova di scrittura sta in una subshell perche un "exec >" fallito nella
+shell principale la farebbe uscire - init morto e kernel panic.
+
+---
+--- a/packages/sysutils/busybox/scripts/init
++++ b/packages/sysutils/busybox/scripts/init
+@@ -647,6 +647,24 @@
+     return 0
+   fi
+ 
++  # devaOS RF35H: da qui in poi c'e' un aggiornamento da applicare, e su SD dura
++  # minuti (estrazione del .tar, md5 di KERNEL e SYSTEM, scrittura di entrambi:
++  # oltre 1,7 GB di I/O). Il cmdline di questa board elenca
++  # "console=tty0 console=ttyS1", e con piu' console= lo stdout dei processi
++  # segue l'ULTIMA: l'avanzamento finisce tutto sulla seriale e sullo schermo
++  # resta il solo logo, indistinguibile da un blocco. Qui lo si sposta sullo
++  # schermo per la durata dell'aggiornamento.
++  #
++  # La prova di scrittura e' in una subshell di proposito: se /dev/tty0 non si
++  # apre, a morire e' la subshell e il boot prosegue. Un "exec >" fallito nella
++  # shell principale la farebbe uscire, cioe' init morto e kernel panic. Per lo
++  # stesso motivo niente fifo con tee in sottofondo: aprire una fifo in
++  # scrittura blocca finche' non c'e' un lettore, e se il tee non partisse
++  # l'init resterebbe appeso per sempre proprio durante un aggiornamento.
++  if [ -c /dev/tty0 ] && (exec >/dev/tty0) 2>/dev/null; then
++    echo "Update in progress - progress is shown on the device screen."
++    exec >/dev/tty0 2>&1
++  fi
+   if [ -d $UPDATE_DIR/.tmp ]; then
+     echo "Failed update detected - performing recovery."
+     echo ""

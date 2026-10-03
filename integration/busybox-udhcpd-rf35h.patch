@@ -1,0 +1,23 @@
+Subject: busybox: udhcpd, il server DHCP per il PC collegato via USB
+
+Quando l\x27RF35H espone la rete via gadget USB, il PC deve prendere un
+indirizzo da qualcuno. Niente udhcpd in Lakka; e\x27 un applet.
+
+---
+--- a/packages/sysutils/busybox/config/busybox-target.conf
++++ b/packages/sysutils/busybox/config/busybox-target.conf
+@@ -1005,11 +1005,11 @@
+ CONFIG_FEATURE_WGET_OPENSSL=y
+ CONFIG_WHOIS=y
+ # CONFIG_ZCIP is not set
+-# CONFIG_UDHCPD is not set
++CONFIG_UDHCPD=y
+ # CONFIG_FEATURE_UDHCPD_BOOTP is not set
+ # CONFIG_FEATURE_UDHCPD_BASE_IP_ON_MAC is not set
+-# CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY is not set
+-CONFIG_DHCPD_LEASES_FILE=""
++CONFIG_FEATURE_UDHCPD_WRITE_LEASES_EARLY=y
++CONFIG_DHCPD_LEASES_FILE="/run/udhcpd.leases"
+ # CONFIG_DUMPLEASES is not set
+ # CONFIG_DHCPRELAY is not set
+ # CONFIG_UDHCPC is not set

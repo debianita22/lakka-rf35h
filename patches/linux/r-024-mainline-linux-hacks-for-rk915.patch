@@ -1,0 +1,78 @@
+devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). dw_mmc 7.2 ha eliminato lo slot: &slot->flags -> &host->flags, slot->mmc -> host->mmc.
+
+--- a/drivers/mmc/core/host.c
++++ b/drivers/mmc/core/host.c
+@@ -397,6 +397,8 @@
+ 		host->caps2 |= MMC_CAP2_NO_SD;
+ 	if (device_property_read_bool(dev, "no-mmc"))
+ 		host->caps2 |= MMC_CAP2_NO_MMC;
++	if (device_property_read_bool(dev, "supports-rk912"))
++		host->caps2 |= MMC_CAP2_WIFI_RK912;
+ 	if (device_property_read_bool(dev, "no-mmc-hs400"))
+ 		host->caps2 &= ~(MMC_CAP2_HS400_1_8V | MMC_CAP2_HS400_1_2V |
+ 				 MMC_CAP2_HS400_ES);
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -1080,7 +1080,8 @@
+ 	 * removable card is checked from a detect work later on in the resume
+ 	 * process.
+ 	 */
+-	if (!mmc_card_keep_power(host)) {
++	if (!mmc_card_keep_power(host) &&
++	    !(host->caps2 & MMC_CAP2_WIFI_RK912)) {
+ 		mmc_power_up(host, host->card->ocr);
+ 		/*
+ 		 * Tell runtime PM core we just powered up the card,
+--- a/drivers/mmc/core/sdio_cis.c
++++ b/drivers/mmc/core/sdio_cis.c
+@@ -190,7 +190,7 @@
+ 		pr_warn("%s: card has broken SDIO 1.1 CIS, forcing SDIO 1.0\n",
+ 			mmc_hostname(card->host));
+ 		vsn = SDIO_SDIO_REV_1_00;
+-	} else if (size < min_size) {
++	} else if (size < min_size && !(card->host->caps2 & MMC_CAP2_WIFI_RK912)) {
+ 		return -EINVAL;
+ 	}
+ 
+@@ -198,7 +198,7 @@
+ 	func->max_blksize = buf[12] | (buf[13] << 8);
+ 
+ 	/* TPLFE_ENABLE_TIMEOUT_VAL, present in ver 1.1 and above */
+-	if (vsn > SDIO_SDIO_REV_1_00)
++	if (vsn > SDIO_SDIO_REV_1_00 && !(card->host->caps2 & MMC_CAP2_WIFI_RK912))
+ 		func->enable_timeout = (buf[28] | (buf[29] << 8)) * 10;
+ 	else
+ 		func->enable_timeout = jiffies_to_msecs(HZ);
+--- a/drivers/mmc/host/dw_mmc.c
++++ b/drivers/mmc/host/dw_mmc.c
+@@ -282,6 +282,10 @@
+ 			     SDMMC_CMD_PRV_DAT_WAIT, 0);
+ 	}
+ 
++	if ((mmc->caps2 & MMC_CAP2_WIFI_RK912) &&
++	    (cmd->opcode == SD_IO_RW_DIRECT))
++		cmdr |= SDMMC_CMD_PRV_DAT_WAIT;
++
+ 	if (cmd->flags & MMC_RSP_PRESENT) {
+ 		/* We expect a response, so set this bit */
+ 		cmdr |= SDMMC_CMD_RESP_EXP;
+@@ -1173,7 +1177,8 @@
+ 
+ 		/* enable clock; only low power if no SDIO */
+ 		clk_en_a = SDMMC_CLKEN_ENABLE;
+-		if (!test_bit(DW_MMC_CARD_NO_LOW_PWR, &host->flags))
++		if (!test_bit(DW_MMC_CARD_NO_LOW_PWR, &host->flags) &&
++		    !(host->mmc->caps2 & MMC_CAP2_WIFI_RK912))
+ 			clk_en_a |= SDMMC_CLKEN_LOW_PWR;
+ 		mci_writel(host, CLKENA, clk_en_a);
+ 
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -463,6 +463,7 @@
+ #define MMC_CAP2_CRYPTO		0
+ #endif
+ #define MMC_CAP2_ALT_GPT_TEGRA	(1 << 28)	/* Host with eMMC that has GPT entry at a non-standard location */
++#define MMC_CAP2_WIFI_RK912     (1 << 29)
+ 
+ 	bool			uhs2_sd_tran;	/* UHS-II flag for SD_TRAN state */
+ 	bool			uhs2_app_cmd;	/* UHS-II flag for APP command */

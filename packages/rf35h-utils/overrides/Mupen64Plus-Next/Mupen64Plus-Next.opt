@@ -1,0 +1,14 @@
+# devaOS RF35H - opzioni di default del core Mupen64Plus-Next (Nintendo 64).
+#
+# Risoluzione di rendering del renderer GLideN64, che e' quello predefinito e
+# l'unico compilato per RK3326 (ParaLLEl-RDP Lakka lo abilita solo su Generic,
+# anche con Vulkan). Il sorgente della versione
+# costruita da Lakka la fissa a 640x480; 320x240 e' la risoluzione nativa
+# della maggior parte dei giochi N64, diventa un upscale pulito 2x sul pannello
+# 640x480, e dimezza i pixel da riempire su ciascun asse - un quarto del
+# lavoro per la GPU Mali-G31.
+#
+# Chiave e valore verificati sul sorgente del core (libretro_core_options.h):
+# il prefisso e' "mupen64plus-" e "320x240" e' fra i valori ammessi.
+# Copiato in /storage solo se non esiste: le tue modifiche restano tue.
+mupen64plus-43screensize = "320x240"

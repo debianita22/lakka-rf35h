@@ -1,0 +1,11 @@
+--- a/src/drivers/drivers.mk
++++ b/src/drivers/drivers.mk
+@@ -163,7 +163,7 @@
+ ifdef CONFIG_LIBNL32
+   DRV_LIBS += -lnl-3
+   DRV_LIBS += -lnl-genl-3
+-  DRV_CFLAGS += -I/usr/include/libnl3
++  DRV_CFLAGS += `pkg-config --cflags libnl-3.0`
+ ifdef CONFIG_LIBNL3_ROUTE
+   DRV_LIBS += -lnl-route-3
+   DRV_CFLAGS += -DCONFIG_LIBNL3_ROUTE

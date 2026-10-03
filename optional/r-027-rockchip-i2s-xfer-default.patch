@@ -1,0 +1,30 @@
+Subject: ASoC: rockchip-i2s: give I2S_XFER a register default
+
+It was the only readable, non-volatile register missing from reg_defaults, so
+the first read hit an invalid flat-cache entry and the kernel logged "using
+zero-initialized flat cache, this may cause unexpected behavior" on every
+boot. XFER starts and stops the transfer and is only touched through
+regmap_update_bits(), a read-modify-write against that cache. Its reset value
+is 0.
+
+---
+--- a/sound/soc/rockchip/rockchip_i2s.c
++++ b/sound/soc/rockchip/rockchip_i2s.c
+@@ -623,6 +623,17 @@
+ 	{0x08, 0x00071f1f},
+ 	{0x10, 0x001f0000},
+ 	{0x14, 0x01f00000},
++	/*
++	 * I2S_XFER was the one readable, non-volatile register without a
++	 * default, so the first read of it hit an invalid flat-cache entry:
++	 * regcache_flat_read() then returns zero and logs "using
++	 * zero-initialized flat cache, this may cause unexpected behavior".
++	 * XFER is the register that starts and stops the transfer, and it is
++	 * only ever touched with regmap_update_bits(), i.e. read-modify-write
++	 * against that cache. Its reset value is 0, so spell it out and let
++	 * the cache start valid instead of guessing.
++	 */
++	{0x1c, 0x00000000},
+ };
+ 
+ static const struct regmap_config rockchip_i2s_regmap_config = {

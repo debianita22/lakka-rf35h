@@ -1,0 +1,15 @@
+#!/bin/sh
+# rf35h-audio-wait - aspetta che la scheda audio esista (ExecStartPre di
+# rf35h-audio.service). Al massimo 20 s, poi si va avanti comunque.
+#
+# Era una riga di sh inline nella unit. Errore: systemd espande $var nelle
+# righe Exec* PRIMA di passarle a sh, anche fra apici (per un $ letterale serve
+# $$). Il mio $i diventava vuoto e il ciclo usciva subito: l'attesa era un
+# no-op silenzioso. Uno script non ha questo problema.
+set -u
+i=0
+while [ ! -e "${RF35H_CARD:-/proc/asound/card0}" ] && [ "$i" -lt 40 ]; do
+	sleep 0.5
+	i=$((i + 1))
+done
+exit 0

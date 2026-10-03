@@ -1,0 +1,40 @@
+Subject: linux: perf senza strumenti dell host rilevati automaticamente
+
+perf cerca sull host alcuni strumenti e, se li trova, li usa durante la build.
+Due lo fanno da soli (opt-out), e con entrambi l esito dipende da cosa c e sulla
+macchina di build, non dal sorgente:
+
+- rustc (feature-rust): compila il carico di test tests/workloads/code_with_type
+  per aarch64-unknown-linux-gnu. Il controllo compila per l host e riesce, la
+  compilazione per aarch64 no. rustc entra nel toolchain con i core libretro in
+  Rust (--all-cores): perf ricompilato dopo di loro fermava la build.
+- shellcheck >= 0.7.2: eseguito come regola di build sugli script di test e di
+  trace/beauty, ogni avviso ferma la build. Oggi il container non lo ha: difetto
+  latente, della stessa classe.
+
+NO_RUST=1 e NO_SHELLCHECK=1 accanto agli altri NO_*. mypy e pylint invece sono
+opt-in (MYPY=1, PYLINT=1) e restano spenti. Le librerie di destinazione (libelf,
+zlib, zstd...) si rilevano col cross-compilatore contro il sysroot: al piu
+cambiano le funzioni di perf, non fanno fallire la build.
+
+---
+--- a/packages/linux/package.mk
++++ b/packages/linux/package.mk
+@@ -463,6 +463,8 @@
+           NO_LIBPFM4=1 \
+           NO_LIBBABELTRACE=1 \
+           NO_CAPSTONE=1 \
++          NO_RUST=1 \
++          NO_SHELLCHECK=1 \
+           NO_LIBPFM4=1 \
+           CROSS_COMPILE="${TARGET_PREFIX}" \
+           JOBS="${CONCURRENCY_MAKE_LEVEL}" \
+@@ -484,6 +486,8 @@
+           NO_LIBPFM4=1 \
+           NO_LIBBABELTRACE=1 \
+           NO_CAPSTONE=1 \
++          NO_RUST=1 \
++          NO_SHELLCHECK=1 \
+           NO_LIBPFM4=1 \
+           BUILD_BPF_SKEL=0 \
+           CROSS_COMPILE="${TARGET_PREFIX}" \

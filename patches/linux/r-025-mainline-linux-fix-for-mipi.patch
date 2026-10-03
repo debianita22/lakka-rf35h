@@ -1,0 +1,14 @@
+devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0).
+
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c
+@@ -1019,8 +1019,7 @@
+ 
+ 	dw_mipi_dsi_wait_for_two_frames(adjusted_mode);
+ 
+-	/* Switch to cmd mode for panel-bridge pre_enable & panel prepare */
+-	dw_mipi_dsi_set_mode(dsi, 0);
++	dsi_write(dsi, DSI_PWR_UP, POWERUP);
+ 
+ 	if (phy_ops->power_on)
+ 		phy_ops->power_on(dsi->plat_data->priv_data);

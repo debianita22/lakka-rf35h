@@ -1,0 +1,22 @@
+Subject: config/functions: hash dei pacchetti con nomi di file che contengono spazi
+
+calculate_stamp passa i nomi a "xargs sha256sum", che li divide sugli spazi:
+"TGB Dual/TGB Dual.cfg" diventa tre nomi inesistenti, sha256sum stampa errori
+e il contenuto di quei file resta FUORI dall hash del pacchetto - cambiarli non
+farebbe ricompilare nulla. xargs -d "\n" prende un nome per riga. Per i nomi
+senza spazi l output e identico (verificato su linux, retroarch, busybox:
+stessi hash), quindi nessuna ricompilazione di massa; nell albero gli unici
+file con spazi sono tre override di rf35h-utils.
+
+---
+--- a/config/functions
++++ b/config/functions
+@@ -1095,7 +1095,7 @@
+   [ -n "$DEVICE" ] && stamp+=" $PROJECT_DIR/$PROJECT/devices/$DEVICE/patches/$PKG_NAME"
+   [ -n "$PKG_NEED_UNPACK" ] && stamp+=" $PKG_NEED_UNPACK"
+ 
+-  data="$(find -L ${stamp} -type f -not -name '.*' 2>/dev/null | sed "s|^${ROOT}/||" | LC_ALL=C sort -u | xargs sha256sum)"
++  data="$(find -L ${stamp} -type f -not -name '.*' 2>/dev/null | sed "s|^${ROOT}/||" | LC_ALL=C sort -u | xargs -d '\n' sha256sum)"
+   [ -n "${PKG_STAMP}" ] && data+=$'\n'"$(echo "${PKG_STAMP}" | sha256sum)"
+ 
+   echo "${data}" | sha256sum | cut -d" " -f1

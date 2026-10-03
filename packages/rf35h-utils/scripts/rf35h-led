@@ -1,0 +1,223 @@
+#!/bin/sh
+# rd FILE [DEFAULT]: prima riga del file senza spawn di cat (read e' builtin);
+# stampa DEFAULT se il file manca o e' vuoto.
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+# rf35h-led - LED degli stick dell'XiFan RF35H.
+#
+# Sono pilotati da un microcontrollore su UART2 (/dev/ttyS2, 9600 8N1, un byte
+# per modo), non da GPIO: nel device tree uart2 ha un pin solo e dma-names =
+# "tx". Non e' una seriale di debug - mettere una console li' significa
+# scrivere il log del kernel dentro il controller dei LED.
+#
+# La tabella dei codici viene dal binario mcu_led del vendor, disassemblato e
+# verificato modo per modo su hardware (docs/VERIFICATION.md di devaOS).
+# I codici "breathing" documentati sono due: 0x13 e 0x18. Gli altri della
+# serie 0x11..0x18 esistono ma non sono stati verificati, quindi non hanno un
+# nome qui: si raggiungono con "raw".
+#
+# Sul device ci sono due tipi di LED diversi, e questo script li copre
+# entrambi perche' per chi lo usa sono "i LED":
+#   - stick: il microcontrollore qui sopra
+#   - pulsanti: due gpio-leds, /sys/class/leds/red e /blue
+#
+#   rf35h-led                mostra lo stato e i modi disponibili
+#   rf35h-led blue           imposta un modo degli stick
+#   rf35h-led raw 0x15       manda un byte qualsiasi al microcontrollore
+#   rf35h-led --restore      rimette l'ultimo modo salvato (default: blue)
+#                            e riattiva l'indicatore di carica sul LED rosso
+#   rf35h-led --sleep        spegne gli stick e toglie corrente all'MCU
+#                            (chiamato da rf35h-suspend.service prima dello sleep)
+#   rf35h-led --wake         ridà corrente e rimette il modo salvato
+#
+# Il modo scelto viene salvato e rimesso al boot da rf35h-state.service.
+
+set -u
+
+TTY="${RF35H_LED_TTY:-/dev/ttyS2}"
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/led"
+DEFAULT="blue"
+
+# Restituisce il codice in esadecimale: e' rf35h-tty a trasformarlo in byte.
+#
+# Tabella decodificata dal binario bin/mcu_led di ArkOS4Clone (lcdyk0517),
+# che su questo hardware funziona. I colori fissi coincidevano con quelli di
+# devaOS; due erano sbagliati: "off" mandava 0x08, che e' FLOW (onda di
+# colori), e lo spegnimento vero e' 0x00. 0x18 e' il respiro multicolore,
+# non il blu.
+code_for() {
+	case "$1" in
+		off)    echo 0x00 ;;
+		green)  echo 0x01 ;;
+		blue)   echo 0x02 ;;
+		red)    echo 0x03 ;;
+		cyan)   echo 0x04 ;;
+		orange) echo 0x05 ;;
+		purple) echo 0x06 ;;
+		white)  echo 0x07 ;;
+		flow)   echo 0x08 ;;
+		breathing-green)  echo 0x11 ;;
+		breathing-blue)   echo 0x12 ;;
+		breathing-red)    echo 0x13 ;;
+		breathing-cyan)   echo 0x14 ;;
+		breathing-orange) echo 0x15 ;;
+		breathing-purple) echo 0x16 ;;
+		breathing-white)  echo 0x17 ;;
+		breathing)        echo 0x18 ;;
+		*) return 1 ;;
+	esac
+}
+
+MODES="off green blue red cyan orange purple white flow breathing breathing-red breathing-green breathing-blue breathing-cyan breathing-orange breathing-purple breathing-white battery charging alert rainbow strobe"
+# Modi dinamici: li anima rf35h-ledd (inotify sul file di stato); qui si
+# salva soltanto. battery: colore dalla carica, respiro in carica, bianco a
+# carica completa. charging: spenti, respiro verde in carica. alert: spenti,
+# lampeggio rosso sotto il 15%. rainbow: ciclo di colori. strobe: rosso/blu.
+DYNAMIC="battery charging alert rainbow strobe"
+SPEED="${STATE}/ledspeed"
+is_dynamic() { for d in ${DYNAMIC}; do [ "$1" = "${d}" ] && return 0; done; return 1; }
+# rf35h-ledd sta girando? Se si', e' LUI l'unico che deve scrivere sull'MCU.
+# Altrimenti script e demone si sovrappongono: il demone ha un frame gia'
+# calcolato e lo manda dopo il nostro byte, e l'effetto scelto non si vede o
+# "off" non spegne. Il link invocation: esiste solo mentre la unit e' attiva.
+ledd_running() { [ -e "${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}" ]; }
+
+# Il busybox di Lakka non ha stty ne' microcom, e senza termios in raw mode il
+# tty si mangia 0x11/0x13 (XON/XOFF) e traduce 0x0d. rf35h-tty e' un helper
+# C di quaranta righe che apre la porta a 9600 8N1 raw e scrive i byte cosi'
+# come sono. Per i test fuori dal device si puo' puntare RF35H_TTY_HELPER a
+# un altro binario.
+HELPER="${RF35H_TTY_HELPER:-/usr/bin/rf35h-tty}"
+
+# L'alimentazione dell'MCU degli stick e' GPIO2_A1, esposto dal device tree
+# come LED class "joyled-power" (z-014). Acceso al boot dal kernel. In
+# sospensione lo si spegne: gli stick sono l'unica cosa che altrimenti
+# resterebbe illuminata a device "spento".
+POWER="${RF35H_JOYLED_POWER:-/sys/class/leds/joyled-power/brightness}"
+
+power() {   # on|off
+	[ -w "${POWER}" ] || return 0        # DTB vecchio senza z-014: niente da fare
+	case "$1" in on) echo 1 > "${POWER}" ;; off) echo 0 > "${POWER}" ;; esac
+}
+power_on_and_wait() {
+	# Se era spento, l'MCU deve ripartire prima di ascoltare: l'arcobaleno di
+	# accensione dura circa un secondo.
+	if [ -r "${POWER}" ] && [ "$(rd "${POWER}" 0)" = "0" ]; then
+		power on; sleep 1.5
+	else
+		power on
+	fi
+}
+
+send() {   # $1 = codice in esadecimale, es. 0x13
+	[ -w "${TTY}" ] || { echo "rf35h-led: ${TTY} non scrivibile" >&2; return 1; }
+	[ -x "${HELPER}" ] || { echo "rf35h-led: manca ${HELPER}" >&2; return 1; }
+	"${HELPER}" "${TTY}" "$1"
+}
+
+save() { mkdir -p "${STATE}" 2>/dev/null && printf '%s\n' "$1" > "${SAVED}" 2>/dev/null || true; }
+
+# LED rosso dei pulsanti come indicatore di carica. Il trigger lo registra il
+# power supply core (drivers/power/supply/power_supply_leds.c, compilato con
+# CONFIG_LEDS_TRIGGERS=y che Lakka ha) come "<nome>-charging-or-full". Il nome
+# e' "battery" perche' la patch 0000 di Lakka rinomina cosi' il power supply
+# del rk817 - senza quella sarebbe "rk817-battery" e il trigger avrebbe un
+# altro nome. Se manca, non si fa niente: non e' un errore.
+CHARGE_LED="${RF35H_CHARGE_LED:-/sys/class/leds/red}"
+CHARGE_TRIG="${RF35H_CHARGE_TRIGGER:-battery-charging-or-full}"
+
+charge_indicator() {
+	# Solo se i LED di stato sono nel modo "charge" (o mai impostati): con
+	# battery/red/off/heartbeat il rosso e' di rf35h-statusled o di rf35h-ledd,
+	# e rimettergli il trigger di carica qui glielo toglierebbe da sotto.
+	case "$(rd "${STATE}/statusled" charge)" in charge) ;; *) return 0 ;; esac
+	# Il trigger lo registra rk817_charger quando fa probe: al boot puo' non
+	# esserci ancora. Si aspetta un po', poi si lascia perdere.
+	i=0
+	while [ ! -e "${CHARGE_LED}/trigger" ] && [ "${i}" -lt "${RF35H_WAIT:-30}" ]; do
+		sleep 0.5
+		i=$((i + 1))
+	done
+	[ -w "${CHARGE_LED}/trigger" ] || return 0
+	grep -q "${CHARGE_TRIG}" "${CHARGE_LED}/trigger" 2>/dev/null || return 0
+	printf '%s' "${CHARGE_TRIG}" > "${CHARGE_LED}/trigger" 2>/dev/null || true
+}
+
+case "${1:-}" in
+	"")
+		echo "stick, alimentazione: $([ -r "${POWER}" ] && { [ "$(rd "${POWER}" 0)" != 0 ] && echo on || echo off; } || echo "(DTB senza joyled-power)")"
+		echo "stick, modo salvato: $(cat "${SAVED}" 2>/dev/null || echo "(nessuno, default ${DEFAULT})")"
+		echo "stick, modi:         ${MODES}"
+		echo "stick, altro:        rf35h-led raw 0x11..0x18"
+		if [ -r "${CHARGE_LED}/trigger" ]; then
+			echo "LED rosso, trigger:  $(sed -n 's/.*\[\(.*\)\].*/\1/p' "${CHARGE_LED}/trigger")"
+		else
+			echo "LED rosso:           (assente)"
+		fi
+		;;
+	--restore)
+		power_on_and_wait
+		m="$(rd "${SAVED}" "${DEFAULT}")"
+		if is_dynamic "${m}"; then
+			touch "${SAVED}" 2>/dev/null || true   # rf35h-ledd riparte subito
+		else
+			b="$(code_for "${m}")" || b="$(code_for "${DEFAULT}")"
+			send "${b}"
+		fi
+		charge_indicator
+		;;
+	--sleep)
+		# Prima il comando OFF (cosi' se il DTB non ha ancora joyled-power gli
+		# stick si spengono lo stesso), poi via la corrente.
+		send "$(code_for off)" 2>/dev/null
+		power off
+		;;
+	--wake)
+		power_on_and_wait
+		m="$(rd "${SAVED}" "${DEFAULT}")"
+		if is_dynamic "${m}"; then
+			touch "${SAVED}" 2>/dev/null || true
+		else
+			b="$(code_for "${m}")" || b="$(code_for "${DEFAULT}")"
+			send "${b}"
+		fi
+		;;
+	--speed)
+		case "${2:-}" in
+			slow|normal|fast) mkdir -p "${STATE}" 2>/dev/null; printf '%s\n' "$2" > "${SPEED}" ;;
+			*) echo "rf35h-led: uso: rf35h-led --speed slow|normal|fast" >&2; exit 1 ;;
+		esac
+		;;
+	raw)
+		v="${2:-}"
+		# Pattern stretti: prima "[0-9]*" accettava una cifra seguita da
+		# qualunque cosa ("5abc", "1+1"), che passava la validazione e poi
+		# faceva fallire $(( v )) con un errore grezzo della shell invece di
+		# questo messaggio. Ora solo 1-3 cifre decimali o 0x + 1-2 esadecimali:
+		# $(( v )) riceve sempre un numero, e il range sotto copre 256-999.
+		case "${v}" in
+			0x[0-9a-fA-F]|0x[0-9a-fA-F][0-9a-fA-F]) ;;
+			[0-9]|[0-9][0-9]|[0-9][0-9][0-9]) ;;
+			*) echo "rf35h-led: uso: rf35h-led raw 0x15 (0-255 o 0x00-0xFF)" >&2; exit 1 ;;
+		esac
+		n=$(( v ))
+		[ "${n}" -ge 0 ] && [ "${n}" -le 255 ] \
+			|| { echo "rf35h-led: byte fuori range: ${v}" >&2; exit 1; }
+		send "${n}"
+		;;
+	*)
+		if is_dynamic "$1"; then
+			save "$1"      # da qui in poi anima rf35h-ledd
+			exit 0
+		fi
+		code_for "$1" >/dev/null || {
+			echo "rf35h-led: modo sconosciuto: $1" >&2
+			echo "modi: ${MODES}" >&2
+			exit 1
+		}
+		save "$1"
+		# Con il demone attivo scrive solo lui: applica il modo statico appena
+		# legge il file. Senza demone tocca a noi.
+		ledd_running || send "$(code_for "$1")"
+		;;
+esac

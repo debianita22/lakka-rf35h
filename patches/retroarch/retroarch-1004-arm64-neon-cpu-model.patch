@@ -1,0 +1,201 @@
+--- a/libretro-common/audio/conversion/float_to_s16.c
++++ b/libretro-common/audio/conversion/float_to_s16.c
+@@ -31,7 +31,7 @@
+ #include <features/features_cpu.h>
+ #include <audio/conversion/float_to_s16.h>
+ 
+-#if (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+ static bool float_to_s16_neon_enabled = false;
+ #ifdef HAVE_ARM_NEON_ASM_OPTIMIZATIONS
+ void convert_float_s16_asm(int16_t *s, const float *in, size_t len);
+--- a/libretro-common/audio/conversion/s16_to_float.c
++++ b/libretro-common/audio/conversion/s16_to_float.c
+@@ -29,7 +29,7 @@
+ #include <features/features_cpu.h>
+ #include <audio/conversion/s16_to_float.h>
+ 
+-#if (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+ static bool s16_to_float_neon_enabled = false;
+ 
+ #ifdef HAVE_ARM_NEON_ASM_OPTIMIZATIONS
+--- a/libretro-common/audio/resampler/drivers/sinc_resampler.c
++++ b/libretro-common/audio/resampler/drivers/sinc_resampler.c
+@@ -90,7 +90,7 @@
+    float kaiser_beta;
+ } rarch_sinc_resampler_t;
+ 
+-#if (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+ 
+ #ifdef HAVE_ARM_NEON_ASM_OPTIMIZATIONS
+ void process_sinc_neon_asm(float *out, const float *left,
+@@ -928,7 +928,7 @@
+    else
+ #endif
+    {
+-#if (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+       re->taps = (re->taps + 7) & ~7;
+ #else
+       re->taps = (re->taps + 3) & ~3;
+@@ -986,7 +986,7 @@
+    }
+    else if (mask & RESAMPLER_SIMD_NEON)
+    {
+-#if (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+ #ifdef HAVE_ARM_NEON_ASM_OPTIMIZATIONS
+       if (window_type != SINC_WINDOW_KAISER)
+          sinc_resampler.process = resampler_sinc_process_neon;
+--- a/libretro-common/features/features_cpu.c
++++ b/libretro-common/features/features_cpu.c
+@@ -755,7 +755,7 @@
+    if (check_arm_cpu_feature("asimd"))
+    {
+       cpu |= RETRO_SIMD_ASIMD;
+-#ifdef __ARM_NEON__
++#if defined(__ARM_NEON__) || defined(__ARM_NEON)
+       cpu |= RETRO_SIMD_NEON;
+ #if defined(__arm__)
+       arm_enable_runfast_mode();
+@@ -780,6 +780,115 @@
+    return cpu;
+ }
+ 
++#if defined(__linux__) && (defined(__aarch64__) || defined(__arm__))
++#include <ctype.h>
++/* Su ARM64 mainline /proc/cpuinfo non ha "model name". Si ricostruisce un
++ * nome da "CPU implementer"/"CPU part" e dal SoC dichiarato nel device tree:
++ * "xifan,rf35h\0rockchip,rk3326" -> "Rockchip RK3326 (Cortex-A35)". */
++static const char *cpu_features_arm_part_name(unsigned implementer, unsigned part)
++{
++   if (implementer == 0x41) /* ARM Ltd. */
++   {
++      switch (part)
++      {
++         case 0xd03: return "Cortex-A53";
++         case 0xd04: return "Cortex-A35";
++         case 0xd05: return "Cortex-A55";
++         case 0xd07: return "Cortex-A57";
++         case 0xd08: return "Cortex-A72";
++         case 0xd09: return "Cortex-A73";
++         case 0xd0a: return "Cortex-A75";
++         case 0xd0b: return "Cortex-A76";
++         case 0xd0d: return "Cortex-A77";
++         case 0xd41: return "Cortex-A78";
++         case 0xd46: return "Cortex-A510";
++         case 0xd47: return "Cortex-A710";
++         case 0xd4d: return "Cortex-A715";
++         default:    break;
++      }
++   }
++   return NULL;
++}
++
++static void cpu_features_arm_model_name(char *s, int len)
++{
++   char line[128];
++   char soc[64]       = {0};
++   unsigned impl      = 0;
++   unsigned part      = 0;
++   const char *core   = NULL;
++   RFILE *fp;
++
++   fp = filestream_open("/proc/cpuinfo",
++         RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
++   if (fp)
++   {
++      while (filestream_gets(fp, line, sizeof(line)))
++      {
++         const char *v = strchr(line, ':');
++         if (!v)
++            continue;
++         if (!impl && !strncmp(line, "CPU implementer", 15))
++            impl = (unsigned)strtoul(v + 1, NULL, 0);
++         else if (!part && !strncmp(line, "CPU part", 8))
++            part = (unsigned)strtoul(v + 1, NULL, 0);
++         if (impl && part)
++            break;
++      }
++      filestream_close(fp);
++   }
++   core = cpu_features_arm_part_name(impl, part);
++
++   /* compatible e' una lista di stringhe separate da NUL: la prima e' la
++    * board, la seconda il SoC ("rockchip,rk3326") */
++   fp = filestream_open("/proc/device-tree/compatible",
++         RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
++   if (fp)
++   {
++      char buf[256];
++      int64_t n = filestream_read(fp, buf, sizeof(buf) - 1);
++      filestream_close(fp);
++      if (n > 0)
++      {
++         const char *p   = buf;
++         const char *end = buf + n;
++         int idx         = 0;
++         buf[n]          = '\0';
++         while (p < end && *p)
++         {
++            size_t l = strlen(p);
++            if (idx == 1)
++            {
++               const char *comma = strchr(p, ',');
++               if (comma && comma[1])
++               {
++                  size_t i;
++                  /* vendor con l'iniziale maiuscola, modello maiuscolo */
++                  snprintf(soc, sizeof(soc), "%.*s %s",
++                        (int)(comma - p), p, comma + 1);
++                  soc[0] = (char)toupper((unsigned char)soc[0]);
++                  for (i = (size_t)(comma - p) + 1; soc[i]; i++)
++                     soc[i] = (char)toupper((unsigned char)soc[i]);
++               }
++               break;
++            }
++            p += l + 1;
++            idx++;
++         }
++      }
++   }
++
++   if (soc[0] && core)
++      snprintf(s, len, "%s (%s)", soc, core);
++   else if (soc[0])
++      strlcpy(s, soc, len);
++   else if (core)
++      strlcpy(s, core, len);
++   else if (impl || part)
++      snprintf(s, len, "ARM 0x%02x part 0x%03x", impl, part);
++}
++#endif
++
+ void cpu_features_get_model_name(char *s, int len)
+ {
+ #if defined(CPU_X86) && !defined(__MACH__)
+@@ -862,6 +971,11 @@
+ 
+       filestream_close(fp);
+ 
++#if defined(__aarch64__) || defined(__arm__)
++      if (!s[0])
++         cpu_features_arm_model_name(s, len);
++#endif
++
+ #if defined(WEBOS)
+       struct stat st;
+       if (stat("/usr/bin/lscpu", &st) == 0)
+--- a/libretro-common/formats/jpeg/rjpeg.c
++++ b/libretro-common/formats/jpeg/rjpeg.c
+@@ -124,7 +124,7 @@
+ #endif
+ 
+ /* Auto-detect NEON support */
+-#if !defined(RJPEG_NO_SIMD) && !defined(RJPEG_NEON) && (defined(__ARM_NEON__) || defined(HAVE_NEON))
++#if !defined(RJPEG_NO_SIMD) && !defined(RJPEG_NEON) && (defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(HAVE_NEON))
+ #define RJPEG_NEON
+ #endif
+ 

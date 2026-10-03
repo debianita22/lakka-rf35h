@@ -1,0 +1,45 @@
+Subject: of_gpio_compat: non ridefinire l'API legacy quando il kernel ce l'ha
+
+Lakka reintroduce <linux/of_gpio.h> con l'API legacy completa - enum
+of_gpio_flags, of_get_named_gpio_flags(), of_get_gpio_flags() - dentro
+0002-add-input-polldev.patch. Il compat header di devaOS la reimplementa, e
+sullo stesso albero le due definizioni collidono:
+
+  of_gpio_compat.h:14:6: error: redeclaration of 'enum of_gpio_flags'
+
+La guardia che c'era non poteva funzionare: OF_GPIO_ACTIVE_LOW e' un
+enumeratore, non una macro, quindi "#ifndef OF_GPIO_ACTIVE_LOW" e' sempre vero.
+E il preprocessore non ha modo di sapere se un enumeratore esiste, quindi la
+scelta va fatta da chi costruisce: il package passa
+-DROCKNIX_OF_GPIO_LEGACY_PRESENT e di questo header resta solo l'include.
+
+Senza quella macro il comportamento e' identico a prima, quindi su un kernel
+mainline senza API legacy (devaOS su 6.15) non cambia niente.
+
+--- a/of_gpio_compat.h
++++ b/of_gpio_compat.h
+@@ -10,6 +10,17 @@
+ #include <linux/of.h>
+ #include <linux/of_gpio.h>
+ 
++/* devaOS/Lakka: su un kernel dove <linux/of_gpio.h> porta ancora l'API legacy
++ * qui non serve niente, e ridefinirla non compila. Lakka la reintroduce con
++ * 0002-add-input-polldev.patch - enum of_gpio_flags, of_get_named_gpio_flags()
++ * e of_get_gpio_flags() - quindi il suo package passa
++ * -DROCKNIX_OF_GPIO_LEGACY_PRESENT e di questo header resta solo l'include.
++ *
++ * La guardia non puo' essere automatica: OF_GPIO_ACTIVE_LOW e' un enumeratore,
++ * non una macro, quindi "#ifndef OF_GPIO_ACTIVE_LOW" e' sempre vero e l'enum
++ * veniva ridefinito comunque. Era questo il bug. */
++#ifndef ROCKNIX_OF_GPIO_LEGACY_PRESENT
++
+ #ifndef OF_GPIO_ACTIVE_LOW
+ enum of_gpio_flags { OF_GPIO_ACTIVE_LOW = 0x1 };
+ #endif
+@@ -44,4 +55,6 @@
+ 
+ #define of_get_named_gpio_flags rocknix_of_get_named_gpio_flags
+ #define of_get_gpio_flags       rocknix_of_get_gpio_flags
++
++#endif /* ROCKNIX_OF_GPIO_LEGACY_PRESENT */
+ #endif

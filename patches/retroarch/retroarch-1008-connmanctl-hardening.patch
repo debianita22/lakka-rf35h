@@ -1,0 +1,292 @@
+Subject: wifi: connmanctl, controllare ogni popen e ricostruire la lista senza svuotarla
+
+popen() puo' fallire (fork o pipe, per esempio sotto pressione di memoria) e
+connmanctl.c non lo controllava mai: pclose(NULL) e fgets(..., NULL) sono un
+SEGV. Ora tutti e 13 i popen sono controllati. refresh_services inoltre
+liberava la lista subito e la ricostruiva mentre leggeva l'output di
+connmanctl: ora la costruisce a parte e la scambia alla fine. Scarta le righe
+piu' corte dei 4 caratteri di stato e libera la string_list vuota.
+
+Corretti anche, lungo gli stessi percorsi: get_connected_servicename non
+liberava tmp se nessun servizio era attivo, e con ln vuoto strlen(ln) - 1
+andava in underflow scrivendo un byte prima dell'array; get_connected_ssid
+lasciava ssid non inizializzato se non c'era rete; tether_start_stop passava
+ap_name e pass_key non inizializzati a tether_toggle, e il controllo
+!ap_name || !pass_key era sempre falso.
+
+---
+--- a/network/drivers_wifi/connmanctl.c
++++ b/network/drivers_wifi/connmanctl.c
+@@ -68,13 +68,31 @@
+    (void)data;
+ }
+ 
++/* devaOS RF35H: popen() puo' fallire (fork o pipe, per esempio sotto
++ * pressione di memoria) e il codice originale non lo controllava mai:
++ * pclose(NULL) e fgets(..., NULL) sono un SEGV. */
++static void connmanctl_run(const char *cmd)
++{
++   FILE *f = popen(cmd, "r");
++   if (f)
++      pclose(f);
++}
++
+ static void connmanctl_refresh_services(connman_t *connman)
+ {
+    char line[512];
+-   FILE *serv_file = popen("connmanctl services", "r");
+-
+-   if (connman->scan.net_list)
+-      RBUF_FREE(connman->scan.net_list);
++   wifi_network_info_t *net_list = NULL;
++   wifi_network_info_t *old_list = NULL;
++   FILE *serv_file               = popen("connmanctl services", "r");
++
++   /* devaOS RF35H: la lista e' letta anche dal thread del menu. Prima veniva
++    * liberata subito e ricostruita mentre si leggeva l'output di connmanctl:
++    * centinaia di ms in cui il menu trovava NULL o una lista a meta'. Ora si
++    * costruisce a parte e si scambia alla fine, e la finestra scende a poche
++    * istruzioni (per azzerarla servirebbe un lock anche nel menu). Se popen
++    * fallisce si tiene la lista vecchia. */
++   if (!serv_file)
++      return;
+ 
+    while (fgets(line, 512, serv_file))
+    {
+@@ -86,6 +104,11 @@
+       if (_len > 0 && line[_len-1] == '\n')
+                       line[--_len] = '\0';
+ 
++      /* devaOS RF35H: 4 caratteri di stato piu' almeno uno: con le righe piu'
++       * corte line[2] e &line[4] leggevano oltre la fine della stringa */
++      if (_len < 5)
++         continue;
++
+       /* Parse lines directly and store net info directly */
+       memset(&entry, 0, sizeof(entry));
+       entry.connected      = (line[2] == 'R' || line[2] == 'O');
+@@ -101,7 +124,10 @@
+          break;
+ 
+       if (list->size == 0)
++      {
++         string_list_free(list);
+          continue;
++      }
+ 
+       for (i = 0; i < list->size-1; i++)
+       {
+@@ -117,19 +143,23 @@
+ 
+       /* Filter only wifi nets */
+       if (!strncmp(entry.netid, "wifi_", 5))
+-         RBUF_PUSH(connman->scan.net_list, entry);
++         RBUF_PUSH(net_list, entry);
+    }
+ 
+    pclose(serv_file);
++
++   old_list               = connman->scan.net_list;
++   connman->scan.net_list = net_list;
++   RBUF_FREE(old_list);
+ }
+ 
+ static bool connmanctl_enable(void *data, bool enabled)
+ {
+    connman_t *connman = (connman_t*)data;
+    if (enabled)
+-      pclose(popen("connmanctl enable wifi", "r"));
++      connmanctl_run("connmanctl enable wifi");
+    else
+-      pclose(popen("connmanctl disable wifi", "r"));
++      connmanctl_run("connmanctl disable wifi");
+ 
+    /* Update the services, to ensure we properly show connection status */
+    connmanctl_refresh_services(connman);
+@@ -160,6 +190,8 @@
+          wc -l");
+ 
+    command_file = popen(connman->command, "r");
++   if (!command_file)
++      return false;
+ 
+    fgets(ln, sizeof(ln), command_file);
+ 
+@@ -199,7 +231,7 @@
+    RARCH_LOG("[CONNMANCTL] Tether toggle: command: \"%s\"\n",
+          connman->command);
+ 
+-   while (fgets(output, sizeof(output), command_file))
++   while (command_file && fgets(output, sizeof(output), command_file))
+    {
+       size_t output_len = strlen(output) - 1;
+       if (output[output_len] == '\n')
+@@ -216,7 +248,8 @@
+                MESSAGE_QUEUE_CATEGORY_INFO);
+    }
+ 
+-   pclose(command_file);
++   if (command_file)
++      pclose(command_file);
+ 
+    RARCH_LOG("[CONNMANCTL] Tether toggle: command finished\n");
+ 
+@@ -249,7 +282,7 @@
+       connmanctl_tether_toggle(connman, false, "", "");
+    }
+ 
+-   pclose(popen("connmanctl scan wifi", "r"));
++   connmanctl_run("connmanctl scan wifi");
+ 
+    {
+       const char *_msg = msg_hash_to_str(MSG_WIFI_SCAN_COMPLETE);
+@@ -310,7 +343,7 @@
+          "connmanctl disconnect %s 2>&1",
+          netinfo->netid);
+ 
+-   pclose(popen(connman->command, "r"));
++   connmanctl_run(connman->command);
+ 
+    /* Refresh the state since it has definitely changed */
+    connmanctl_refresh_services(connman);
+@@ -474,7 +507,7 @@
+    strlcpy(connman->command, "connmanctl connect ", sizeof(connman->command));
+    strlcat(connman->command, netinfo->netid,        sizeof(connman->command));
+ 
+-   pclose(popen(connman->command, "r"));
++   connmanctl_run(connman->command);
+ 
+    /* connmanctl connect torna appena la richiesta e' partita: associazione,
+     * handshake e DHCP vengono dopo. Prima si guardava lo stato subito, e una
+@@ -550,11 +583,14 @@
+          "grep \"^..\\(R\\|O\\)\" | "
+          "cut -d' ' -f 2");
+ 
++   ssid[0]      = '\0';
+    command_file = popen(connman->command, "r");
+-
+-   fgets(ssid, buffersize, command_file);
+-
+-   pclose(command_file);
++   if (command_file)
++   {
++      if (!fgets(ssid, buffersize, command_file))
++         ssid[0] = '\0';
++      pclose(command_file);
++   }
+ 
+    ssid_size = strlen(ssid) - 1;
+ 
+@@ -581,6 +617,8 @@
+       return 0;
+ 
+    tmp = (char*)malloc(sizeof(char) * len);
++   if (!tmp)
++      return 0;
+ 
+    /* Following command lists all stored services in
+     * connman settings folder, which are then used in
+@@ -600,7 +638,7 @@
+    RARCH_LOG("[CONNMANCTL] Testing configured services for activity: command: \"%s\"\n",
+          connman->command);
+ 
+-   while (fgets(tmp, len, command_file))
++   while (command_file && fgets(tmp, len, command_file))
+    {
+       size_t ln_len;
+       size_t tmp_len = strlen(tmp) - 1;
+@@ -626,14 +664,18 @@
+             tmp);
+ 
+       service_file = popen(connman->command, "r");
+-
+-      fgets(ln, sizeof(ln), service_file);
+-      ln_len = strlen(ln) - 1;
+-
+-      if (ln[ln_len] == '\n')
+-          ln[ln_len] = '\0';
+-
+-      pclose(service_file);
++      ln[0]        = '\0';
++      if (service_file)
++      {
++         if (!fgets(ln, sizeof(ln), service_file))
++            ln[0] = '\0';
++         pclose(service_file);
++      }
++      /* devaOS RF35H: con ln vuoto, strlen(ln) - 1 andava in underflow e
++       * ln[ln_len] scriveva un byte prima dell'array, sullo stack */
++      ln_len = strlen(ln);
++      if (ln_len > 0 && ln[ln_len - 1] == '\n')
++         ln[ln_len - 1] = '\0';
+ 
+       RARCH_LOG("[CONNMANCTL] Service: \"%s\", status: \"%s\"\n",
+             tmp, ln);
+@@ -654,7 +696,10 @@
+       }
+    }
+ 
+-   pclose(command_file);
++   if (command_file)
++      pclose(command_file);
++   /* devaOS RF35H: prima tmp non veniva liberato se nessun servizio era attivo */
++   free(tmp);
+    return 0;
+ }
+ 
+@@ -667,8 +712,10 @@
+     * tethering service is already running / not running
+     * before performing the desired action
+     */
+-   char ap_name[64];
+-   char pass_key[256];
++   /* devaOS RF35H: inizializzati. Nel ramo di spegnimento arrivavano non
++    * inizializzati a tether_toggle, che li stampa con %s */
++   char ap_name[64]    = {0};
++   char pass_key[256]  = {0};
+    FILE *command_file  = NULL;
+    char ln[512]        = {0};
+    char ssid[64]       = {0};
+@@ -744,7 +791,7 @@
+          RARCH_LOG("[CONNMANCTL] Tether start stop: parsing command: \"%s\"\n",
+                connman->command);
+ 
+-         while (fgets(ln, sizeof(ln), command_file))
++         while (command_file && fgets(ln, sizeof(ln), command_file))
+          {
+             size_t ln_len = strlen(ln) - 1;
+ 
+@@ -780,10 +827,12 @@
+             }
+          }
+ 
+-         pclose(command_file);
++         if (command_file)
++            pclose(command_file);
+       }
+ 
+-      if (!ap_name || !pass_key)
++      /* devaOS RF35H: un array non e' mai NULL, il controllo era sempre falso */
++      if (!*ap_name || !*pass_key)
+       {
+          size_t _len;
+          RARCH_ERR("[CONNMANCTL] Tether start stop: APNAME or PASSWORD missing\n");
+@@ -829,7 +878,7 @@
+             RARCH_LOG("[CONNMANCTL] Tether start stop: disconnecting from service \"%s\", command: \"%s\"\n",
+                   service, connman->command);
+ 
+-            while (fgets(ln, sizeof(ln), command_file))
++            while (command_file && fgets(ln, sizeof(ln), command_file))
+             {
+                size_t ln_len = strlen(ln) - 1;
+                if (ln[ln_len] == '\n')
+@@ -845,7 +894,8 @@
+                         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+             }
+ 
+-            pclose(command_file);
++            if (command_file)
++               pclose(command_file);
+ 
+             RARCH_LOG("[CONNMANCTL] Tether start stop: disconnect end\n");
+          }

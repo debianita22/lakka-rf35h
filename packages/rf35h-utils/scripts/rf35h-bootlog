@@ -1,0 +1,57 @@
+#!/bin/sh
+# rf35h-bootlog - scrive la diagnostica completa dove si legge anche a device
+# morto: la partizione /storage, che e' ext4 e si monta su qualunque PC Linux
+# togliendo la SD.
+#
+#   rf35h-bootlog boot        chiamato da rf35h-bootlog.service all'avvio
+#   rf35h-bootlog shutdown    chiamato allo spegnimento
+#   rf35h-bootlog             come "boot", per lanciarlo a mano
+#
+# Perche' non basta rf35h-diag: quello serve se hai gia' una shell. Se lo
+# schermo resta nero o il boot si ferma, l'unica cosa che ti resta e' la SD.
+# createlog-lakka, che Lakka ha gia', scrive in /tmp e al riavvio sparisce.
+#
+# Il log allo spegnimento e' l'altra meta': contiene time_in_state e i picchi
+# termici di tutta la sessione, cioe' i dati che dicono se la scala OPP piena
+# regge davvero sotto carico.
+#
+# Rotazione numerata e non per data: questi handheld non hanno una batteria
+# per l'orologio, quindi al boot la data puo' essere l'epoca zero e i nomi coi
+# timestamp risulterebbero tutti uguali e ordinati a caso.
+
+set -u
+
+DIR="${RF35H_LOGDIR:-/storage/rf35h-logs}"
+KEEP="${RF35H_LOGKEEP:-5}"
+WHAT="${1:-boot}"
+DIAG="${RF35H_DIAG:-/usr/bin/rf35h-diag}"
+
+mkdir -p "${DIR}" 2>/dev/null || {
+	echo "rf35h-bootlog: non posso scrivere in ${DIR}" >&2
+	exit 0        # meglio saltare che bloccare il boot
+}
+
+BASE="${DIR}/${WHAT}"
+
+# rotazione: base.4 -> base.5, ... base -> base.1
+i="${KEEP}"
+while [ "${i}" -gt 1 ]; do
+	prev=$((i - 1))
+	[ -f "${BASE}.${prev}.log" ] && mv -f "${BASE}.${prev}.log" "${BASE}.${i}.log"
+	i="${prev}"
+done
+[ -f "${BASE}.log" ] && mv -f "${BASE}.log" "${BASE}.1.log"
+
+{
+	echo "# rf35h-bootlog ${WHAT}"
+	echo "# uptime: $(cut -d' ' -f1 /proc/uptime 2>/dev/null)s"
+	echo "# data di sistema: $(date 2>/dev/null)  (senza RTC puo' essere sbagliata)"
+	echo
+	"${DIAG}" --full 2>&1
+} > "${BASE}.log" 2>/dev/null
+
+# Una copia del log del kernel a parte: e' la prima cosa che si guarda e
+# averla senza dover scorrere il resto fa risparmiare tempo.
+dmesg > "${DIR}/dmesg-${WHAT}.log" 2>/dev/null || true
+
+exit 0

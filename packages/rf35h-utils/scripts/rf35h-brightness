@@ -1,0 +1,112 @@
+#!/bin/sh
+# rd FILE [DEFAULT]: prima riga del file senza spawn di cat (read e' builtin);
+# stampa DEFAULT se il file manca o e' vuoto.
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+# rf35h-brightness - retroilluminazione dell'XiFan RF35H.
+#
+# Lakka su RK3326 non ha nessun controllo di luminosita' (odroidgoa-volkeys fa
+# solo il volume) e questo device non ha tasti dedicati: i soli adc-keys sono
+# vol+ e vol-. Il pannello parte a 128/255 per via di
+# default-brightness-level nel device tree e li' resterebbe.
+#
+#   rf35h-brightness          mostra il valore corrente
+#   rf35h-brightness 60       imposta al 60%
+#   rf35h-brightness +10      alza di 10 punti percentuali
+#   rf35h-brightness -10      abbassa
+#   rf35h-brightness --restore  rimette l'ultimo valore salvato
+#
+# Il valore viene salvato e rimesso al boot da rf35h-state.service.
+# Il minimo e' 5%: a zero lo schermo e' spento e sembra un device morto.
+
+set -u
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/brightness"
+MIN_PCT=5
+
+find_backlight() {
+	BL="${RF35H_BACKLIGHT:-}"
+	[ -n "${BL}" ] && return 0
+	for d in /sys/class/backlight/*; do
+		[ -e "${d}/brightness" ] && { BL="${d}"; return 0; }
+	done
+	BL=""
+	return 1
+}
+
+find_backlight || true
+
+# Al boot il backlight puo' non esserci ancora: rf35h-state.service parte con
+# multi-user.target, ma il probe dei device e' asincrono. Uscire subito
+# significherebbe non rimettere la luminosita' e - con Type=oneshot - impedire
+# anche agli ExecStart successivi di partire. Quindi in --restore si aspetta,
+# come gia' fanno headphone-sense e spkeys-service coi loro device.
+if [ "${1:-}" = "--restore" ]; then
+	i=0
+	# La condizione e' "non ancora utilizzabile", non "non ancora trovato":
+	# con RF35H_BACKLIGHT impostato a mano il percorso c'e' gia' ma il file
+	# puo' non esserci, e la prima versione di questo controllo non aspettava.
+	while [ ! -e "${BL:-/nonexistent}/brightness" ] && [ "${i}" -lt "${RF35H_WAIT:-30}" ]; do
+		sleep 0.5
+		find_backlight || true
+		i=$((i + 1))
+	done
+fi
+
+if [ -z "${BL}" ] || [ ! -e "${BL}/brightness" ]; then
+	echo "rf35h-brightness: nessun backlight sotto /sys/class/backlight" >&2
+	# In --restore non e' un errore da propagare: e' un ripristino best effort.
+	[ "${1:-}" = "--restore" ] && exit 0
+	exit 1
+fi
+
+MAX="$(rd "${BL}/max_brightness" 255)"
+CUR="$(rd "${BL}/brightness" 0)"
+# max_brightness a 0 (o illeggibile e non numerico) farebbe dividere per zero
+# qui sotto e abortire lo script: si ripiega sul valore tipico.
+case "${MAX}" in ''|*[!0-9]*|0) MAX=255 ;; esac
+case "${CUR}" in ''|*[!0-9]*) CUR=0 ;; esac
+# ARROTONDATA, come in apply(): prima era troncata (CUR * 100 / MAX) mentre
+# apply() arrotonda, e ogni pressione rileggeva il valore dall'hardware e lo
+# troncava. I passi derivavano: +5 diventava +4 o +5, -5 diventava -5 o -6, e
+# +5 seguito da -5 partendo da 50 riportava a 49. Con MAX 255 ogni percentuale
+# ha un valore distinto e il giro percentuale -> valore -> percentuale e'
+# esatto.
+cur_pct=$(( (CUR * 100 + MAX / 2) / MAX ))
+
+apply() {   # $1 = percentuale
+	p="$1"
+	[ "${p}" -lt "${MIN_PCT}" ] && p="${MIN_PCT}"
+	[ "${p}" -gt 100 ] && p=100
+	# arrotonda al valore piu' vicino invece di troncare
+	v=$(( (p * MAX + 50) / 100 ))
+	echo "${v}" > "${BL}/brightness" || {
+		echo "rf35h-brightness: scrittura fallita su ${BL}/brightness" >&2; exit 1; }
+	mkdir -p "${STATE}" 2>/dev/null && printf '%s\n' "${p}" > "${SAVED}" 2>/dev/null || true
+	echo "${p}%"
+}
+
+case "${1:-}" in
+	"")
+		echo "${cur_pct}%  (${CUR}/${MAX}, $(basename "${BL}"))"
+		;;
+	--restore)
+		p="$(rd "${SAVED}")"
+		case "${p}" in
+			''|*[!0-9]*) exit 0 ;;   # niente di salvato: lascia il default del DT
+			*) apply "${p}" >/dev/null ;;
+		esac
+		;;
+	+*|-*)
+		d="${1#[+-]}"
+		case "${d}" in ''|*[!0-9]*) echo "rf35h-brightness: uso: +10 oppure -10" >&2; exit 1 ;; esac
+		case "$1" in
+			+*) apply $(( cur_pct + d )) ;;
+			*)  apply $(( cur_pct - d )) ;;
+		esac
+		;;
+	*)
+		case "$1" in ''|*[!0-9]*) echo "rf35h-brightness: uso: rf35h-brightness 60" >&2; exit 1 ;; esac
+		apply "$1"
+		;;
+esac

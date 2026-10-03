@@ -1,0 +1,235 @@
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/inc/wake_lock.h rk915/inc/wake_lock.h
+--- a/inc/wake_lock.h	2026-03-15 11:52:05.000000000 +0000
++++ b/inc/wake_lock.h	2026-09-17 20:36:57.001407229 +0000
+@@ -30,47 +30,49 @@
+ };
+ 
+ struct wake_lock {
+-	struct wakeup_source ws;
++	struct wakeup_source *ws;
+ };
+ 
+ static inline void wake_lock_init(struct wake_lock *lock, int type,
+ 				  const char *name)
+ {
+-	struct wakeup_source *ws = &lock->ws;
+-
+-	if (ws) {
+-		memset(ws, 0, sizeof(*ws));
+-		ws->name = name;
+-	}
+-	wakeup_source_add(ws);
++	/* devaOS: wakeup_source_add()/_remove() became static inside
++	 * drivers/base/power/wakeup.c in 7.0 and are no longer visible to
++	 * modules. wakeup_source_register()/_unregister() are the exported
++	 * equivalents; they allocate, so ws becomes a pointer. */
++	lock->ws = wakeup_source_register(NULL, name);
+ }
+ 
+ static inline void wake_lock_destroy(struct wake_lock *lock)
+ {
+-	struct wakeup_source *ws = &lock->ws;
+-
+-	wakeup_source_remove(ws);
+-	__pm_relax(ws);
++	if (lock->ws) {
++		__pm_relax(lock->ws);
++		wakeup_source_unregister(lock->ws);
++		lock->ws = NULL;
++	}
+ }
+ 
+ static inline void wake_lock(struct wake_lock *lock)
+ {
+-	__pm_stay_awake(&lock->ws);
++	if (lock->ws)
++		__pm_stay_awake(lock->ws);
+ }
+ 
+ static inline void wake_lock_timeout(struct wake_lock *lock, long timeout)
+ {
+-	__pm_wakeup_event(&lock->ws, jiffies_to_msecs(timeout));
++	if (lock->ws)
++		__pm_wakeup_event(lock->ws, jiffies_to_msecs(timeout));
+ }
+ 
+ static inline void wake_unlock(struct wake_lock *lock)
+ {
+-	__pm_relax(&lock->ws);
++	if (lock->ws)
++		__pm_relax(lock->ws);
+ }
+ 
+ static inline int wake_lock_active(struct wake_lock *lock)
+ {
+-	return lock->ws.active;
++	return lock->ws ? lock->ws->active : 0;
+ }
+ 
+ #endif
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/inc/wow.h rk915/inc/wow.h
+--- a/inc/wow.h	2026-03-15 11:52:05.000000000 +0000
++++ b/inc/wow.h	2026-09-17 20:37:30.999532857 +0000
+@@ -11,7 +11,17 @@
+ #define _WOW_H_
+ #include <linux/syscore_ops.h>
+ 
++#include <linux/version.h>
++#include <linux/syscore_ops.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++extern struct syscore host_syscore;
++#define rk915_register_syscore()	register_syscore(&host_syscore)
++#define rk915_unregister_syscore()	unregister_syscore(&host_syscore)
++#else
+ extern struct syscore_ops host_syscore_ops;
++#define rk915_register_syscore()	register_syscore_ops(&host_syscore_ops)
++#define rk915_unregister_syscore()	unregister_syscore_ops(&host_syscore_ops)
++#endif
+ 
+ void wow_enable_irq_wake(void);
+ void wow_disable_irq_wake(void);
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/src/beacon.c rk915/src/beacon.c
+--- a/src/beacon.c	2026-03-15 11:52:05.000000000 +0000
++++ b/src/beacon.c	2026-09-17 20:38:12.901458995 +0000
+@@ -1,3 +1,4 @@
++#include <linux/version.h>
+ /*
+  * Copyright (c) 2021, Fuzhou Rockchip Electronics Co., Ltd
+  *
+@@ -42,7 +43,12 @@
+ #if (LINUX_VERSION_CODE > KERNEL_VERSION(4, 6, 0))
+ static void vif_bcn_timer_expiry(struct timer_list *t)
+ {
++/* devaOS: from_timer() was renamed timer_container_of() in 6.16. */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0)
++	struct umac_vif *uvif = timer_container_of(uvif, t, bcn_timer);
++#else
+ 	struct umac_vif *uvif = from_timer(uvif, t, bcn_timer);
++#endif
+ #else
+ static void vif_bcn_timer_expiry(unsigned long data)
+ {
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/src/hal.c rk915/src/hal.c
+--- a/src/hal.c	2026-03-15 11:52:05.000000000 +0000
++++ b/src/hal.c	2026-09-17 20:37:30.999713823 +0000
+@@ -1501,7 +1501,7 @@
+ static int cleanup_all_resources(void)
+ {
+ 	unregister_pm_notifier(&hpriv->pm_notifier);
+-	unregister_syscore_ops(&host_syscore_ops);
++	rk915_unregister_syscore();
+ 
+ 	/* Free private structure
+ 	kfree(hpriv);
+@@ -1608,7 +1608,7 @@
+ 	hpriv->pm_notifier.notifier_call = rk915_pm_notifier;
+ 	register_pm_notifier(&hpriv->pm_notifier);
+ 
+-	register_syscore_ops(&host_syscore_ops);
++	rk915_register_syscore();
+ 	if (_rpu_umac_if_init(&main_dir_entry) < 0) {
+ 		RPU_ERROR_HAL("%s: wlan_init failed\n", hal_name);
+ 		err = -ENOMEM;
+@@ -1630,7 +1630,7 @@
+ error2:
+ 	if (hpriv->rx_wkq != NULL)
+ 		destroy_workqueue(hpriv->rx_wkq);
+-	unregister_syscore_ops(&host_syscore_ops);
++	rk915_unregister_syscore();
+ 	unregister_pm_notifier(&hpriv->pm_notifier);
+ error1:
+ #ifdef TX_USE_THREAD
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/src/umac_if.c rk915/src/umac_if.c
+--- a/src/umac_if.c	2026-03-15 11:52:05.000000000 +0000
++++ b/src/umac_if.c	2026-09-17 20:37:57.243932434 +0000
+@@ -1013,8 +1013,13 @@
+ 	return ret;
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++static int config(struct ieee80211_hw *hw, int radio_idx,
++		u32 changed)
++#else
+ static int config(struct ieee80211_hw *hw,
+ 		unsigned int changed)
++#endif
+ {
+ 	struct img_priv *priv = hw->priv;
+ 	struct ieee80211_conf *conf = &hw->conf;
+@@ -1882,7 +1887,12 @@
+ }
+ 
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++static int set_antenna(struct ieee80211_hw *hw, int radio_idx,
++		       u32 tx_ant, u32 rx_ant)
++#else
+ static int set_antenna(struct ieee80211_hw *hw, u32 tx_ant, u32 rx_ant)
++#endif
+ {
+ 	struct img_priv *priv = (struct img_priv *)hw->priv;
+ 
+@@ -2232,8 +2242,13 @@
+ }
+ 
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++int set_rts_threshold(struct ieee80211_hw *hw, int radio_idx,
++		      u32 value)
++#else
+ int set_rts_threshold(struct ieee80211_hw *hw,
+ 		      u32 value)
++#endif
+ {
+ 	struct img_priv *priv = NULL;
+ 
+diff -urN '--exclude=*.o' '--exclude=*.ko' '--exclude=.*' '--exclude=*.cmd' '--exclude=Module.symvers' '--exclude=modules.order' '--exclude=*.mod*' '--exclude=firmware' '--exclude=docs' rk915-base/src/wow.c rk915/src/wow.c
+--- a/src/wow.c	2026-03-15 11:52:05.000000000 +0000
++++ b/src/wow.c	2026-09-17 20:37:30.999404784 +0000
+@@ -7,6 +7,7 @@
+  * (at your option) any later version.
+  */
+ 
++#include <linux/version.h>
+ #include "wow.h"
+ #include "core.h"
+ #include "hal_io.h"
+@@ -14,10 +15,26 @@
+ #ifdef CONFIG_PM
+ 
+ unsigned char img_suspend_status;
++
++/* devaOS: Linux 7.0 reworked syscore. struct syscore_ops lost its embedded
++ * list_head and the callbacks gained a void *data argument; registration now
++ * goes through a separate struct syscore. Guarded so the same source still
++ * builds on 6.15. */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++static int host_suspend(void *data);
++static const struct syscore_ops host_syscore_ops_v7 = {
++	.suspend = host_suspend,
++};
++struct syscore host_syscore = {
++	.ops = &host_syscore_ops_v7,
++	.data = NULL,
++};
++#else
+ static int host_suspend(void);
+ struct syscore_ops host_syscore_ops = {
+ 	.suspend = host_suspend,
+ };
++#endif
+ 
+ #if 0
+ static int wait_for_econ_ps_cfg(struct img_priv *priv)
+@@ -250,7 +267,11 @@
+ }
+ 
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
++static int host_suspend(void *data)
++#else
+ static int host_suspend(void)
++#endif
+ {
+ 	/*if ((img_suspend_status == 1) && (rx_interrupt_status == 1)) {
+ 		RPU_ERROR_UMACIF("%s: Interrupt raised during Suspend, cancel suspend",

@@ -1,0 +1,21 @@
+#!/bin/sh
+# rf35h-rk915-load - carica il driver Wi-Fi rk915, ma solo se il device tree
+# dichiara davvero quel chip. Chiamato da rf35h-rk915-load.service, ordinato
+# prima di connman: senza, il gestore di rete puo' partire quando wlan0 non
+# esiste ancora.
+set -u
+NODE="${RF35H_CHIPTYPE:-/proc/device-tree/wireless-wlan/wifi_chip_type}"
+[ -r "${NODE}" ] || exit 0
+# il nodo e' una stringa terminata da NUL: si legge il primo token stampabile
+chip="$(tr -d '\000' < "${NODE}" | tr -cd 'a-zA-Z0-9')"
+[ "${chip}" = "rk915" ] || exit 0
+# Se il modulo non si carica lo si dice, invece di uscire con successo: prima
+# l'errore finiva in /dev/null e il servizio risultava attivo, con "niente
+# Wi-Fi" come unico sintomo. modprobe esce 0 anche a modulo gia' caricato,
+# quindi un fallimento e' un problema vero. Fallire qui non blocca la rete:
+# il servizio sta Before= connman, non Requires=.
+if ! modprobe rk915; then
+	echo "rf35h-rk915-load: modprobe rk915 fallito" >&2
+	exit 1
+fi
+exit 0

@@ -1,0 +1,44 @@
+[Unit]
+Description=XiFan RF35H board state (retroilluminazione, LED degli stick)
+Before=retroarch.target
+
+# Questo servizio scrive in /storage, e fs-resize si rifiuta di espandere la
+# partizione se trova gia' /storage/.config, .cache o .kodi.
+# In realta' non potrebbe succedere: libreelec-target-generator, trovando
+# /storage/.please_resize_me, punta default.target su fs-resize.target, e quel
+# boot esegue SOLO il ridimensionamento - multi-user.target non viene
+# raggiunto, quindi noi non partiamo affatto. La condizione resta come rete di
+# sicurezza se un domani quel meccanismo cambia: costa una stat.
+ConditionPathExists=!/storage/.please_resize_me
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Se non c'e' niente di salvato, --restore non tocca nulla: la retroilluminazione
+# resta al default-brightness-level del device tree (128/255) e i LED al modo
+# di default.
+# Sospensione/ripresa dei device in serie invece che in parallelo. Era la
+# patch g002 di ROCKNIX (pm_async_enabled = 0 in kernel/power/main.c), ma
+# /sys/power/pm_async e' una manopola runtime - power_attr(pm_async) in
+# kernel/power/main.c:214 - quindi non serve patchare il kernel per tutti gli
+# RK3326 dell'albero. "-" davanti: se il file non c'e', non e' un errore.
+ExecStart=-/bin/sh -c 'echo 0 > /sys/power/pm_async'
+# "-" davanti a entrambi: con Type=oneshot un ExecStart che fallisce impedisce
+# ai successivi di partire, e questi due sono ripristini best effort. Gli
+# script aspettano gia' che i device compaiano (il probe e' asincrono e
+# multi-user.target non lo garantisce), ma se dopo l'attesa non ci sono,
+# meglio saltare che bloccare il resto.
+ExecStart=-/usr/bin/rf35h-brightness --restore
+ExecStart=-/usr/bin/rf35h-led --restore
+ExecStart=-/usr/bin/rf35h-statusled --restore
+ExecStart=-/usr/bin/rf35h-usb --restore
+# Vibrazione: il driver riparte con rumble_enable=1 a ogni boot; se l'utente
+# l'ha spenta dal menu, RetroArch ha salvato 0 in /storage/.config/rf35h/rumble.
+ExecStart=-/usr/bin/rf35h-vibra --restore
+
+# Lo spegnimento dei LED e' l'unico motivo per cui questo servizio non e' un
+# semplice oneshot "fire and forget": il microcontrollore mantiene lo stato
+# anche a device spento.
+ExecStop=/usr/bin/rf35h-led off
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,286 @@
+--- a/Makefile	2026-09-14 18:32:27.867698602 +0000
++++ b/Makefile	2026-09-14 18:31:43.670431207 +0000
+@@ -1,4 +1,9 @@
+-ifeq ($(DEVICE),$(filter $(DEVICE), S922X RK3588))
++# devaOS: the RF35H device tree binds rocknix-singleadc-joypad only; the
++# plain rocknix-joypad still uses the removed input-polldev API and would
++# fail to compile, so RK3326 builds just the one it needs.
++ifeq ($(DEVICE),$(filter $(DEVICE), RK3326))
++	obj-m := rocknix-singleadc-joypad.o
++else ifeq ($(DEVICE),$(filter $(DEVICE), S922X RK3588))
+ 	obj-m := rocknix-joypad.o
+ else ifeq ($(DEVICE),$(filter $(DEVICE), H700 RK3399))
+ 	obj-m := rocknix-singleadc-joypad.o
+--- a/rocknix-singleadc-joypad.c	2026-09-14 18:32:27.867698602 +0000
++++ b/rocknix-singleadc-joypad.c	2026-09-14 18:31:43.673763742 +0000
+@@ -7,14 +7,14 @@
+ 
+ /*----------------------------------------------------------------------------*/
+ #include <linux/module.h>
+-#include <linux/input-polldev.h>
++#include <linux/input.h>   /* devaOS: was pulled in by the removed input-polldev.h */
+ #include <linux/platform_device.h>
+ #include <linux/iio/consumer.h>
+ #include <linux/version.h>
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0))
+ #include <linux/of_gpio.h>
+ #else
+-#include <linux/of_gpio_legacy.h>
++#include "of_gpio_compat.h"   /* devaOS: replaces the removed of_gpio_legacy.h */
+ #endif
+ #include <linux/delay.h>
+ #include <linux/pwm.h>
+@@ -243,7 +243,10 @@
+ 	bool positive;
+ };
+ 
+-extern struct input_dev * joypad_input_g;
++/* devaOS: upstream declares this extern and something else in their tree
++ * defines it; nothing in ours does, and this module only ever writes it.
++ * A module-local definition satisfies the reference without an export. */
++static struct input_dev *joypad_input_g;
+ 
+ static int pwm_vibrator_start(struct joypad *joypad)
+ {
+@@ -615,9 +618,9 @@
+ };
+ 
+ /*----------------------------------------------------------------------------*/
+-static void joypad_gpio_check(struct input_polled_dev *poll_dev)
++static void joypad_gpio_check(struct input_dev *input)
+ {
+-	struct joypad *joypad = poll_dev->private;
++	struct joypad *joypad = input_get_drvdata(input);
+ 	int nbtn, value;
+ 
+ 	for (nbtn = 0; nbtn < joypad->bt_gpio_count; nbtn++) {
+@@ -629,20 +632,20 @@
+ 		}
+ 		value = gpio_get_value_cansleep(gpio->num);
+ 		if (value != gpio->old_value) {
+-			input_event(poll_dev->input,
++			input_event(input,
+ 				gpio->report_type,
+ 				gpio->linux_code,
+ 				(value == gpio->active_level) ? 1 : 0);
+ 			gpio->old_value = value;
+ 		}
+ 	}
+-	input_sync(poll_dev->input);
++	input_sync(input);
+ }
+ 
+ /*----------------------------------------------------------------------------*/
+-static void joypad_adc_check(struct input_polled_dev *poll_dev)
++static void joypad_adc_check(struct input_dev *input)
+ {
+-	struct joypad *joypad = poll_dev->private;
++	struct joypad *joypad = input_get_drvdata(input);
+ 	int nbtn;
+ 	int mag;
+ 	int deadzone = READ_ONCE(joypad->bt_adc_deadzone);
+@@ -718,20 +721,20 @@
+ 		adcy->value = adcy->value > adcy->max ? adcy->max : adcy->value;
+ 		adcy->value = adcy->value < adcy->min ? adcy->min : adcy->value;
+ 
+-		input_report_abs(poll_dev->input,
++		input_report_abs(input,
+ 			adcx->report_type,
+ 			adcx->invert ? adcx->value * (-1) : adcx->value);
+-		input_report_abs(poll_dev->input,
++		input_report_abs(input,
+ 			adcy->report_type,
+ 			adcy->invert ? adcy->value * (-1) : adcy->value);
+ 	}
+-	input_sync(poll_dev->input);
++	input_sync(input);
+ }
+ 
+ /*----------------------------------------------------------------------------*/
+-static void joypad_poll(struct input_polled_dev *poll_dev)
++static void joypad_poll(struct input_dev *input)
+ {
+-	struct joypad *joypad = poll_dev->private;
++	struct joypad *joypad = input_get_drvdata(input);
+ 
+ 	if (joypad->enable) {
+ 		if (joypad->use_miyoo_serial) {
+@@ -740,29 +743,29 @@
+ 			 * our miyoo_serial_threadfn(). We'll just do
+ 			 * input_report_abs here from the stored values.
+ 			 */
+-			input_report_abs(poll_dev->input, ABS_X,  joypad->miyoo.left_x);
+-			input_report_abs(poll_dev->input, ABS_Y,  joypad->miyoo.left_y);
+-			input_report_abs(poll_dev->input, ABS_RX, joypad->miyoo.right_x);
+-			input_report_abs(poll_dev->input, ABS_RY, joypad->miyoo.right_y);
+-			input_sync(poll_dev->input);
++			input_report_abs(input, ABS_X,  joypad->miyoo.left_x);
++			input_report_abs(input, ABS_Y,  joypad->miyoo.left_y);
++			input_report_abs(input, ABS_RX, joypad->miyoo.right_x);
++			input_report_abs(input, ABS_RY, joypad->miyoo.right_y);
++			input_sync(input);
+ 
+-			joypad_gpio_check(poll_dev);
++			joypad_gpio_check(input);
+ 		} else {
+-			joypad_adc_check(poll_dev);
+-			joypad_gpio_check(poll_dev);
++			joypad_adc_check(input);
++			joypad_gpio_check(input);
+ 		}
+ 	}
+-	if (poll_dev->poll_interval != joypad->poll_interval) {
++	if (input_get_poll_interval(input) != joypad->poll_interval) {
+ 		mutex_lock(&joypad->lock);
+-		poll_dev->poll_interval = joypad->poll_interval;
++		input_set_poll_interval(input, joypad->poll_interval);
+ 		mutex_unlock(&joypad->lock);
+ 	}
+ }
+ 
+ /*----------------------------------------------------------------------------*/
+-static void joypad_open(struct input_polled_dev *poll_dev)
++static int joypad_open(struct input_dev *input)
+ {
+-	struct joypad *joypad = poll_dev->private;
++	struct joypad *joypad = input_get_drvdata(input);
+ 	int nbtn;
+ 
+ 	for (nbtn = 0; nbtn < joypad->bt_gpio_count; nbtn++) {
+@@ -773,11 +776,11 @@
+ 		gpio->old_value = val;
+ 
+ 		// Immediately report the current state
+-		input_event(poll_dev->input, gpio->report_type,
++		input_event(input, gpio->report_type,
+ 					gpio->linux_code,
+ 					(val == gpio->active_level) ? 1 : 0);
+ 	}
+-	input_sync(poll_dev->input);
++	input_sync(input);
+ 
+ 	for (nbtn = 0; nbtn < joypad->amux_count; nbtn++) {
+ 		struct bt_adc *adc = &joypad->adcs[nbtn];
+@@ -791,19 +794,20 @@
+ 		adc->cal = adc->value;
+ 	}
+ 	/* buttons status sync */
+-	joypad_adc_check(poll_dev);
+-	joypad_gpio_check(poll_dev);
++	joypad_adc_check(input);
++	joypad_gpio_check(input);
+ 
+ 	/* button report enable */
+ 	mutex_lock(&joypad->lock);
+ 	joypad->enable = true;
+ 	mutex_unlock(&joypad->lock);
++	return 0;
+ }
+ 
+ /*----------------------------------------------------------------------------*/
+-static void joypad_close(struct input_polled_dev *poll_dev)
++static void joypad_close(struct input_dev *input)
+ {
+-	struct joypad *joypad = poll_dev->private;
++	struct joypad *joypad = input_get_drvdata(input);
+ 
+ 	if (joypad->has_rumble) {
+ 		cancel_work_sync(&joypad->play_work);
+@@ -1126,7 +1130,6 @@
+ /*----------------------------------------------------------------------------*/
+ static int joypad_input_setup(struct device *dev, struct joypad *joypad)
+ {
+-	struct input_polled_dev *poll_dev;
+ 	struct input_dev *input;
+ 	int nbtn, error;
+ 	u32 joypad_bustype = BUS_HOST;
+@@ -1134,19 +1137,15 @@
+ 	u32 joypad_revision = 0;
+ 	u32 joypad_product = 0;
+ 
+-	poll_dev = devm_input_allocate_polled_device(dev);
+-	if (!poll_dev) {
++	input = devm_input_allocate_device(dev);
++	if (!input) {
+ 		dev_err(dev, "no memory for polled device\n");
+ 		return -ENOMEM;
+ 	}
+ 
+-	poll_dev->private	= joypad;
+-	poll_dev->poll		= joypad_poll;
+-	poll_dev->poll_interval	= joypad->poll_interval;
+-	poll_dev->open		= joypad_open;
+-	poll_dev->close		= joypad_close;
+-
+-	input = poll_dev->input;
++	input_set_drvdata(input, joypad);
++	input->open  = joypad_open;
++	input->close = joypad_close;
+ 
+ 	input->name = DRV_NAME;
+ 
+@@ -1237,7 +1236,13 @@
+ 
+ 	joypad->dev = dev;
+ 
+-	error = input_register_polled_device(poll_dev);
++	error = input_setup_polling(input, joypad_poll);
++	if (error) {
++		dev_err(dev, "unable to set up polling: %d\n", error);
++		return error;
++	}
++	input_set_poll_interval(input, joypad->poll_interval);
++	error = input_register_device(input);
+ 	if (error) {
+ 		dev_err(dev, "unable to register polled device, err=%d\n",
+ 			error);
+--- a/of_gpio_compat.h	2026-09-14 15:02:02.066464576 +0000
++++ b/of_gpio_compat.h	2026-09-14 18:31:43.671351562 +0000
+@@ -0,0 +1,47 @@
++/* devaOS: of_get_named_gpio_flags() and of_get_gpio_flags() were removed
++ * from mainline (the legacy integer-GPIO OF helpers). This driver needs the
++ * flags to learn active-low. Rebuilt here the way the kernel implemented
++ * them - resolve the phandle with args, take the flags cell, and map the
++ * gpio number through the modern helper - so the driver source stays as
++ * upstream wrote it. */
++#ifndef ROCKNIX_OF_GPIO_COMPAT_H
++#define ROCKNIX_OF_GPIO_COMPAT_H
++#include <linux/version.h>
++#include <linux/of.h>
++#include <linux/of_gpio.h>
++
++#ifndef OF_GPIO_ACTIVE_LOW
++enum of_gpio_flags { OF_GPIO_ACTIVE_LOW = 0x1 };
++#endif
++
++static inline int rocknix_of_get_named_gpio_flags(const struct device_node *np,
++		const char *propname, int index, enum of_gpio_flags *flags)
++{
++	struct of_phandle_args args;
++	int gpio, ret;
++
++	gpio = of_get_named_gpio(np, propname, index);
++	if (gpio < 0)
++		return gpio;
++	if (flags) {
++		*flags = 0;
++		ret = of_parse_phandle_with_args(np, propname, "#gpio-cells", index, &args);
++		if (!ret) {
++			/* Rockchip and most controllers: cell 0 = pin, cell 1 = flags. */
++			if (args.args_count >= 2 && (args.args[1] & 1))
++				*flags |= OF_GPIO_ACTIVE_LOW;
++			of_node_put(args.np);
++		}
++	}
++	return gpio;
++}
++
++static inline int rocknix_of_get_gpio_flags(const struct device_node *np,
++		int index, enum of_gpio_flags *flags)
++{
++	return rocknix_of_get_named_gpio_flags(np, "gpios", index, flags);
++}
++
++#define of_get_named_gpio_flags rocknix_of_get_named_gpio_flags
++#define of_get_gpio_flags       rocknix_of_get_gpio_flags
++#endif

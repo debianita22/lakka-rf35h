@@ -1,0 +1,24 @@
+[Unit]
+Description=XiFan RF35H restore saved speaker volume
+# Imposta il volume del DAC a ogni avvio. NON e' opzionale: il driver mainline
+# non scrive mai DDAC_VOLL/R, che restano al valore di reset dell'hardware -
+# misurato sul device: 0x00, e quel registro e' un'ATTENUAZIONE, quindi zero
+# significa volume MASSIMO. Senza questo servizio Lakka pilota l'amplificatore
+# esterno a fondo scala fin dal boot, mentre ArkOS lo tiene a ~184.
+#
+# Avevo messo qui una ConditionPathExists sul file salvato, per non toccare
+# nulla quando l'utente non aveva mai spostato il cursore. Era sbagliato: senza
+# file il DAC restava al massimo.
+#
+# Niente commutazione del jack: quella la fa il kernel (simple-audio-card +
+# pin-switch + route DAPM).
+Before=retroarch.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/rf35h-audio-wait
+ExecStart=-/usr/bin/rf35h-dac-volume --restore
+
+[Install]
+WantedBy=multi-user.target

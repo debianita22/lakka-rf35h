@@ -1,0 +1,82 @@
+#!/bin/sh
+# rf35h-ap on|off|status - l'access point Wi-Fi di Lakka, spento davvero.
+#
+# Il toggle di Lakka fa "connmanctl tether wifi off" solo se connman riporta
+# Tethering=True, e non tocca /storage/.cache/services/localap.conf, il flag
+# che al boot fa partire localap.service: spento dal menu, al riavvio l'hotspot
+# tornava. Con wpa_supplicant (qui non c'e' iwd) lo stato riportato e lo
+# smontaggio dell'interfaccia AP non sono affidabili. Questo script:
+#   off  toglie il flag di boot (lo mette da parte: nome e password restano),
+#        spegne il tethering, verifica, e se l'interfaccia resta in modo AP
+#        spegne e riaccende la tecnologia Wi-Fi (connman poi si riconnette).
+#   on   rimette il flag (o lo crea con i default di Lakka) e avvia il servizio.
+# percorsi sovrascrivibili come negli altri script: senza, questo script non
+# si puo' provare fuori dal device
+CONF="${RF35H_LOCALAP_CONF:-/storage/.cache/services/localap.conf}"
+NETDIR="${RF35H_NET_DIR:-/sys/class/net}"
+
+tethering() {
+	connmanctl technologies 2>/dev/null | grep -A10 '/net/connman/technology/wifi' \
+		| grep -m1 '^  Tethering =' | grep -q True
+}
+# Password casuale per dispositivo. Il default di Lakka e' PASSWORD=RetroArch
+# (connmanctl.c di RetroArch), pubblica: chiunque in portata potrebbe collegarsi
+# e trovare SSH con le credenziali di default root/root. 12 caratteri senza
+# quelli che si confondono digitandoli sul telefono (0 O 1 l I): ~70 bit.
+gen_pass() { tr -dc 'A-HJ-NP-Za-km-z2-9' < /dev/urandom 2>/dev/null | head -c 12; }
+# Crea la configurazione se manca, e converte UNA volta quella con la password
+# pubblica di default. Sincrono e veloce: il menu lo chiama prima di leggere la
+# password da mostrare, invece di rincorrere "on" che gira in background.
+prepare() {
+	[ -f "$CONF.off" ] && [ ! -f "$CONF" ] && mv -f "$CONF.off" "$CONF"
+	if [ ! -f "$CONF" ]; then
+		mkdir -p "$(dirname "$CONF")"
+		printf 'APNAME=LakkaAccessPoint\nPASSWORD=%s\n' "$(gen_pass)" > "$CONF"
+	elif grep -qx 'PASSWORD=RetroArch' "$CONF"; then
+		sed -i "s/^PASSWORD=RetroArch\$/PASSWORD=$(gen_pass)/" "$CONF"
+	fi
+	chmod 600 "$CONF" 2>/dev/null || true
+}
+ap_mode() {
+	for d in "${NETDIR}"/wl*; do
+		[ -e "$d" ] || continue
+		wpa_cli -i "$(basename "$d")" status 2>/dev/null | grep -q '^mode=AP' && return 0
+	done
+	return 1
+}
+
+case "${1:-status}" in
+	off)
+		[ -f "$CONF" ] && mv -f "$CONF" "$CONF.off"
+		connmanctl tether wifi off >/dev/null 2>&1
+		i=0
+		while [ $i -lt 8 ]; do
+			tethering || ap_mode || { echo "access point spento"; exit 0; }
+			sleep 0.5; i=$((i + 1))
+		done
+		echo "l'AP resiste: spengo e riaccendo il Wi-Fi"
+		connmanctl disable wifi >/dev/null 2>&1
+		sleep 1
+		connmanctl enable wifi >/dev/null 2>&1
+		sleep 2
+		if tethering || ap_mode; then echo "access point ANCORA attivo" >&2; exit 1; fi
+		echo "access point spento"
+		;;
+	on)
+		prepare
+		systemctl start localap.service
+		sleep 2
+		if tethering || ap_mode; then echo "access point attivo"; else echo "access point NON partito" >&2; exit 1; fi
+		;;
+	prepare)
+		prepare
+		;;
+	status)
+		if tethering || ap_mode; then echo "attivo"; else echo "spento"; fi
+		[ -f "$CONF" ] && echo "al boot: parte" || echo "al boot: non parte"
+		# La password e' casuale: qui si legge, oltre che nella notifica del menu.
+		[ -f "$CONF" ] && sed -n 's/^APNAME=/rete:     /p; s/^PASSWORD=/password: /p' "$CONF"
+		;;
+	*)
+		echo "uso: rf35h-ap on|off|status|prepare" >&2; exit 2 ;;
+esac

@@ -1,0 +1,35 @@
+Subject: u-boot RK3326: non trattare come errori i warning di gcc moderno
+
+Il fork Hardkernel e fermo al 2018 e compila con -Werror. Con il gcc di
+oggi warning che allora non esistevano fermano la build:
+
+  cmd/gpt.c:386: error: variable 'offset' set but not used
+
+KCFLAGS finisce in coda a KBUILD_CFLAGS, quindi -Wno-error vince.
+
+---
+diff --git a/projects/Rockchip/devices/RK3326/packages/u-boot/package.mk b/projects/Rockchip/devices/RK3326/packages/u-boot/package.mk
+index 59fbd6f4..7f08bcf1 100644
+--- a/projects/Rockchip/devices/RK3326/packages/u-boot/package.mk
++++ b/projects/Rockchip/devices/RK3326/packages/u-boot/package.mk
+@@ -50,7 +50,19 @@ make_target() {
+     [ -n "$UBOOT_FIRMWARE" ] && find_file_path bootloader/firmware && . ${FOUND_PATH}
+     DEBUG=${PKG_DEBUG} CROSS_COMPILE="$TARGET_KERNEL_PREFIX" LDFLAGS="" ARCH=arm make mrproper
+     DEBUG=${PKG_DEBUG} CROSS_COMPILE="$TARGET_KERNEL_PREFIX" LDFLAGS="" ARCH=arm make $($ROOT/$SCRIPTS/uboot_helper $PROJECT $DEVICE $UBOOT_SYSTEM config)
+-    DEBUG=${PKG_DEBUG} CROSS_COMPILE="$TARGET_KERNEL_PREFIX" LDFLAGS="" ARCH=arm _python_sysroot="$TOOLCHAIN" _python_prefix=/ _python_exec_prefix=/ make $UBOOT_TARGET HOSTCC="$HOST_CC" HOSTLDFLAGS="-L$TOOLCHAIN/lib" HOSTSTRIP="true" CONFIG_MKIMAGE_DTC_PATH="scripts/dtc/dtc"
++    # devaOS: questo U-Boot e' il fork Hardkernel del 2018 e il compilatore
++    # che lo costruisce e' quello di oggi. Warning che allora non esistevano
++    # diventano errori perche' l'albero compila con -Werror, per esempio:
++    #
++    #   cmd/gpt.c:386: error: variable 'offset' set but not used
++    #                         [-Werror=unused-but-set-variable]
++    #
++    # KCFLAGS finisce in coda a KBUILD_CFLAGS, quindi -Wno-error vince su
++    # quello messo dall'albero. Non e' abbassare la guardia sul nostro codice:
++    # e' smettere di pretendere che un sorgente fermo al 2018 stia al passo di
++    # gcc 16. Sull'RF35H questo binario viene poi scartato - il loader e'
++    # known-good.bin - ma il package deve comunque costruirsi.
++    DEBUG=${PKG_DEBUG} CROSS_COMPILE="$TARGET_KERNEL_PREFIX" LDFLAGS="" ARCH=arm _python_sysroot="$TOOLCHAIN" _python_prefix=/ _python_exec_prefix=/ make $UBOOT_TARGET KCFLAGS="-Wno-error" HOSTCC="$HOST_CC" HOSTLDFLAGS="-L$TOOLCHAIN/lib" HOSTSTRIP="true" CONFIG_MKIMAGE_DTC_PATH="scripts/dtc/dtc"
+   fi
+ }
+ 

@@ -1,0 +1,11 @@
+[Unit]
+Description=XiFan RF35H late boot snapshot, 90 s after boot
+# rf35h-bootlog gira a ~20 s ed e' troppo presto per vedere RetroArch: questo
+# fotografa lo stato quando la GUI dovrebbe essere su da un pezzo.
+
+[Timer]
+OnBootSec=90s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

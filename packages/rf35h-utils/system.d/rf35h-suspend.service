@@ -1,0 +1,25 @@
+[Unit]
+Description=XiFan RF35H suspend preparation
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Prima dello sleep (ExecStart):
+#  - stick spenti e MCU senza corrente: sono l'unica cosa che altrimenti
+#    resterebbe illuminata a device "spento", e consumano;
+#  - pm_async=0: sospensione e ripresa dei device in serie invece che in
+#    parallelo. Con il parallelo il rk817 e la SDIO della RK915 si pestano i
+#    piedi in ripresa. E' la patch g002 di ROCKNIX, ma a runtime: pm_async e'
+#    una manopola (power_attr(pm_async) in kernel/power/main.c).
+# Al risveglio (ExecStop, grazie a StopWhenUnneeded): pm_async torna a 1,
+# l'MCU riparte e rf35h-led --wake rimette il colore salvato.
+# "-" davanti: se qualcosa manca (DTB vecchio, file assente), non e' un errore.
+ExecStart=-/usr/bin/rf35h-led --sleep
+ExecStart=-/bin/sh -c 'echo 0 > /sys/power/pm_async'
+ExecStop=-/bin/sh -c 'echo 1 > /sys/power/pm_async'
+ExecStop=-/usr/bin/rf35h-led --wake
+
+[Install]
+WantedBy=sleep.target

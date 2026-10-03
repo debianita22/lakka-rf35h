@@ -1,0 +1,91 @@
+#!/bin/sh
+# rf35h-crashlog [crash|snapshot] - fotografa lo stato quando RetroArch muore,
+# o a boot avanzato, su /storage/rf35h-logs/ (che sopravvive al reboot: il
+# journal di Lakka sta su tmpfs e si perde).
+#
+#   crash     chiamato da systemd via OnFailure= su retroarch.service
+#   snapshot  chiamato dal timer rf35h-bootlog-late a 90 s dal boot
+#
+# Con Restart=always un crash all'avvio riparte ogni pochi secondi: il
+# rate-limit evita di riempire la card di file identici (uno al minuto al
+# massimo), e si tengono solo gli ultimi 8.
+set -u
+MODE="${1:-crash}"
+DIR="${RF35H_LOGDIR:-/storage/rf35h-logs}"
+KEEP=8
+mkdir -p "${DIR}" 2>/dev/null || exit 0
+
+# rate-limit: se l'ultimo crash e' di meno di 60 s fa, non ne scrivo un altro.
+# L'istante sta in un sentinel, non nell'mtime: la busybox di Lakka non ha
+# FEATURE_STAT_FORMAT e "stat -c %Y" fallirebbe, azzerando il limite proprio
+# nel restart loop in cui serve.
+STAMP="${DIR}/.last-crash"
+if [ "${MODE}" = crash ]; then
+	now=$(date +%s); last=0
+	[ -r "${STAMP}" ] && read -r last < "${STAMP}"
+	case "${last}" in ''|*[!0-9]*) last=0 ;; esac
+	[ $((now - last)) -lt 60 ] && exit 0
+	printf '%s\n' "${now}" > "${STAMP}"
+fi
+
+F="${DIR}/${MODE}-$(date +%Y%m%d-%H%M%S)-$$.txt"
+{
+	echo "=== rf35h-crashlog ${MODE}  $(date)  uptime $(cut -d' ' -f1 /proc/uptime)s"
+	# L'RF35H non ha un RTC affidabile e l'NTP si puo' spegnere: la data qui sopra,
+	# e quella nel nome del file, possono essere sbagliate anche di giorni (uno
+	# snapshot datato 29/9 era stato scritto il 23). Queste righe identificano
+	# sessione e build senza fidarsi dell'orologio.
+	echo "=== identita'"
+	echo "  kernel:   $(uname -r) ($(uname -v))"
+	echo "  sistema:  $( [ -r /etc/os-release ] && . /etc/os-release; echo "${NAME:-?} ${VERSION:-?}, BUILD_ID ${BUILD_ID:-?}")"
+	echo "  boot id:  $(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+	if [ -e /run/systemd/timesync/synchronized ]; then
+		echo "  orologio: sincronizzato via rete"
+	else
+		echo "  orologio: NON sincronizzato, data e nome del file possono essere sbagliati"
+	fi
+	echo "=== retroarch.service"
+	systemctl status retroarch --no-pager -l 2>&1 | head -25
+	echo
+	echo "=== ultime righe di RetroArch nel journal (stdout/stderr del processo)"
+	journalctl -b -u retroarch --no-pager -o short-precise 2>&1 | tail -60
+	echo
+	echo "=== kernel: oops, BUG, panic, sleeping-in-atomic, segfault"
+	dmesg 2>/dev/null | grep -nE "Oops|BUG:|Kernel panic|scheduling while atomic|sleeping function|Unable to handle|segfault|Call trace|WARNING:" | head -20
+	echo "--- dmesg, ultime 60 righe"
+	dmesg 2>/dev/null | tail -60
+	echo
+	echo "=== RetroArch: librerie mancanti e log su file"
+	# Se RetroArch muore subito senza stampare nulla, spesso e' il loader
+	# dinamico: una libreria non trovata uccide il processo prima di main(),
+	# quindi nel journal non compare una riga sua. Successo davvero provando
+	# a togliere il compositore: senza il pacchetto wl, RetroArch resta
+	# linkato contro librerie che non ci sono piu'.
+	ldd /usr/bin/retroarch 2>&1 | grep -i "not found" || echo "  nessuna libreria mancante"
+	for f in /storage/logfiles/*.log; do
+		[ -r "${f}" ] && { echo "--- ${f}"; tail -30 "${f}"; }
+	done 2>/dev/null
+	echo
+	echo "=== unit fallite"
+	systemctl list-units --failed --no-pager 2>&1
+	echo
+	echo "=== nostre unit"
+	systemctl status rf35h-audio rf35h-state rf35h-ledd rf35h-zram rf35h-ntp rf35h-volkeys --no-pager 2>&1 | grep -E "^[a-z●×]|Active:|Process:|Main PID"
+	echo
+	echo "=== audio: scheda, stream aperti"
+	cat /proc/asound/cards 2>/dev/null
+	for p in /proc/asound/card*/pcm*p/sub*/hw_params; do [ -r "$p" ] && { echo "$p:"; cat "$p"; }; done 2>/dev/null
+	echo
+	echo "=== journal: warning ed errori di questo boot"
+	journalctl -b -p warning --no-pager 2>&1 | tail -40
+	echo
+	echo "=== retroarch.cfg: le voci che pesano all'avvio"
+	grep -hE '^(audio_driver|audio_device|audio_enable_menu|audio_enable|menu_driver|video_driver|log_verbosity|rf35h_)' /storage/.config/retroarch/retroarch.cfg 2>/dev/null
+} > "${F}" 2>&1
+sync
+
+# tengo gli ultimi KEEP per tipo
+for t in crash snapshot; do
+	ls -t "${DIR}"/${t}-*.txt 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do rm -f "${old}"; done
+done
+echo "${F}"

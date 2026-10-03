@@ -1,0 +1,32 @@
+Subject: uae4arm: rinominare il simbolo che confligge con std::numbers
+
+src/statusline.cpp dichiara "static const char *numbers". Con GCC 16 quel nome
+confligge con std::numbers di C++20, portato in scope da un "using namespace
+std" in un header: reference to numbers is ambiguous.
+
+Si rinomina il simbolo invece di passare -std=gnu++17: la regola dei .cpp in
+Makefile.libretro usa $(CFLAGS), non $(CXXFLAGS), quindi il flag finirebbe
+anche sui file .c.
+
+---
+--- a/packages/lakka/libretro_cores/uae4arm/package.mk
++++ b/packages/lakka/libretro_cores/uae4arm/package.mk
+@@ -23,3 +23,18 @@
+     cp -v uae4arm_libretro.so ${INSTALL}/usr/lib/libretro/
+     cp -v capsimg.so ${INSTALL}/usr/lib/
+ }
++
++# devaOS RF35H: src/statusline.cpp dichiara "static const char *numbers", che
++# con GCC 16 confligge con std::numbers di C++20, portato in scope da un
++# "using namespace std" in un header: "reference to 'numbers' is ambiguous".
++#
++# Si rinomina il simbolo invece di abbassare lo standard con -std=gnu++17:
++# quel Makefile compila i .cpp con "$(CXX) $(fpic) $(CFLAGS) ...", cioe' passa
++# CFLAGS anche al C++ e non guarda mai CXXFLAGS, quindi un -std= finirebbe
++# anche sui file .c e farebbe protestare gcc a ogni compilazione. La variabile
++# e' static e ricorre due volte nello stesso file: la rinomina e' contenuta, e
++# il confine di parola lascia intatto NUMBERS_NUM. Idempotente: se un giorno a
++# monte la rinominassero, la sed non trova nulla e non fa danni.
++pre_make_target() {
++  sed -i 's/\bnumbers\b/td_numbers/g' src/statusline.cpp
++}

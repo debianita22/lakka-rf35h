@@ -1,0 +1,84 @@
+Subject: sway: niente barra ne sfondo sulla console, e migrazione della vecchia copia
+
+La configurazione di sway e quella desktop generica di LibreELEC: una barra
+che lancia "date" ogni secondo e uno sfondo a 2160p, entrambi invisibili sotto
+RetroArch a schermo intero. Senza superfici sovrapposte wlroots puo fare direct
+scanout.
+
+sway-config copia il default in /storage solo al primo avvio e poi non lo
+aggiorna piu: chi aveva gia la copia di serie la conservava. Migrazione una
+tantum, con backup, riconosciuta dalla barra di serie.
+
+---
+--- a/packages/wayland/compositor/sway/config/config
++++ b/packages/wayland/compositor/sway/config/config
+@@ -24,7 +24,10 @@
+ ### Output configuration
+ #
+ # Default wallpaper (more resolutions are available in /usr/share/sway/)
+-output * bg /usr/share/sway/libreelec-wallpaper-2160.png fill
++# devaOS RF35H: nero pieno invece dello sfondo a 2160p. Su questa console
++# RetroArch e' sempre a schermo intero: l'immagine veniva decodificata e
++# scalata su 640x480 senza che nessuno la vedesse mai.
++output * bg #000000 solid_color
+ 
+ # hide_cursor hides the cursor image after the specified timeout (in milliseconds) has elapsed with no activity on that cursor
+ seat * hide_cursor 3000
+@@ -207,28 +210,13 @@
+ bindsym $mod+r mode "resize"
+ 
+ #
+-# Status Bar:
+-#
+-# Read `man 5 sway-bar` for more information about this section.
+-bar {
+-    position top
+-
+-    # When the status_command prints a new line to stdout, swaybar updates.
+-    # The default just shows the current date and time.
+-    status_command while date +'%a %e %b %G - %k:%M'; do sleep 1; done
+-
+-    colors {
+-        background $base00
+-        separator  $base01
+-        statusline $base04
+-
+-        # State             Border  BG      Text
+-        focused_workspace   $base05 $base0D $base00
+-        active_workspace    $base05 $base03 $base00
+-        inactive_workspace  $base03 $base01 $base05
+-        urgent_workspace    $base08 $base08 $base00
+-        binding_mode        $base00 $base0A $base00    }
+-}
++# devaOS RF35H: nessuna barra di stato. Quella di LibreELEC lanciava "date"
++# ogni secondo in un ciclo di shell e ridisegnava la barra a ogni giro:
++# risvegli continui su quattro Cortex-A35 per un orologio che, sotto
++# RetroArch a schermo intero, non si vede mai. Senza superfici sovrapposte
++# wlroots puo' inoltre fare direct scanout - mandare il buffer di RetroArch al
++# pannello senza comporre - che e' il guadagno cercato togliendo il
++# compositore, ottenuto invece tenendolo.
+ 
+ # Basic color configuration using the Base16 variables for windows and borders.
+ # Property Name         Border  BG      Text    Indicator Child Border
+--- a/packages/wayland/compositor/sway/scripts/sway-config
++++ b/packages/wayland/compositor/sway/scripts/sway-config
+@@ -31,6 +31,19 @@
+   mkdir -p ${SWAY_CONFIG_BASEDIR}
+   cp ${SWAY_CONFIG_USER_DEFAULT} ${SWAY_CONFIG_BASEDIR}
+ fi
++# devaOS RF35H: la configurazione di default viene copiata in /storage al
++# primo avvio e da li' non si aggiorna piu': chi ha installato una versione
++# precedente continua a usare la copia di allora, con la barra di stato e lo
++# sfondo che sway-lean-rf35h.patch toglie. Se la copia contiene ancora la
++# barra di SERIE di LibreELEC - riconoscibile dal suo status_command - la si
++# salva e la si sostituisce col default nuovo. Una tantum: il default nuovo
++# non contiene quella riga, quindi al riavvio successivo non scatta piu'. Se
++# l'utente ha tolto o cambiato la barra da se', la sua configurazione non
++# viene toccata; se l'aveva modificata altrove, resta nel backup.
++if grep -q "status_command while date" ${SWAY_CONFIG_USER} 2>/dev/null; then
++  cp ${SWAY_CONFIG_USER} ${SWAY_CONFIG_USER}.rf35h-backup
++  cp ${SWAY_CONFIG_USER_DEFAULT} ${SWAY_CONFIG_USER}
++fi
+ 
+ if [ ! -f ${SWAY_CONFIG_COLOR} ]; then
+   cp ${SWAY_CONFIG_COLOR_DEFAULT} ${SWAY_CONFIG_BASEDIR}

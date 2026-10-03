@@ -1,0 +1,350 @@
+#!/bin/sh
+# rf35h-ikemen - IKEMEN GO sulla XiFan RF35H (devaOS / Lakka)
+#
+#   rf35h-ikemen start [r]             da RetroArch: renderer r (se c'e') e avvio del servizio
+#   rf35h-ikemen run                   avvia IKEMEN (ExecStart di rf35h-ikemen.service)
+#   rf35h-ikemen back                  dopo l'uscita: stato del renderer e ritorno a RetroArch
+#   rf35h-ikemen renderer [r]          r = opengles | opengl  (senza r: stampa l'attuale)
+#   rf35h-ikemen prepare               prepara la cartella di gioco senza avviare
+#
+# Da RetroArch: Core senza contenuto > IKEMEN GO. E' il core lanciatore
+# ikemen_libretro.so, che chiama "start": il servizio e' in conflitto con
+# retroarch.service, quindi avviarlo chiude RetroArch, e uscire dal menu
+# principale di IKEMEN lo riporta su.
+#
+# Cartella di gioco: /storage/roms/ikemen (condivisa in rete come ROMs/ikemen).
+# Personaggi in chars/, stage in stages/, elenco in data/select.def. I file del
+# motore (script Lua, stati comuni, shader) si riallineano da soli quando
+# l'immagine porta una versione nuova; quelli dello screenpack si aggiungono
+# solo se mancano, quindi le tue modifiche restano.
+#
+# Renderer (Video.RenderMode in save/config.ini, lo stesso che cambia il menu di
+# IKEMEN; il core lanciatore lo mostra nelle sue opzioni, da "renderer"):
+#   opengles  OpenGL ES 3.2  predefinito. Panfrost espone ES 3.1: il 3.2 lo
+#                            dichiara Mesa (MESA_GLES_VERSION_OVERRIDE), e
+#                            l'unica funzione 3.2 che manca davvero, il geometry
+#                            shader, serve solo alle ombre dei modelli 3D.
+#   opengl    OpenGL 3.3     desktop GL; Panfrost arriva a 3.1, il 3.3 lo
+#                            dichiara Mesa (MESA_GL_VERSION_OVERRIDE).
+# Vulkan non c'e': Mesa PanVK sul Mali-G31 espone Vulkan 1.0 (vulkaninfo sulla
+# console), il renderer Vulkan di IKEMEN vuole la 1.3, e forzandola
+# (MESA_VK_VERSION_OVERRIDE) parte senza errori ma lascia lo schermo nero, senza
+# un modo di uscirne dalla console. Il driver funziona - vkcube e RetroArch in
+# vulkan girano - e' questa combinazione che no. Qui IKEMEN_DISABLE_VULKAN lo
+# toglie anche dal menu di IKEMEN (patch 0003), e un RenderMode Vulkan rimasto
+# in config.ini torna a OpenGL ES.
+# Se un renderer diverso da opengles fa uscire IKEMEN con errore entro
+# FAIL_WINDOW secondi, si torna a opengles e si riprova una volta; la nota resta
+# in /storage/rf35h-logs.
+set -u
+
+SHARE="${IKEMEN_SHARE:-/usr/share/ikemen}"
+GAME="${IKEMEN_HOME:-/storage/roms/ikemen}"
+BIN="${IKEMEN_BIN:-/usr/bin/ikemen}"
+STATE_DIR="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+LOGDIR="${RF35H_LOGDIR:-/storage/rf35h-logs}"
+FAIL_WINDOW="${IKEMEN_FAIL_WINDOW:-20}"
+STATE="${STATE_DIR}/ikemen-renderer"
+RA_CFG="${IKEMEN_RA_CFG:-/storage/.config/retroarch/retroarch.cfg}"
+CFG="${GAME}/save/config.ini"
+LOG="${LOGDIR}/ikemen.log"
+STOPPING=0
+
+die() { echo "rf35h-ikemen: $*" >&2; exit 1; }
+say() { echo "rf35h-ikemen: $*" >&2; }
+
+mode_of() {
+	case "$1" in
+		opengles) echo "OpenGL ES 3.2" ;;
+		opengl)   echo "OpenGL 3.3" ;;
+		*)        return 1 ;;
+	esac
+}
+# RenderMode -> nome breve; qualunque altra cosa (vuoto, "Vulkan 1.3" di una
+# versione precedente, "OpenGL ES 3.1" di vecchie build...) vale opengles,
+# l'unico che su questa GPU parte sempre.
+name_of() {
+	case "$1" in
+		"OpenGL 3.3") echo opengl ;;
+		*)            echo opengles ;;
+	esac
+}
+
+# ini_get <file> <sezione> <chiave>: il valore, senza commento in coda.
+# Sezioni e chiavi senza distinzione di maiuscole, come le legge IKEMEN.
+ini_get() {
+	[ -f "$1" ] || return 0
+	awk -v sec="$2" -v key="$3" '
+	/^[[:space:]]*\[/ {
+		s = $0; sub(/^[[:space:]]*\[/, "", s); sub(/\].*$/, "", s)
+		insec = (tolower(s) == tolower(sec)); next
+	}
+	insec && /=/ {
+		k = $0; sub(/[[:space:]]*=.*$/, "", k); sub(/^[[:space:]]*/, "", k)
+		if (tolower(k) == tolower(key)) {
+			v = $0; sub(/\r$/, "", v); sub(/^[^=]*=[[:space:]]*/, "", v)
+			sub(/[[:space:]]*(;.*)?$/, "", v)
+			print v; exit
+		}
+	}' "$1"
+}
+
+# ini_set <file> <sezione> <chiave> <valore>: cambia solo il valore e lascia
+# com'e' il resto della riga a sinistra dell'uguale (IKEMEN allinea le colonne);
+# aggiunge la chiave in fondo alla sezione, o la sezione in fondo al file.
+# Scrittura su file temporaneo e rename: un'interruzione non lascia un
+# config.ini a meta', che IKEMEN rimpiazzerebbe con i valori di fabbrica.
+ini_set() {
+	[ "$(ini_get "$1" "$2" "$3")" = "$4" ] && return 0
+	tmp="$1.rf35h.$$"
+	awk -v sec="$2" -v key="$3" -v val="$4" '
+	function flush() { if (insec && !done) { print key " = " val; done = 1 } }
+	/^[[:space:]]*\[/ {
+		if (insec) flush()
+		s = $0; sub(/^[[:space:]]*\[/, "", s); sub(/\].*$/, "", s)
+		insec = (tolower(s) == tolower(sec)); if (insec) seen = 1
+		print; next
+	}
+	insec && !done && /=/ {
+		k = $0; sub(/[[:space:]]*=.*$/, "", k); sub(/^[[:space:]]*/, "", k)
+		if (tolower(k) == tolower(key)) {
+			# CRLF (config.ini modificato da Windows via rete): si conserva
+			cr = ($0 ~ /\r$/) ? "\r" : ""
+			match($0, /=[[:space:]]*/)
+			print substr($0, 1, RSTART + RLENGTH - 1) val cr; done = 1; next
+		}
+	}
+	{ print }
+	END {
+		if (insec) flush()
+		if (!seen) { print ""; print "[" sec "]"; print key " = " val }
+	}' "$1" > "${tmp}" && mv -f "${tmp}" "$1" || { rm -f "${tmp}"; return 1; }
+}
+
+# Il file di stato ("renderer" lo stampa, il core lanciatore lo mostra fra le
+# sue opzioni): una parola sola, riscritta solo se cambia.
+save_state() {
+	[ "$(cat "${STATE}" 2>/dev/null)" = "$1" ] && return 0
+	mkdir -p "${STATE_DIR}" && printf '%s\n' "$1" > "${STATE}.tmp.$$" && mv -f "${STATE}.tmp.$$" "${STATE}"
+}
+
+# Tempo di gioco in "Core senza contenuto". RetroArch lo tiene per il core
+# lanciatore in <log>/IKEMEN GO/IKEMEN GO.lrtl ("runtime": "H:MM:SS"), ma per
+# lui la sessione dura i 2 s prima dell'avvio: qui si aggiunge quella vera.
+# Solo file che esistono gia' (log disattivati: niente); RetroArch li rilegge
+# e ci somma i suoi secondi al prossimo avvio.
+# Come la legge RetroArch: vale la prima occorrenza della chiave, e "~" e' la
+# HOME (RetroArch abbrevia cosi' i percorsi sotto /storage quando salva).
+ra_cfg_get() {
+	[ -r "${RA_CFG}" ] || return 0
+	v="$(sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*\$/\1/p" "${RA_CFG}" | head -n 1)"
+	# "~" letterale, voluto: e' come RetroArch scrive i percorsi sotto HOME
+	# shellcheck disable=SC2088
+	case "${v}" in "~"|"~/"*) v="${HOME:-/storage}${v#\~}" ;; esac
+	printf '%s\n' "${v}"
+}
+runtime_add() {
+	case "$1" in ''|*[!0-9]*|0) return 0 ;; esac
+	dir="$(ra_cfg_get runtime_log_directory)"
+	case "${dir}" in
+		''|default)
+			dir="$(ra_cfg_get playlist_directory)"
+			case "${dir}" in ''|default) dir="/storage/.config/retroarch/playlists" ;; esac
+			dir="${dir}/logs" ;;
+	esac
+	for f in "${dir}/IKEMEN GO/IKEMEN GO.lrtl" "${dir}/IKEMEN GO.lrtl"; do
+		[ -f "${f}" ] || continue
+		awk -v add="$1" '
+		/"runtime"[[:space:]]*:/ && match($0, /"[0-9]+:[0-9][0-9]:[0-9][0-9]"/) {
+			split(substr($0, RSTART + 1, RLENGTH - 2), t, ":")
+			sec = t[1] * 3600 + t[2] * 60 + t[3] + add
+			$0 = substr($0, 1, RSTART) sprintf("%d:%02d:%02d", int(sec / 3600), int((sec % 3600) / 60), sec % 60) substr($0, RSTART + RLENGTH - 1)
+		}
+		{ print }' "${f}" > "${f}.rf35h.$$" && mv -f "${f}.rf35h.$$" "${f}" || rm -f "${f}.rf35h.$$"
+	done
+}
+
+# sync_list <lista> <sovrascrivi 0|1>: copia i file elencati da SHARE a GAME.
+sync_list() {
+	[ -f "$1" ] || return 0
+	while IFS= read -r rel; do
+		case "${rel}" in ''|/*|*..*) continue ;; esac
+		src="${SHARE}/${rel}"; dst="${GAME}/${rel}"
+		[ -f "${src}" ] || continue
+		if [ "$2" = 1 ] || [ ! -e "${dst}" ]; then
+			mkdir -p "${dst%/*}" && cp -f "${src}" "${dst}.rf35h-new" && mv -f "${dst}.rf35h-new" "${dst}" \
+				|| { say "copia fallita: ${rel}"; return 1; }
+		fi
+	done < "$1"
+}
+
+prepare() {
+	[ -x "${BIN}" ] && [ -d "${SHARE}" ] || die "IKEMEN GO non e' installato (${BIN}, ${SHARE})"
+	mkdir -p "${GAME}/save" "${LOGDIR}" || die "non riesco a creare ${GAME}"
+	# motore: sovrascritto quando cambia versione (script Lua e stati comuni
+	# devono essere quelli del binario)
+	v="$(cat "${SHARE}/engine.version" 2>/dev/null)"
+	if [ "$(cat "${GAME}/.rf35h-engine" 2>/dev/null)" != "${v}" ]; then
+		say "allineo i file del motore (${v})"
+		sync_list "${SHARE}/engine.list" 1 && printf '%s\n' "${v}" > "${GAME}/.rf35h-engine"
+	fi
+	# screenpack e KFM: solo i file che mancano, alla prima volta o quando
+	# l'immagine ne porta una versione nuova
+	v="$(cat "${SHARE}/screenpack.version" 2>/dev/null)"
+	if [ "$(cat "${GAME}/.rf35h-screenpack" 2>/dev/null)" != "${v}" ]; then
+		say "copio lo screenpack (${v}), senza toccare i file esistenti"
+		sync_list "${SHARE}/screenpack.list" 0 && printf '%s\n' "${v}" > "${GAME}/.rf35h-screenpack"
+	fi
+	# configurazione iniziale per la console; il renderer scelto dal menu prima
+	# del primo avvio sta solo nel file di stato
+	if [ ! -s "${CFG}" ]; then
+		cp -f "${SHARE}/rf35h-default-config.ini" "${CFG}" || die "manca ${SHARE}/rf35h-default-config.ini"
+		r="$(cat "${STATE}" 2>/dev/null)"
+		m="$(mode_of "${r}")" && ini_set "${CFG}" Video RenderMode "${m}"
+	fi
+	# Ombre dei modelli 3D: su Mali-G31 non esiste il geometry shader. Con
+	# l'override di versione GL Mesa lo accetterebbe comunque: si tengono
+	# spente, anche se il menu di IKEMEN le riaccende.
+	ini_set "${CFG}" Video EnableModelShadow 0
+	# Un RenderMode sconosciuto IKEMEN lo tratterebbe come OpenGL 3.3, e un
+	# "Vulkan 1.3" rimasto da una versione precedente darebbe lo schermo nero:
+	# tutto cio' che non e' OpenGL 3.3 diventa OpenGL ES.
+	cur="$(ini_get "${CFG}" Video RenderMode)"
+	m="$(mode_of "$(name_of "${cur}")")"
+	[ "${cur}" = "${m}" ] || ini_set "${CFG}" Video RenderMode "${m}"
+}
+
+set_env() {
+	unset MESA_GLES_VERSION_OVERRIDE MESA_GL_VERSION_OVERRIDE MESA_GLSL_VERSION_OVERRIDE MESA_VK_VERSION_OVERRIDE
+	case "$1" in
+		opengles) export MESA_GLES_VERSION_OVERRIDE=3.2 ;;
+		opengl)   export MESA_GL_VERSION_OVERRIDE=3.3 MESA_GLSL_VERSION_OVERRIDE=330 ;;
+	esac
+}
+
+common_env() {
+	# Wayland se sway gira (Lakka), altrimenti KMS diretto (build senza
+	# compositore). IKEMEN_VIDEODRIVER forza una scelta, per le prove.
+	if [ -n "${IKEMEN_VIDEODRIVER:-}" ]; then
+		export SDL_VIDEODRIVER="${IKEMEN_VIDEODRIVER}"
+	elif [ -n "${WAYLAND_DISPLAY:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/${WAYLAND_DISPLAY}" ]; then
+		export SDL_VIDEODRIVER=wayland
+	else
+		export SDL_VIDEODRIVER=kmsdrm
+	fi
+	# audio: SDL e' compilata solo con ALSA (niente PulseAudio/PipeWire in
+	# Lakka), quindi non serve forzarla; SDL_AUDIODRIVER dall'esterno vale
+	# il joypad arriva da evdev, non dal compositore: non perderlo se sway
+	# non da' il fuoco alla finestra
+	export SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1
+	# Vulkan spento anche dentro IKEMEN (patch 0003): sparisce dal menu Opzioni
+	# > Video, e un RenderMode Vulkan torna a OpenGL. Vedi l'intestazione.
+	export IKEMEN_DISABLE_VULKAN=1
+	# mappatura del joypad della RF35H anche se save/config.ini punta altrove
+	if [ -r "${SHARE}/external/gamecontrollerdb.txt" ]; then
+		SDL_GAMECONTROLLERCONFIG="$(grep -v '^[[:space:]]*#' "${SHARE}/external/gamecontrollerdb.txt")"
+		export SDL_GAMECONTROLLERCONFIG
+	fi
+	# Il garbage collector di Go lavora di piu' vicino a questo tetto invece di
+	# far crescere il processo fino all'OOM killer (730 MB di RAM in tutto).
+	if [ -z "${GOMEMLIMIT:-}" ]; then
+		kb="$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null)"
+		case "${kb}" in ''|*[!0-9]*) ;; *) export GOMEMLIMIT="$((kb * 6 / 10 / 1024))MiB" ;; esac
+	fi
+}
+
+launch() {
+	[ -f "${LOG}" ] && mv -f "${LOG}" "${LOGDIR}/ikemen.prev.log"
+	{ echo "=== rf35h-ikemen $(date)  renderer $1 ($(mode_of "$1"))"; env | grep -E '^(SDL_[A-Z_]*DRIVER|MESA_[A-Z_]*|PAN_[A-Z_]*|GOMEMLIMIT|IKEMEN_DISABLE_VULKAN)=' | sort; } > "${LOG}"
+	"${BIN}" >> "${LOG}" 2>&1 &
+	pid=$!
+	# systemctl stop (o lo spegnimento) manda TERM a tutto il cgroup: qui basta
+	# non lasciare orfani, e ricordarsi che l'uscita e' voluta, non un errore
+	# del renderer (niente ripiego, niente nuovo avvio)
+	trap 'STOPPING=1; kill -TERM "${pid}" 2>/dev/null' TERM INT
+	wait "${pid}"; rc=$?
+	# wait interrotto da un segnale: aspetto la fine vera
+	while kill -0 "${pid}" 2>/dev/null; do wait "${pid}"; rc=$?; done
+	trap - TERM INT
+	return "${rc}"
+}
+
+run() {
+	prepare
+	cd "${GAME}" || die "non entro in ${GAME}"
+	common_env
+	r="$(name_of "$(ini_get "${CFG}" Video RenderMode)")"
+	save_state "${r}"
+	tries=1
+	while :; do
+		set_env "${r}"
+		t0="$(date +%s)"
+		launch "${r}"; rc=$?
+		el=$(($(date +%s) - t0))
+		runtime_add "${el}"
+		[ "${STOPPING}" = 1 ] && return "${rc}"
+		now="$(name_of "$(ini_get "${CFG}" Video RenderMode)")"
+		if [ "${rc}" -ne 0 ] && [ "${el}" -lt "${FAIL_WINDOW}" ] && [ "${r}" != opengles ] && [ "${tries}" -eq 1 ]; then
+			note="${LOGDIR}/ikemen-fallback-$(date +%Y%m%d-%H%M%S).txt"
+			{
+				echo "IKEMEN GO con il renderer '${r}' e' uscito con codice ${rc} dopo ${el} s."
+				echo "Torno a 'opengles' e riprovo. Per rimettere '${r}': Opzioni > Video in IKEMEN, oppure"
+				echo "Menu rapido > Opzioni del core nei 2 s dopo aver scelto IKEMEN GO in Core senza contenuto."
+				echo "--- ultime righe del log ---"
+				tail -n 40 "${LOG}"
+			} > "${note}"
+			say "'${r}' non parte (codice ${rc} in ${el} s): torno a opengles, vedi ${note}"
+			ini_set "${CFG}" Video RenderMode "$(mode_of opengles)"
+			r=opengles; tries=2
+			save_state "${r}"
+			continue
+		fi
+		# il renderer puo' essere stato cambiato dal menu di IKEMEN
+		save_state "${now}"
+		return "${rc}"
+	done
+}
+
+# Dal core lanciatore di RetroArch. Il renderer passa da renderer() (che
+# rifiuta cio' che non conosce, vulkan compreso), poi il servizio: --no-block
+# perche' il job non aspetti RetroArch, che e' proprio cio' che systemd sta per
+# fermare.
+start() {
+	if [ -n "${1:-}" ]; then
+		( renderer "$1" ) || say "renderer '$1' non applicato, resta $(renderer)"
+	fi
+	systemctl --no-block start rf35h-ikemen.service
+}
+
+back() {
+	[ -f "${CFG}" ] && save_state "$(name_of "$(ini_get "${CFG}" Video RenderMode)")"
+	# allo spegnimento non si riaccende niente
+	[ "$(systemctl is-system-running 2>/dev/null)" = stopping ] && return 0
+	systemctl --no-block start retroarch.service
+}
+
+renderer() {
+	if [ -z "${1:-}" ]; then
+		# uno stato "vulkan" di una versione precedente non vale piu'
+		r="$(cat "${STATE}" 2>/dev/null)"
+		mode_of "${r}" >/dev/null || r="$(name_of "$(ini_get "${CFG}" Video RenderMode)")"
+		echo "${r}"
+		return 0
+	fi
+	[ "$1" = vulkan ] && die "Vulkan non e' disponibile per IKEMEN su questa console: il driver del Mali-G31 espone Vulkan 1.0, IKEMEN vuole la 1.3 (schermo nero)"
+	m="$(mode_of "$1")" || die "renderer sconosciuto '$1' (opengles, opengl)"
+	save_state "$1"
+	# senza config.ini lo applichera' prepare() al primo avvio, dal file di stato
+	if [ -f "${CFG}" ]; then
+		ini_set "${CFG}" Video RenderMode "${m}" || die "non riesco a scrivere ${CFG}"
+	fi
+}
+
+case "${1:-}" in
+	start)    start "${2:-}" ;;
+	run)      run ;;
+	back)     back ;;
+	renderer) renderer "${2:-}" ;;
+	prepare)  prepare ;;
+	*)        sed -n '2,9s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac

@@ -1,0 +1,15 @@
+[Unit]
+Description=XiFan RF35H default per-core RetroArch overrides
+# Prima che RetroArch parta, o al primo avvio caricherebbe un core senza il
+# suo override. After local-fs: gli override vanno in /storage.
+After=local-fs.target
+Before=retroarch.target
+ConditionPathExists=/usr/share/rf35h/retroarch-overrides
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/rf35h-overrides
+
+[Install]
+WantedBy=multi-user.target

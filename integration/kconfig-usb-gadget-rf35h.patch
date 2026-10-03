@@ -1,0 +1,37 @@
+Subject: RK3326 kernel: gadget USB via configfs (RNDIS, ECM, NCM) per la modalita\x27 "trasferimento file" dell\x27RF35H
+
+USB_GADGET era gia\x27 =y ma senza nessuna funzione. Il DWC2 e\x27
+dual-role e il
+role switch e\x27 controllabile da userspace: manca solo il gadget.
+
+---
+--- a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
++++ b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+@@ -4687,7 +4687,26 @@
+ # CONFIG_USB_DUMMY_HCD is not set
+ # end of USB Peripheral Controller
+ 
+-# CONFIG_USB_CONFIGFS is not set
++CONFIG_USB_CONFIGFS=y
++# CONFIG_USB_CONFIGFS_SERIAL is not set
++# CONFIG_USB_CONFIGFS_ACM is not set
++# CONFIG_USB_CONFIGFS_OBEX is not set
++CONFIG_USB_CONFIGFS_NCM=y
++CONFIG_USB_CONFIGFS_ECM=y
++# CONFIG_USB_CONFIGFS_ECM_SUBSET is not set
++CONFIG_USB_CONFIGFS_RNDIS=y
++# CONFIG_USB_CONFIGFS_EEM is not set
++# CONFIG_USB_CONFIGFS_MASS_STORAGE is not set
++# CONFIG_USB_CONFIGFS_F_LB_SS is not set
++# CONFIG_USB_CONFIGFS_F_FS is not set
++# CONFIG_USB_CONFIGFS_F_UAC1 is not set
++# CONFIG_USB_CONFIGFS_F_UAC1_LEGACY is not set
++# CONFIG_USB_CONFIGFS_F_UAC2 is not set
++# CONFIG_USB_CONFIGFS_F_MIDI is not set
++# CONFIG_USB_CONFIGFS_F_MIDI2 is not set
++# CONFIG_USB_CONFIGFS_F_HID is not set
++# CONFIG_USB_CONFIGFS_F_UVC is not set
++# CONFIG_USB_CONFIGFS_F_PRINTER is not set
+ 
+ #
+ # USB Gadget precomposed configurations

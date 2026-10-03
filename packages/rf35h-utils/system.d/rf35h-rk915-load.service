@@ -1,0 +1,17 @@
+[Unit]
+Description=XiFan RF35H load the RK915 Wi-Fi driver before the network managers
+# AURKNIX carica rk915 da un servizio ordinato PRIMA di connman, non dal
+# coldplug: cosi' il gestore di rete non parte mai prima che l'interfaccia
+# esista. Noi lo lasciavamo a modules-load.d, che garantisce solo la fase
+# sysinit ma non l'ordine rispetto a connman.
+After=systemd-modules-load.service local-fs.target
+Before=connman.service wpa_supplicant.service
+ConditionPathExists=/proc/device-tree/wireless-wlan/wifi_chip_type
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/rf35h-rk915-load
+
+[Install]
+WantedBy=multi-user.target

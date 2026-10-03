@@ -1,0 +1,37 @@
+Subject: retroarch: il toggle dei servizi Lakka non svuota piu il file di configurazione
+
+systemd_service_toggle apriva in scrittura il file che fa da interruttore del
+servizio, svuotandolo. Quel file e anche l EnvironmentFile delle opzioni: per
+sshd, SSH_ARGS con PasswordAuthentication=no (la protezione standard contro la
+password root di default) spariva riaccendendo SSH dal menu, e l accesso con
+password tornava attivo senza avviso. Ora il file si crea solo se manca.
+Vale per SSH, Samba e Bluetooth.
+
+---
+--- a/menu/menu_setting.c
++++ b/menu/menu_setting.c
+@@ -9210,10 +9210,21 @@
+ 
+    if (pid == 0)
+    {
++      /* devaOS RF35H: il file e' l'interruttore del servizio (la unit ha
++       * ConditionPathExists su di esso), ma e' anche l'EnvironmentFile da cui
++       * il servizio legge le proprie opzioni. Aprirlo in scrittura lo SVUOTAVA:
++       * per sshd voleva dire che SSH_ARGS="-o PasswordAuthentication=no" - la
++       * protezione standard di LibreELEC contro la password root di default -
++       * spariva la prima volta che si riaccendeva SSH dal menu, e l'accesso con
++       * password tornava attivo senza alcun avviso. Basta che il file esista:
++       * lo si crea solo se manca, e il contenuto dell'utente resta. */
+       if (enable)
+-         filestream_close(filestream_open(path,
+-                  RETRO_VFS_FILE_ACCESS_WRITE,
+-                  RETRO_VFS_FILE_ACCESS_HINT_NONE));
++      {
++         if (!filestream_exists(path))
++            filestream_close(filestream_open(path,
++                     RETRO_VFS_FILE_ACCESS_WRITE,
++                     RETRO_VFS_FILE_ACCESS_HINT_NONE));
++      }
+       else
+          filestream_delete(path);
+ 

@@ -1,0 +1,9 @@
+# devaOS RF35H: mappature SDL GameController per IKEMEN GO.
+# Joypad integrato (rocknix-joypad): Bus 0019, Vendor 484b, Product 1101,
+# Version 0100, nome "retrogame_joypad". La prima riga ha nel GUID il CRC16 del
+# nome, come lo calcola SDL >= 2.26; la seconda ha CRC 0 e vale per ogni
+# versione. Indici presi dall'autoconfig RetroArch dell'overlay; SDL usa il
+# layout posizionale Xbox (a in basso, b a destra, x a sinistra, y in alto).
+# I pad USB (Xbox, PlayStation, 8BitDo...) li conosce gia' SDL da sola.
+19009b4d4b4800000111000000010000,retrogame_joypad,a:b0,b:b1,x:b3,y:b2,back:b8,guide:b10,start:b9,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,
+190000004b4800000111000000010000,retrogame_joypad,a:b0,b:b1,x:b3,y:b2,back:b8,guide:b10,start:b9,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,leftstick:b11,rightstick:b12,dpup:b13,dpdown:b14,dpleft:b15,dpright:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,

@@ -1,0 +1,62 @@
+Subject: RK3326 options per l'RF35H: Vulkan (PanVK) accanto a OpenGL ES, IKEMEN GO e i giochi
+
+---
+--- a/projects/Rockchip/devices/RK3326/options
++++ b/projects/Rockchip/devices/RK3326/options
+@@ -155,6 +155,56 @@
+     if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
+       SYSTEM_SIZE=3072
+     fi
++
++  # devaOS RF35H: Vulkan accanto a OpenGL ES, non al suo posto.
++  #
++  # Mesa compila PanVK (VULKAN_DRIVERS_MESA=panfrost, da config/graphic) e
++  # RetroArch il driver "vulkan". I core del set di default non cambiano
++  # renderer: flycast e parallel_n64 hanno gia' il loro Vulkan, ParaLLEl-RDP
++  # di mupen64plus_next Lakka lo compila solo su Generic. OpenGL ES resta il
++  # predefinito ovunque: Vulkan si sceglie in RetroArch da
++  # Impostazioni > Driver > Video. IKEMEN no: resta su OpenGL (docs/diario.md).
++  # Su Bifrost (Mali-G31) PanVK e' "non conforme" per Mesa: si attiva solo con
++  # PAN_I_WANT_A_BROKEN_VULKAN_DRIVER=1, che rf35h-utils imposta per
++  # RetroArch insieme al ripiego automatico su "gl" se Vulkan non parte.
++  # RF35H_VULKAN=no al momento della build torna a un'immagine senza Vulkan:
++  # PKG_STAMP su VULKAN (apply.sh) fa ricompilare Mesa, RetroArch e i core.
++  #
++  # IKEMEN GO (ikemen-go): motore di picchiaduro, in RetroArch fra i Core
++  # senza contenuto (core lanciatore ikemen_libretro). RF35H_IKEMEN=no lo
++  # esclude (niente toolchain Go, niente screenpack da scaricare).
++  #
++  # Giochi fatti per questa console. Nessun dato dei giochi nell'immagine:
++  # ognuno si spegne con la sua variabile (build-lakka-rf35h.sh: --no-...).
++  #   gtasa            GTA: San Andreas dall'APK/OBB 2.11.311 dell'utente;
++  #                    lanciatore in Core senza contenuto       RF35H_GTASA
++  #   re3              GTA III (re3), core libretro: solo se l'albero ha il
++  #                    pacchetto (--re3, da un repo privato). Codice senza
++  #                    licenza: solo immagini personali         RF35H_RE3
++  #   openxeenng       World of Xeen (OpenXeenNG, Rust), core libretro;
++  #                    porta con se' rust-bin:host            RF35H_OPENXEENNG
++  #   deva_adventures  Deva's Awesome Adventures, gioco didattico,
++  #                    core libretro senza contenuto     RF35H_DEVA_ADVENTURES
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      if [ "${RF35H_VULKAN:-yes}" != "no" ]; then
++        VULKAN="vulkan-loader"
++      fi
++      if [ "${RF35H_IKEMEN:-yes}" != "no" ]; then
++        ADDITIONAL_PACKAGES+=" ikemen-go"
++      fi
++      if [ "${RF35H_GTASA:-yes}" != "no" ]; then
++        ADDITIONAL_PACKAGES+=" gtasa"
++      fi
++      if [ "${RF35H_RE3:-yes}" != "no" ] && [ -f "${PROJECT_DIR}/${PROJECT}/devices/${DEVICE}/packages/re3/package.mk" ]; then
++        ADDITIONAL_PACKAGES+=" re3"
++      fi
++      if [ "${RF35H_OPENXEENNG:-yes}" != "no" ]; then
++        ADDITIONAL_PACKAGES+=" openxeenng"
++      fi
++      if [ "${RF35H_DEVA_ADVENTURES:-yes}" != "no" ]; then
++        ADDITIONAL_PACKAGES+=" deva_adventures"
++      fi
++    fi
+   # bootargs with serial console enable for debug
+   # EXTRA_CMDLINE="console=ttyS2,1500000n8 console=tty0 net.iframes=0 fbcon=rotate:3 systemd.debug_shell=ttyS2"
+ 

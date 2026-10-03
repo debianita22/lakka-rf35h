@@ -1,0 +1,16 @@
+[Unit]
+Description=XiFan RF35H idle suspend
+After=rf35h-state.service
+
+[Service]
+# Minuti di inattivita' prima di sospendere. 0 disattiva.
+# Si cambia in /storage/.config/rf35h-idle.conf, una riga:
+#   RF35H_IDLE_MINUTES=15
+Environment=RF35H_IDLE_MINUTES=10
+EnvironmentFile=-/storage/.config/rf35h-idle.conf
+ExecStart=/usr/bin/rf35h-idle
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+Subject: cannonball: fissare -std=gnu++11 per il Boost incluso
+
+Il core porta una copia vecchia di Boost (deps/boost/multi_index) che con lo
+standard predefinito di GCC 16 non compila: usa i membri di std::allocator
+rimossi in C++20.
+
+Il Makefile fissa -std=gnu++11 per Switch ed Emscripten ma non per unix. Si
+mette lo stesso standard, sulla variabile che la regola dei .cpp usa davvero.
+
+---
+--- a/packages/lakka/libretro_cores/cannonball/package.mk
++++ b/packages/lakka/libretro_cores/cannonball/package.mk
+@@ -7,6 +7,21 @@
+ PKG_LONGDESC="Cannonball: An Enhanced OutRun Engine"
+ PKG_TOOLCHAIN="make"
+ 
++# devaOS RF35H: il core porta con se' una copia vecchia di Boost
++# (deps/boost/multi_index), che con lo standard C++ predefinito di GCC 16
++# fallisce - "no type named 'pointer' in ... trampoline": sono i membri di
++# std::allocator deprecati in C++17 e rimossi in C++20, su cui quel Boost si
++# appoggia.
++#
++# Il Makefile fissa -std=gnu++11 per Nintendo Switch ed Emscripten ma non per
++# la piattaforma unix, dove lascia decidere al compilatore. Si mette lo stesso
++# standard che il progetto usa altrove. La regola dei .cpp e'
++# "$(CXX) -c ... $(CPPFLAGS) $(CXXFLAGS)", quindi CXXFLAGS e' la variabile
++# giusta - al contrario di uae4arm, dove serviva CFLAGS.
++pre_make_target() {
++  CXXFLAGS+=" -std=gnu++11"
++}
++
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
+     cp -v cannonball_libretro.so ${INSTALL}/usr/lib/libretro/

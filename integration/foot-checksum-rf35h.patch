@@ -1,0 +1,32 @@
+Subject: foot: aggiorna il checksum all'archivio che codeberg serve oggi
+
+Stessa cosa gia' vista con fcft: codeberg genera gli archivi al volo con
+"git archive" e i byte sono cambiati.
+
+  Incorrect checksum: got 9d6a6222... wanted 2213a78b...
+
+Da verificare prima di fidarsi, con lo stesso metodo usato per fcft:
+
+  ./lakka-rf35h/verify-tarball.sh \
+      https://codeberg.org/dnkl/foot/archive/1.26.1.tar.gz \
+      https://codeberg.org/dnkl/foot.git 1.26.1
+
+Curiosita' utile: tllist, dallo stesso autore e dalla stessa forge, si e'
+scaricato senza problemi. Quindi non e' codeberg ad aver cambiato tutto
+insieme - sono i singoli archivi a essere stati rigenerati in momenti
+diversi.
+
+---
+diff --git a/packages/wayland/util/foot/package.mk b/packages/wayland/util/foot/package.mk
+index c8abde5f..c194fc78 100644
+--- a/packages/wayland/util/foot/package.mk
++++ b/packages/wayland/util/foot/package.mk
+@@ -3,7 +3,7 @@
+ 
+ PKG_NAME="foot"
+ PKG_VERSION="1.26.1"
+-PKG_SHA256="2213a78b773c1f87bc503fcc2914d1f3474e9aaa2cb7fc92ec5dba4867ab71e0"
++PKG_SHA256="9d6a6222062111d0b8d7156cfbe4dc0bd74fcb9e8a387b0c81b99cc5087c526d"
+ PKG_LICENSE="MIT"
+ PKG_SITE="https://codeberg.org/dnkl/foot/"
+ PKG_URL="https://codeberg.org/dnkl/foot/archive/${PKG_VERSION}.tar.gz"

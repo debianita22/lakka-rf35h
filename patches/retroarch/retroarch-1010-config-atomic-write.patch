@@ -1,0 +1,88 @@
+Subject: config: scrittura atomica dei file di configurazione
+
+config_file_write apriva il file con fopen("wb"), che lo svuota subito: un
+crash, la batteria che si stacca o la scheda piena a meta' scrittura
+lasciavano retroarch.cfg vuoto o troncato, e gli errori di scrittura non
+venivano visti. Su Linux ora si scrive <path>.tmp con i permessi del file che
+si sostituisce, si controllano fflush, ferror, fsync e fclose, e solo allora
+lo si rinomina sopra l'originale. In caso di errore il file originale resta
+intero, la funzione restituisce false e la configurazione resta da salvare.
+Un collegamento simbolico resta tale: li' si scrive sul posto.
+
+---
+--- a/libretro-common/file/config_file.c
++++ b/libretro-common/file/config_file.c
+@@ -25,6 +25,10 @@
+ #include <stdio.h>
+ #include <ctype.h>
+ #include <errno.h>
++#if defined(__linux__)
++#include <sys/stat.h>
++#include <unistd.h>
++#endif
+ 
+ #include <retro_miscellaneous.h>
+ #include <compat/strl.h>
+@@ -1409,6 +1413,54 @@
+          config_file_dump(conf, stdout, sort);
+       else
+       {
++#if defined(__linux__)
++         /* devaOS RF35H: scrittura atomica. fopen("wb") sul file vero lo
++          * svuotava subito: un crash, la batteria che si stacca o la scheda
++          * piena a meta' scrittura lasciavano retroarch.cfg vuoto o troncato,
++          * e gli errori di scrittura non venivano nemmeno visti. Ora si scrive
++          * "<path>.tmp", lo si porta su disco e lo si rinomina sopra
++          * l'originale, che resta intero finche' il nuovo non e' completo.
++          * Un collegamento simbolico resta tale: li' si scrive sul posto. */
++         char tmp_path[PATH_MAX_LENGTH];
++         struct stat st;
++         void *buf    = NULL;
++         FILE *file   = NULL;
++         bool ok      = true;
++         bool in_place = (lstat(path, &st) == 0 && S_ISLNK(st.st_mode))
++               || (size_t)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path)
++                  >= sizeof(tmp_path);
++
++         if (in_place)
++            strlcpy(tmp_path, path, sizeof(tmp_path));
++         if (!(file = (FILE*)fopen_utf8(tmp_path, "wb")))
++            return false;
++         /* stessi permessi del file che si sostituisce */
++         if (!in_place && stat(path, &st) == 0)
++            fchmod(fileno(file), st.st_mode & 07777);
++
++         buf = calloc(1, 0x4000);
++         setvbuf(file, (char*)buf, _IOFBF, 0x4000);
++
++         config_file_dump(conf, file, sort);
++
++         if (fflush(file) != 0 || ferror(file) || fsync(fileno(file)) != 0)
++            ok = false;
++         if (fclose(file) != 0)
++            ok = false;
++         if (buf)
++            free(buf);
++
++         if (!in_place)
++         {
++            if (ok && rename(tmp_path, path) != 0)
++               ok = false;
++            if (!ok)
++               unlink(tmp_path);
++         }
++         /* il flag resta: un salvataggio successivo ci riprova */
++         if (!ok)
++            return false;
++#else
+          void* buf  = NULL;
+          FILE *file = (FILE*)fopen_utf8(path, "wb");
+          if (!file)
+@@ -1423,6 +1475,7 @@
+             fclose(file);
+          if (buf)
+             free(buf);
++#endif
+ 
+          /* Only update modified flag if config file
+           * is actually written to disk */

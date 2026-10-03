@@ -1,0 +1,7 @@
+[Unit]
+Description=XiFan RF35H late boot snapshot (RetroArch has had time to start or die)
+ConditionPathExists=!/storage/.please_resize_me
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rf35h-crashlog snapshot

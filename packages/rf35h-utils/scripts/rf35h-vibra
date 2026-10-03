@@ -1,0 +1,23 @@
+#!/bin/sh
+# rf35h-vibra on|off|status|--restore - interruttore della vibrazione.
+#
+# Il driver rocknix-singleadc-joypad espone rumble_enable in sysfs e riparte a
+# 1 a ogni boot; il menu Device Settings salva la scelta in
+# /storage/.config/rf35h/rumble e rf35h-state la ripristina con --restore.
+# Sull'RF35H il motore e' su un GPIO semplice: o spento o a piena forza.
+set -u
+SYS="${RF35H_RUMBLE_SYSFS:-/sys/devices/platform/rocknix-singleadc-joypad/rumble_enable}"
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/rumble"
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+apply() { [ -w "${SYS}" ] || { echo "rf35h-vibra: ${SYS} non scrivibile (driver assente?)" >&2; return 1; }; printf '%s\n' "$1" > "${SYS}"; }
+case "${1:-status}" in
+	on)  mkdir -p "${STATE}" 2>/dev/null; printf '1\n' > "${SAVED}" 2>/dev/null; apply 1 && echo "vibrazione accesa" ;;
+	off) mkdir -p "${STATE}" 2>/dev/null; printf '0\n' > "${SAVED}" 2>/dev/null; apply 0 && echo "vibrazione spenta" ;;
+	--restore)
+		# niente salvato = lasciare il default del driver (acceso)
+		v="$(rd "${SAVED}" "")"
+		case "${v}" in 0|1) apply "${v}" ;; *) exit 0 ;; esac ;;
+	status) echo "driver: $(rd "${SYS}" '?')   salvato: $(rd "${SAVED}" 'nessuno (default: acceso)')" ;;
+	*) echo "uso: rf35h-vibra on|off|status|--restore" >&2; exit 2 ;;
+esac

@@ -1,0 +1,209 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: devaOS RF35H <devaos@rf35h>
+Date: Fri, 25 Sep 2026 15:33:23 +0200
+Subject: [PATCH 2/2] Fixes for the OpenGL ES and Vulkan renderers on ARM/Mesa
+
+GLES:
+- post-processing textures: RGBA8 instead of RGBA8_SNORM, which GLES
+  rejects (needs type BYTE, not color-renderable): both ping-pong
+  framebuffers were incomplete.
+- external shaders get a GLSL ES header with default precision (they
+  failed to compile), a failing one is skipped instead of crashing on a
+  nil program, and the sampler uniform is looked up as "Texture".
+Vulkan:
+- read the limits of the GPU actually used, not only of a discrete one
+  (on integrated GPUs minUniformBufferOffsetAlignment stayed 0).
+- clamp the scissor to the render target: "no window" produced a
+  131072x131072 scissor that some drivers wrap to empty (lavapipe drew
+  scaled 8-bit stages without background).
+---
+ src/render_gles32.go | 42 ++++++++++++++++++--------
+ src/render_vk.go     | 72 ++++++++++++++++++++++++++++++--------------
+ 2 files changed, 78 insertions(+), 36 deletions(-)
+
+diff --git a/src/render_gles32.go b/src/render_gles32.go
+index 5281644..16e3842 100644
+--- a/src/render_gles32.go
++++ b/src/render_gles32.go
+@@ -779,25 +779,37 @@ func (r *Renderer_GLES32) Init() {
+ 	// Compile post-processing shaders
+ 	// Because we only have one VAO, the attributes will only be set in EndFrame()
+ 
+-	// Pre-allocate the shader slice to accommodate all external shaders plus the identity shader
+-	r.postShaderSelect = make([]*ShaderProgram_GLES32, len(sys.cfg.Video.ExternalShaders)+1)
++	// Only the external shaders that compile, plus the identity shader
++	r.postShaderSelect = make([]*ShaderProgram_GLES32, 0, len(sys.cfg.Video.ExternalShaders)+1)
+ 
+ 	// Configure postVAO
+ 	gl.BindVertexArray(r.postVAO)
+ 	gl.BindBuffer(gl.ARRAY_BUFFER, r.postVertBuffer)
+ 
+-	// External Shaders
++	// External Shaders. They are shared with desktop GL and carry no default
++	// precision, which GLSL ES requires in fragment shaders: without this
++	// header they failed to compile, newShaderProgram returned nil and the
++	// next line dereferenced it (crash at startup). A shader that still does
++	// not compile is skipped instead of taking the whole game down.
++	const esPostHeader = "#version 320 es\nprecision highp float;\nprecision highp int;\n"
+ 	for i := 0; i < len(sys.cfg.Video.ExternalShaders); i++ {
+-		r.postShaderSelect[i], _ = r.newShaderProgram(string(sys.externalShaders[0][i])+"\x00", string(sys.externalShaders[1][i])+"\x00",
+-			"", fmt.Sprintf("Postprocess Shader #%v", i), true)
+-		r.postShaderSelect[i].RegisterAttributes("VertCoord") // "TexCoord" was registered but never used
+-		r.postShaderSelect[i].RegisterUniforms("Texture_GLES32", "TextureSize", "CurrentTime")
++		name := fmt.Sprintf("Postprocess Shader #%v", i)
++		postShader, err := r.newShaderProgram(esPostHeader+string(sys.externalShaders[0][i])+"\x00", esPostHeader+string(sys.externalShaders[1][i])+"\x00",
++			"", name, false)
++		if err != nil || postShader == nil {
++			LogMessage("External shader %v (%v) skipped: %v", i, sys.cfg.Video.ExternalShaders[i], err)
++			continue
++		}
++		postShader.RegisterAttributes("VertCoord") // "TexCoord" was registered but never used
++		// The sampler is called "Texture" in the shaders
++		postShader.RegisterUniforms("Texture", "TextureSize", "CurrentTime")
+ 
+ 		// Configure postVAO for this specific shader's attribute location
+-		if loc, ok := r.postShaderSelect[i].attributes["VertCoord"]; ok && loc >= 0 {
++		if loc, ok := postShader.attributes["VertCoord"]; ok && loc >= 0 {
+ 			gl.EnableVertexAttribArray(uint32(loc))
+ 			gl.VertexAttribPointer(uint32(loc), 2, gl.FLOAT, false, 0, nil)
+ 		}
++		r.postShaderSelect = append(r.postShaderSelect, postShader)
+ 	}
+ 
+ 	// Identity shader (no post-processing). This should be the last one in modern OpenGL
+@@ -812,7 +824,7 @@ func (r *Renderer_GLES32) Init() {
+ 	}
+ 
+ 	// It should be the last one in modern OpenGL
+-	r.postShaderSelect[len(r.postShaderSelect)-1] = identShader
++	r.postShaderSelect = append(r.postShaderSelect, identShader)
+ 
+ 	// Unbind for safety
+ 	gl.BindVertexArray(0)
+@@ -851,8 +863,12 @@ func (r *Renderer_GLES32) Init() {
+ 	r.fbo_pp = make([]uint32, 2)
+ 	r.fbo_pp_texture = make([]uint32, 2)
+ 
+-	// Shaders might use negative values, so
+-	// we specify that we want signed pixels
++	// Desktop GL uses signed pixels here (RGBA8_SNORM) because shaders might
++	// use negative values. OpenGL ES cannot: RGBA8_SNORM needs type BYTE and
++	// is not color-renderable without EXT_render_snorm, so the texture was
++	// rejected (GL_INVALID_OPERATION), both post-processing framebuffers were
++	// incomplete and every glClear on them failed. RGBA8 is renderable
++	// everywhere; the post-processing shaders output colours in [0,1].
+ 	// r.fbo_pp_texture
+ 	for i := 0; i < 2; i++ {
+ 		gl.GenTextures(1, &(r.fbo_pp_texture[i]))
+@@ -866,7 +882,7 @@ func (r *Renderer_GLES32) Init() {
+ 		gl.TexImage2D(
+ 			gl.TEXTURE_2D,
+ 			0,
+-			gl.RGBA8_SNORM,
++			gl.RGBA8,
+ 			sys.scrrect[2],
+ 			sys.scrrect[3],
+ 			0,
+@@ -1136,7 +1152,7 @@ func (r *Renderer_GLES32) EndFrame() {
+ 		}
+ 
+ 		// set post-processing parameters
+-		if loc, ok := postShader.uniforms["Texture_GLES32"]; ok && loc >= 0 {
++		if loc, ok := postShader.uniforms["Texture"]; ok && loc >= 0 {
+ 			r.SetUniformISub(loc, 0)
+ 		}
+ 		if loc, ok := postShader.uniforms["TextureSize"]; ok && loc >= 0 {
+diff --git a/src/render_vk.go b/src/render_vk.go
+index e67fd5f..7bed7a1 100644
+--- a/src/render_vk.go
++++ b/src/render_vk.go
+@@ -1548,33 +1548,42 @@ func (r *Renderer_VK) NewVulkanDevice(appInfo *vk.ApplicationInfo, window uintpt
+ 		vk.GetPhysicalDeviceProperties(r.gpuDevices[i], &gpuProperties)
+ 		gpuProperties.Deref()
+ 		if gpuProperties.DeviceType == vk.PhysicalDeviceTypeDiscreteGpu {
+-			//gpuProperties.Limits.Deref()
+-			r.maxAnisotropy = gpuProperties.Limits.MaxSamplerAnisotropy
+-			r.minUniformBufferOffsetAlignment = uint32(gpuProperties.Limits.MinUniformBufferOffsetAlignment)
+-			r.maxImageArrayLayers = gpuProperties.Limits.MaxImageArrayLayers
+-			maxSampleFlag := int32(gpuProperties.Limits.FramebufferColorSampleCounts & gpuProperties.Limits.FramebufferDepthSampleCounts)
+-			maxSamples := 1
+-			if maxSampleFlag&int32(vk.SampleCount64Bit) > 0 {
+-				maxSamples = 64
+-			} else if maxSampleFlag&int32(vk.SampleCount32Bit) > 0 {
+-				maxSamples = 32
+-			} else if maxSampleFlag&int32(vk.SampleCount16Bit) > 0 {
+-				maxSamples = 16
+-			} else if maxSampleFlag&int32(vk.SampleCount8Bit) > 0 {
+-				maxSamples = 8
+-			} else if maxSampleFlag&int32(vk.SampleCount4Bit) > 0 {
+-				maxSamples = 4
+-			} else if maxSampleFlag&int32(vk.SampleCount2Bit) > 0 {
+-				maxSamples = 2
+-			}
+-			if sys.msaa > int32(maxSamples) {
+-				sys.cfg.SetValueUpdate("Video.MSAA", maxSamples)
+-				sys.msaa = int32(maxSamples)
+-			}
+ 			r.gpuIndex = uint32(i)
+ 			break
+ 		}
+ 	}
++	// Limits of the GPU actually used, discrete or not. They used to be read
++	// only for a discrete GPU: on integrated/SoC GPUs (e.g. Mali) the uniform
++	// offset alignment stayed 0 and the dynamic uniform offsets were not
++	// aligned to what the device requires.
++	{
++		var gpuProperties vk.PhysicalDeviceProperties
++		vk.GetPhysicalDeviceProperties(r.gpuDevices[r.gpuIndex], &gpuProperties)
++		gpuProperties.Deref()
++		//gpuProperties.Limits.Deref()
++		r.maxAnisotropy = gpuProperties.Limits.MaxSamplerAnisotropy
++		r.minUniformBufferOffsetAlignment = uint32(gpuProperties.Limits.MinUniformBufferOffsetAlignment)
++		r.maxImageArrayLayers = gpuProperties.Limits.MaxImageArrayLayers
++		maxSampleFlag := int32(gpuProperties.Limits.FramebufferColorSampleCounts & gpuProperties.Limits.FramebufferDepthSampleCounts)
++		maxSamples := 1
++		if maxSampleFlag&int32(vk.SampleCount64Bit) > 0 {
++			maxSamples = 64
++		} else if maxSampleFlag&int32(vk.SampleCount32Bit) > 0 {
++			maxSamples = 32
++		} else if maxSampleFlag&int32(vk.SampleCount16Bit) > 0 {
++			maxSamples = 16
++		} else if maxSampleFlag&int32(vk.SampleCount8Bit) > 0 {
++			maxSamples = 8
++		} else if maxSampleFlag&int32(vk.SampleCount4Bit) > 0 {
++			maxSamples = 4
++		} else if maxSampleFlag&int32(vk.SampleCount2Bit) > 0 {
++			maxSamples = 2
++		}
++		if sys.msaa > int32(maxSamples) {
++			sys.cfg.SetValueUpdate("Video.MSAA", maxSamples)
++			sys.msaa = int32(maxSamples)
++		}
++	}
+ 	queueCreateInfos := []vk.DeviceQueueCreateInfo{{
+ 		SType:            vk.StructureTypeDeviceQueueCreateInfo,
+ 		QueueCount:       1,
+@@ -6099,6 +6108,23 @@ func (r *Renderer_VK) EnableScissor(x, y, width, height int32) {
+ 		height += y
+ 		y = 0
+ 	}
++	// Clamp to the render target. "No window" arrives as a huge rectangle
++	// (-65536,-65536,196608,196608), i.e. a 131072x131072 scissor after the
++	// clamp above: legal in Vulkan, but some drivers keep the scissor in 16-bit
++	// fixed point and it wraps to an empty rectangle, so nothing is drawn
++	// (seen on lavapipe: backgrounds of scaled 8-bit stages were black).
++	if w := sys.scrrect[2] - x; width > w {
++		width = w
++	}
++	if h := sys.scrrect[3] - y; height > h {
++		height = h
++	}
++	if width < 0 {
++		width = 0
++	}
++	if height < 0 {
++		height = 0
++	}
+ 	r.VKState.scissor = vk.Rect2D{
+ 		Offset: vk.Offset2D{
+ 			X: int32(x),

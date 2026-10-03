@@ -1,0 +1,20 @@
+[Unit]
+Description=IKEMEN GO (devaOS RF35H)
+# RetroArch e IKEMEN non possono stare insieme: stesso schermo, stessa scheda
+# ALSA, stesso joypad. Avviare questa unit ferma RetroArch (che salva la sua
+# configurazione uscendo, come sempre); all'uscita ExecStopPost lo riavvia.
+# Con Conflicts= systemd ordina lo stop di RetroArch prima di questo start.
+Conflicts=retroarch.service
+After=retroarch.service graphical.target
+Requires=graphical.target
+
+[Service]
+Type=simple
+# WAYLAND_DISPLAY, XDG_RUNTIME_DIR e HOME: gli stessi di RetroArch
+EnvironmentFile=/usr/lib/retroarch/retroarch-env.conf
+ExecStart=/usr/bin/rf35h-ikemen run
+ExecStopPost=-/usr/bin/rf35h-ikemen back
+# niente Restart: si esce dal menu principale di IKEMEN e si torna a RetroArch
+TimeoutStopSec=10
+# come per RetroArch: un core dump sulla SD non lo leggerebbe nessuno
+LimitCORE=0

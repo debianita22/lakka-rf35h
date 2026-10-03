@@ -1,0 +1,28 @@
+Subject: applewin: dichiarare xxd:host fra le dipendenze
+
+AppleWin converte le ROM in sorgenti C++ con "xxd -i" in
+resource/CMakeResources.cmake. Senza xxd nel PATH la build fallisce con codice
+127 su DISK2-13sector.rom.cpp.
+
+Lakka ha gia il pacchetto packages/devel/xxd, che compila il binario dal
+sorgente di vim e lo installa in ${TOOLCHAIN}/bin: mancava solo la
+dichiarazione. Si vede solo con --all-cores, perche applewin non e nella lista
+ristretta.
+
+---
+--- a/packages/lakka/libretro_cores/applewin/package.mk
++++ b/packages/lakka/libretro_cores/applewin/package.mk
+@@ -3,7 +3,12 @@
+ PKG_LICENSE="GPL-2.0"
+ PKG_SITE="https://github.com/audetto/AppleWin"
+ PKG_URL="${PKG_SITE}.git"
+-PKG_DEPENDS_TARGET="toolchain"
++# devaOS RF35H: AppleWin converte le ROM in sorgenti C++ con "xxd -i"
++# (resource/CMakeResources.cmake). Senza xxd nel PATH la build muore con
++# codice 127 - comando non trovato - su DISK2-13sector.rom.cpp. Lakka ha gia'
++# un pacchetto xxd (packages/devel/xxd) che lo compila dal sorgente di vim e
++# lo mette in ${TOOLCHAIN}/bin: basta dichiararlo.
++PKG_DEPENDS_TARGET="toolchain xxd:host"
+ PKG_LONGDESC="Apple II emulator for Linux"
+ PKG_TOOLCHAIN="cmake"
+ 

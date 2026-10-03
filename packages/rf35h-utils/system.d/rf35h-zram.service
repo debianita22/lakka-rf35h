@@ -1,0 +1,22 @@
+[Unit]
+Description=XiFan RF35H zram swap (compressed RAM)
+DefaultDependencies=no
+After=sysinit.target
+Before=retroarch.target
+
+# Questo servizio scrive in /storage, e fs-resize si rifiuta di espandere la
+# partizione se trova gia' /storage/.config, .cache o .kodi.
+# In realta' non potrebbe succedere: libreelec-target-generator, trovando
+# /storage/.please_resize_me, punta default.target su fs-resize.target, e quel
+# boot esegue SOLO il ridimensionamento - multi-user.target non viene
+# raggiunto, quindi noi non partiamo affatto. La condizione resta come rete di
+# sicurezza se un domani quel meccanismo cambia: costa una stat.
+ConditionPathExists=!/storage/.please_resize_me
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/rf35h-zram boot
+ExecStop=/usr/bin/rf35h-zram stop
+
+[Install]
+WantedBy=multi-user.target

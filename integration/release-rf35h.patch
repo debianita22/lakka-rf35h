@@ -1,0 +1,78 @@
+diff --git a/projects/Rockchip/bootloader/release b/projects/Rockchip/bootloader/release
+index 86f0271b..ef1c35ae 100644
+--- a/projects/Rockchip/bootloader/release
++++ b/projects/Rockchip/bootloader/release
+@@ -5,28 +5,53 @@ SRCDIR="${BUILD}"/image/system/usr/share/bootloader
+ DSTDIR="${RELEASE_DIR}"/3rdparty/bootloader
+ 
+ mkdir -p "${DSTDIR}"
+-if [ -n "${UBOOT_SYSTEM}" ]; then
+-  if [ -f "${SRCDIR}"/"${UBOOT_FIT_IMAGE}" ]; then
+-    cp -av "${SRCDIR}"/"${UBOOT_FIT_IMAGE}" "${DSTDIR}" && \
+-    ln -sfv "${UBOOT_FIT_IMAGE}" "${DSTDIR}"/idbloader.img || exit 1
+-    if [ "${ROCKCHIP_LEGACY_BOOT}" = "1" ]; then
+-      touch "${DSTDIR}"/.rockchip_boot_chain_old
+-    else
+-      touch "${DSTDIR}"/.rockchip_boot_chain_new
+-    fi
+-    if [ "${DEVICE}" = "RK3326" ]; then
+-      if [ -f "${SRCDIR}/boot.ini" ]; then
+-        cp -av "${SRCDIR}/boot.ini" "${DSTDIR}"
++
++# devaOS RF35H: questo device non usa il U-Boot Hardkernel. Il loader e' il
++# blob 32K..16M estratto da una release che su questa board parte davvero
++# (AURKNIX 20260809): idbloader a 32K, uboot.img a 8M, trust.img a 12M, nel
++# layout del miniloader Rockchip. Lo scriviamo come u-boot-rockchip.bin: il
++# dd di mkimage e' "bs=32k seek=1", cioe' esattamente da 32K, e la prima
++# partizione parte a 32768 settori (16M), quindi i byte cadono al posto giusto
++# senza toccare nient'altro.
++#
++# if/else e non un return anticipato: scripts/image SORGENTE questo file
++# (". ${FOUND_PATH}", riga 354), quindi un "exit" qui terminerebbe l'intera
++# build - e con codice 0 lo farebbe fingendo successo.
++if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++  RF35H_LOADER="${PROJECT_DIR}/${PROJECT}/devices/${DEVICE}/bootloader/rf35h-loader.bin"
++  if [ ! -f "${RF35H_LOADER}" ]; then
++    echo "release: ${RF35H_LOADER} does not exist."
++    exit 1
++  fi
++  cp -av "${RF35H_LOADER}" "${DSTDIR}/${UBOOT_FIT_IMAGE}" || exit 1
++  touch "${DSTDIR}/.rockchip_boot_chain_old"
++  DTB_PREFIX="${DEVICE//X/}"
++  cp -av "${SRCDIR}"/"${DTB_PREFIX,,}"*.dtb "${DSTDIR}"
++
++else
++  if [ -n "${UBOOT_SYSTEM}" ]; then
++    if [ -f "${SRCDIR}"/"${UBOOT_FIT_IMAGE}" ]; then
++      cp -av "${SRCDIR}"/"${UBOOT_FIT_IMAGE}" "${DSTDIR}" && \
++      ln -sfv "${UBOOT_FIT_IMAGE}" "${DSTDIR}"/idbloader.img || exit 1
++      if [ "${ROCKCHIP_LEGACY_BOOT}" = "1" ]; then
++        touch "${DSTDIR}"/.rockchip_boot_chain_old
+       else
+-        echo "release: ${SRCDIR}/boot.ini does not exist."
+-        exit 1
++        touch "${DSTDIR}"/.rockchip_boot_chain_new
+       fi
++      if [ "${DEVICE}" = "RK3326" ]; then
++        if [ -f "${SRCDIR}/boot.ini" ]; then
++          cp -av "${SRCDIR}/boot.ini" "${DSTDIR}"
++        else
++          echo "release: ${SRCDIR}/boot.ini does not exist."
++          exit 1
++        fi
++      fi
++    else
++      echo "release: bootloader image ${SRCDIR}/${UBOOT_FIT_IMAGE} does not exist."
++      exit 1
+     fi
+-  else
+-    echo "release: bootloader image ${SRCDIR}/${UBOOT_FIT_IMAGE} does not exist."
+-    exit 1
+   fi
+-fi
+ 
+-DTB_PREFIX="${DEVICE//X/}"
+-cp -av "${SRCDIR}"/"${DTB_PREFIX,,}"*.dtb "${DSTDIR}"
++  DTB_PREFIX="${DEVICE//X/}"
++  cp -av "${SRCDIR}"/"${DTB_PREFIX,,}"*.dtb "${DSTDIR}"
++fi

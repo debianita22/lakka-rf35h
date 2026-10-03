@@ -1,0 +1,117 @@
+Subject: RK3326 options per l\x27RF35H: package del device, wpa_supplicant, cmdline seriale, -O2, SYSTEM da 3 GB
+
+---
+--- a/projects/Rockchip/devices/RK3326/options
++++ b/projects/Rockchip/devices/RK3326/options
+@@ -50,7 +50,52 @@
+     WINDOWMANAGER="sway"
+ 
+   # additional packages to install
+-    ADDITIONAL_PACKAGES+=" odroidgo2-utils odroidgoa-volkeys usb-modeswitch-RK3326"
++  # devaOS RF35H: i due servizi OGA non valgono su questo device.
++  #   odroidgo2-utils  -> cerca il jack "rk817_int Headphones" e commuta
++  #                       "Playback Mux" su SPK quando stacchi le cuffie.
++  #                       Qui la scheda si chiama rk817_ext e l'ampli esterno
++  #                       e' alimentato da HPOL/HPOR: SPK spegne l'audio.
++  #   odroidgoa-volkeys -> cerca i gpio-keys "odroidgo3-keys"; qui i tasti
++  #                       volume sono un nodo adc-keys su saradc 2.
++  # rf35h-utils li rimpiazza riusando gli stessi due binari con i parametri
++  # giusti, quindi odroidgo2-utils (che fornisce headphone-sense) resta.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      # La board non ha Bluetooth: nessun nodo nel device tree (ne' nel nostro
++      # ne' in quello di ArkOS, che gira sullo stesso hardware), niente UART
++      # per un modulo BT, e CONFIG_BT_HCIBTUSB non e' nemmeno abilitato, quindi
++      # non servirebbe neanche una chiavetta USB. Tutto cio' che segue da
++      # BLUETOOTH_SUPPORT=yes - bluez nell'immagine, il supporto BT in
++      # pipewire/pulseaudio - e' peso che non puo' essere usato. Il menu
++      # Bluetooth di RetroArch lo nascondiamo gia' (patch 1003).
++      BLUETOOTH_SUPPORT="no"
++      # xpadneo e' il driver per i pad Xbox One via Bluetooth: senza BT non
++      # serve. I pad Xbox via USB in modo host li gestisce xpad, che abbiamo
++      # abilitato nel kernel (kconfig-zram-gamepads-rf35h).
++      # Imbottito di spazi ai due lati: cosi' xpadneo viene tolto anche se e'
++      # il primo o l'unico della lista, non solo quando ha uno spazio davanti.
++      ADDITIONAL_PACKAGES=" ${ADDITIONAL_PACKAGES} "
++      ADDITIONAL_PACKAGES="${ADDITIONAL_PACKAGES/ xpadneo / }"
++      ADDITIONAL_PACKAGES="${ADDITIONAL_PACKAGES#"${ADDITIONAL_PACKAGES%%[! ]*}"}"
++      ADDITIONAL_PACKAGES="${ADDITIONAL_PACKAGES%"${ADDITIONAL_PACKAGES##*[! ]}"}"
++      ADDITIONAL_PACKAGES+=" odroidgo2-utils rf35h-utils usb-modeswitch-RK3326"
++    else
++      ADDITIONAL_PACKAGES+=" odroidgo2-utils odroidgoa-volkeys usb-modeswitch-RK3326"
++    fi
++
++  # devaOS RF35H: wpa_supplicant invece di iwd.
++  #
++  # Non e' una preferenza: la RK915 e' un driver vendor fermo alla semantica
++  # mac80211 di qualche anno fa, e devaOS - che sullo stesso hardware ha il
++  # Wi-Fi funzionante - usa wpa_supplicant (BR2_PACKAGE_WPA_SUPPLICANT=y nel
++  # suo defconfig). Con iwd il driver scansiona e consegna i BSS, ma la UI di
++  # Lakka non vede reti.
++  #
++  # connman ha gia' il ramo per questo: con WIRELESS_DAEMON=wpa_supplicant si
++  # ricostruisce con --enable-wifi --disable-iwd e si tira dietro il package
++  # wpa_supplicant. E' una strada supportata, non una forzatura.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      WIRELESS_DAEMON="wpa_supplicant"
++    fi
+ 
+   # additional Firmware to use (dvb-firmware, misc-firmware, wlan-firmware)
+   # Space separated list is supported,
+@@ -59,6 +104,57 @@
+ 
+   # bootargs for release
+     EXTRA_CMDLINE="console=tty0 net.iframes=0 fbcon=rotate:3"
++  # devaOS RF35H: pannello 640x480 landscape nativo, niente rotazione.
++  #
++  # Console su ttyS1. NON ttyS2: su questo device uart2 non e' una seriale di
++  # debug ma un collegamento a senso unico verso il microcontrollore che pilota
++  # i LED degli stick - 9600 8N1, un byte per modo. Il DTS lo dichiara di
++  # conseguenza: dma-names = "tx" e uart2m1_xfer ridotto a un solo pin
++  # (px30.dtsi ne ha due). Mettere una console li' significa scrivere il log
++  # del kernel dentro il controller dei LED: e' successo davvero sulle prime
++  # immagini devaOS.
++  #
++  # ATTENZIONE alla riga commentata qui sotto: contiene
++  # systemd.debug_shell=ttyS2 e su questa board aprirebbe una shell di root
++  # verso quel microcontrollore. Per il debug qui si usa ttyS1.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      # quiet: il kernel stampa ~850 righe all'avvio, ciascuna sul framebuffer
++      # E sulla seriale. Con quiet restano solo gli errori sulla console, ma
++      # tutto resta in dmesg e nel journal, quindi non si perde nulla per la
++      # diagnosi. ROCKNIX fa lo stesso. L'avanzamento dell'aggiornamento resta
++      # visibile: lo stampa l'init in spazio utente, che quiet non filtra.
++      #
++      # net.ifnames (non "iframes": il refuso arriva da Lakka e rendeva il
++      # parametro inerte - qui l'interfaccia si chiama wlan0 comunque, ma
++      # tanto vale scriverlo giusto).
++      EXTRA_CMDLINE="quiet console=tty0 console=ttyS1,1500000n8 net.ifnames=0"
++    fi
++
++  # devaOS RF35H: ottimizza per velocita', non per dimensione.
++  #
++  # config/optimize mette GCC_OPTIM="-Os" per tutto lo userspace: giusto per un
++  # media center, sbagliato per un emulatore. PROJECT_CFLAGS viene appeso DOPO
++  # GCC_OPTIM in TARGET_CFLAGS e gcc tiene l'ultimo -O: cosi' tutto quello che
++  # prende i flag dall'ambiente senza aggiungere i propri passa a -O2. Chi
++  # conta davvero e' Mesa (meson --buildtype=plain: solo flag dell'ambiente),
++  # cioe' il driver Panfrost in userspace; poi SDL2, alsa-lib, libpng,
++  # freetype. RetroArch forza gia' -O2 da solo e i core lo aggiungono nei loro
++  # Makefile: per loro non cambia niente.
++  # Il kernel e' un'altra storia: CC_OPTIMIZE_FOR_PERFORMANCE=y c'e' gia', e
++  # con GCC non esiste LTO (serve Clang). Non si tocca.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      PROJECT_CFLAGS="-O2"
++    fi
++
++  # devaOS RF35H: partizione SYSTEM da 3 GB invece di 2. Lakka ci fa stare i
++  # suoi ~120 core in 2 GB, e con -O2 la base cresce di 60-80 MB: ci starebbe
++  # ancora, ma di poco. Con 3 GB non ci si pensa piu', e un aggiornamento con
++  # una SYSTEM piu' grande non fallisce a meta'. Sulla SD la STORAGE perde
++  # 1 GB: su 64 non si nota. Le options del device vengono lette dopo quelle
++  # di Lakka (config/options: distribuzione, progetto, device), quindi vince.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      SYSTEM_SIZE=3072
++    fi
+   # bootargs with serial console enable for debug
+   # EXTRA_CMDLINE="console=ttyS2,1500000n8 console=tty0 net.iframes=0 fbcon=rotate:3 systemd.debug_shell=ttyS2"
+ 

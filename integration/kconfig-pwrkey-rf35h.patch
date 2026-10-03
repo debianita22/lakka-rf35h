@@ -1,0 +1,13 @@
+diff --git a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+index 262e75e6..f50d5461 100644
+--- a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
++++ b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+@@ -2378,7 +2378,7 @@ CONFIG_INPUT_UINPUT=y
+ # CONFIG_INPUT_PCF8574 is not set
+ # CONFIG_INPUT_PWM_BEEPER is not set
+ CONFIG_INPUT_PWM_VIBRA=y
+-# CONFIG_INPUT_RK805_PWRKEY is not set
++CONFIG_INPUT_RK805_PWRKEY=y
+ # CONFIG_INPUT_GPIO_ROTARY_ENCODER is not set
+ # CONFIG_INPUT_DA7280_HAPTICS is not set
+ # CONFIG_INPUT_ADXL34X is not set

@@ -1,0 +1,112 @@
+#!/bin/sh
+# rf35h-audiotest - ripete la stessa riproduzione e salva i registri del codec
+# a ogni giro, cosi' un giro buono e uno cattivo si possono confrontare.
+#
+# Serve perche' il difetto e' casuale: stesso comando, a volte pulito e a
+# volte no. Se i registri dei due casi sono IDENTICI il problema e' di tempi
+# (aggancio della PLL, allineamento I2S); se differiscono, il registro che
+# cambia e' il colpevole. In entrambi i casi la risposta e' nel confronto, non
+# in un'altra ipotesi.
+#
+#   rf35h-audiotest [numero di giri]     default 8
+#
+# A ogni giro senti il tono e annoti se era buono. Alla fine lo script
+# chiede quali lo erano e fa il confronto da solo.
+set -u
+
+N="${1:-8}"
+OUT="${RF35H_AUDIOTEST_DIR:-/storage/audiotest}"
+I2C="${RF35H_I2C:-/usr/bin/rf35h-i2c}"
+BUS="${RF35H_I2C_BUS:-0}"
+ADDR="${RF35H_I2C_ADDR:-0x20}"
+
+[ -x "${I2C}" ] || { echo "manca ${I2C}" >&2; exit 1; }
+command -v speaker-test >/dev/null 2>&1 || { echo "manca speaker-test" >&2; exit 1; }
+
+dump() {   # tutti i registri del codec su una riga per registro
+	r=18
+	while [ "$r" -le 79 ]; do
+		printf '0x%02x %s\n' "$r" "$("${I2C}" "${BUS}" "${ADDR}" "$(printf '0x%02x' "$r")" 2>/dev/null | cut -d= -f2 | tr -d ' ')"
+		r=$((r + 1))
+	done
+}
+
+mkdir -p "${OUT}" || exit 1
+rm -f "${OUT}"/giro-*.txt
+
+echo "Fermo RetroArch per avere la scheda libera."
+systemctl stop retroarch 2>/dev/null
+sleep 1
+
+i=1
+while [ "$i" -le "$N" ]; do
+	printf '\n--- giro %d di %d: ascolta ---\n' "$i" "$N"
+	# hw:0 diretto: niente conversione di plughw di mezzo
+	speaker-test -D hw:0 -c2 -t sine -f 440 -l 1 >/dev/null 2>&1 &
+	SPK=$!
+	sleep 1                      # registri letti MENTRE suona
+	dump > "${OUT}/giro-${i}.txt"
+	wait "$SPK" 2>/dev/null
+	sleep 1                      # il PCM si chiude fra un giro e l'altro
+	i=$((i + 1))
+done
+
+systemctl start retroarch 2>/dev/null
+
+printf '\nQuali giri si sentivano BENE? (numeri separati da spazio, invio per saltare): '
+read -r BUONI
+# L'input e' libero: prima "1,3" (virgole) metteva il giro 1 fra i cattivi e
+# faceva cercare giro-1,3.txt; un numero fuori intervallo o una lettera davano
+# file inesistenti; "*" veniva espanso nei nomi dei file. Virgole e punti e
+# virgola valgono come spazi, niente glob, si tengono solo numeri di giro validi
+# (una volta sola) e ogni scarto lo si dice.
+set -f
+RAW=$(printf '%s' "${BUONI}" | tr ',;' '  ')
+BUONI=""
+for t in ${RAW}; do
+	case "$t" in
+		*[!0-9]*) echo "  ignorato: '$t' (non e' un numero di giro)"; continue ;;
+	esac
+	if [ "$t" -ge 1 ] && [ "$t" -le "$N" ]; then
+		case " ${BUONI} " in *" $t "*) ;; *) BUONI="${BUONI} $t" ;; esac
+	else
+		echo "  ignorato: $t (i giri vanno da 1 a $N)"
+	fi
+done
+set +f
+BUONI="${BUONI# }"
+[ -n "${BUONI}" ] || { echo "Registri in ${OUT}/ - li puoi confrontare a mano."; exit 0; }
+
+CATTIVI=""
+i=1
+while [ "$i" -le "$N" ]; do
+	case " ${BUONI} " in *" $i "*) ;; *) CATTIVI="${CATTIVI} $i" ;; esac
+	i=$((i + 1))
+done
+set -- ${BUONI};  B1="${1:-}"
+set -- ${CATTIVI}; C1="${1:-}"
+
+if [ -z "${B1}" ] || [ -z "${C1}" ]; then
+	echo "Servono almeno un giro buono e uno cattivo per confrontare."
+	echo "Registri in ${OUT}/"
+	exit 0
+fi
+
+echo
+echo "=== differenze fra il giro ${B1} (buono) e il ${C1} (cattivo) ==="
+if diff "${OUT}/giro-${B1}.txt" "${OUT}/giro-${C1}.txt" > "${OUT}/diff.txt"; then
+	echo "  NESSUNA: i registri sono identici."
+	echo "  Quindi non e' configurazione, e' un problema di TEMPI: la PLL del"
+	echo "  codec o l'allineamento I2S agganciano a volte si' e a volte no."
+else
+	sed 's/^/  /' "${OUT}/diff.txt"
+fi
+
+echo
+echo "=== quanti giri buoni e cattivi si somigliano fra loro ==="
+for g in ${BUONI}; do printf '  buono  %s: %s\n' "$g" "$(cksum < "${OUT}/giro-${g}.txt" | cut -d' ' -f1)"; done
+for g in ${CATTIVI}; do printf '  cattivo %s: %s\n' "$g" "$(cksum < "${OUT}/giro-${g}.txt" | cut -d' ' -f1)"; done
+echo
+echo "(se tutti i buoni hanno la stessa somma e tutti i cattivi un'altra,"
+echo " la differenza e' sistematica; se le somme sono tutte uguali, e' tempi)"
+echo "Tutto in ${OUT}/ - mandami diff.txt e un paio di giro-*.txt"

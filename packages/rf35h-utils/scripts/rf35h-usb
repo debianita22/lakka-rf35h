@@ -1,0 +1,229 @@
+#!/bin/sh
+# rf35h-usb - la porta USB-C OTG dell'XiFan RF35H.
+#
+#   rf35h-usb                 stato
+#   rf35h-usb host            pad, chiavette, tastiere, cuffie USB-C (default)
+#   rf35h-usb transfer        la console diventa una scheda di rete USB per il
+#                             PC: file via Samba (\\lakka.local) e SSH
+#   rf35h-usb --restore       rimette il modo salvato al boot
+#
+# Come funziona "transfer": il DWC2 del PX30 e' dual-role e il suo role switch
+# e' scrivibile da userspace (/sys/class/usb_role). Si mette in "device", si
+# costruisce via configfs un gadget composito RNDIS + ECM (la ricetta di
+# g_ether: Windows prende RNDIS con gli OS descriptor, Linux e Mac prendono
+# ECM), si alza usb0 con 192.168.7.1 e udhcpd assegna .10-.19 al PC. connman
+# ignora usb* (blacklist), cosi' non prova a fare DHCP client sul gadget.
+# Samba, se non era acceso, viene acceso: e' il modo in cui i file passano.
+#
+# Il trasferimento vero e' via rete perche' un gadget "mass storage" vorrebbe
+# /storage smontato, e /storage e' Lakka. MTP avrebbe voluto umtprd, che Lakka
+# non ha. La rete c'era gia' tutta: Samba, SSH, Avahi.
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+SAVED="${STATE}/usb"
+DEFAULT="host"
+
+UDC_DIR="${RF35H_UDC_DIR:-/sys/class/udc}"
+ROLE_DIR="${RF35H_ROLE_DIR:-/sys/class/usb_role}"
+CFS="${RF35H_CONFIGFS:-/sys/kernel/config}"
+GADGET="${CFS}/usb_gadget/rf35h"
+IP="${RF35H_USB_IP:-192.168.7.1}"
+NET="${RF35H_USB_NET:-192.168.7}"
+LEASES="/run/udhcpd.leases"
+UDHCPD_CONF="/run/rf35h-udhcpd.conf"
+
+log() { echo "rf35h-usb: $*" >&2; }
+
+role_path() {
+	for r in "${ROLE_DIR}"/*/role; do [ -w "$r" ] && { echo "$r"; return 0; }; done
+	return 1
+}
+
+set_role() {   # host|device
+	r="$(role_path)" || { log "nessun usb_role switch: DTB senza usb-role-switch (z-012)?"; return 1; }
+	echo "$1" > "$r"
+}
+
+udc_name() { ls "${UDC_DIR}" 2>/dev/null | head -1; }
+
+gadget_up() {
+	mountpoint -q "${CFS}" 2>/dev/null || mount -t configfs none "${CFS}" 2>/dev/null
+	[ -d "${CFS}/usb_gadget" ] || { log "niente configfs usb_gadget: kernel senza USB_CONFIGFS"; return 1; }
+	[ -L "${GADGET}/configs/c.1/rndis.usb0" ] && return 0     # gia' costruito
+
+	mkdir -p "${GADGET}" || return 1
+	cd "${GADGET}" || return 1
+	echo 0x1d6b > idVendor          # Linux Foundation
+	echo 0x0104 > idProduct         # Multifunction Composite Gadget
+	echo 0x0100 > bcdDevice
+	echo 0x0200 > bcdUSB
+	mkdir -p strings/0x409
+	echo "0123456789" > strings/0x409/serialnumber
+	echo "XiFan" > strings/0x409/manufacturer
+	echo "RF35H (Lakka)" > strings/0x409/product
+
+	mkdir -p configs/c.1/strings/0x409
+	echo "RNDIS + ECM" > configs/c.1/strings/0x409/configuration
+	echo 250 > configs/c.1/MaxPower
+
+	# Microsoft OS descriptors: cosi' Windows carica il suo driver RNDIS senza
+	# chiedere niente. E' la ricetta usata da Android e da g_ether.
+	# (os_desc/ e functions/*/os_desc/ li crea il kernel: si scrive dentro)
+	if [ -d os_desc ]; then
+		echo 1 > os_desc/use
+		echo 0xcd > os_desc/b_vendor_code
+		echo MSFT100 > os_desc/qw_sign
+	fi
+
+	mkdir -p functions/rndis.usb0
+	if [ -d functions/rndis.usb0/os_desc/interface.rndis ]; then
+		echo RNDIS > functions/rndis.usb0/os_desc/interface.rndis/compatible_id
+		echo 5162001 > functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id
+	fi
+	mkdir -p functions/ecm.usb0
+	# MAC fissi e distinguibili: il PC ricorda l'interfaccia fra una sessione e l'altra
+	echo "02:35:48:00:00:01" > functions/rndis.usb0/host_addr
+	echo "02:35:48:00:00:02" > functions/rndis.usb0/dev_addr
+	echo "02:35:48:00:00:03" > functions/ecm.usb0/host_addr
+	echo "02:35:48:00:00:04" > functions/ecm.usb0/dev_addr
+
+	ln -s functions/rndis.usb0 configs/c.1/ 2>/dev/null
+	ln -s functions/ecm.usb0 configs/c.1/ 2>/dev/null
+	ln -s configs/c.1 os_desc/ 2>/dev/null
+
+	udc="$(udc_name)"
+	[ -n "${udc}" ] || { log "nessun UDC in ${UDC_DIR}: il DWC2 non e' in modo device"; return 1; }
+	echo "${udc}" > UDC
+}
+
+gadget_down() {
+	[ -d "${GADGET}" ] || return 0
+	cd "${GADGET}" || return 0
+	echo "" > UDC 2>/dev/null
+	rm -f os_desc/c.1 configs/c.1/rndis.usb0 configs/c.1/ecm.usb0 2>/dev/null
+	rmdir configs/c.1/strings/0x409 configs/c.1 2>/dev/null
+	rmdir functions/rndis.usb0 functions/ecm.usb0 2>/dev/null
+	rmdir strings/0x409 2>/dev/null
+	cd / && rmdir "${GADGET}" 2>/dev/null
+}
+
+BR="usbbr0"
+SMB_FLAG="/storage/.cache/services/samba.disabled"
+SMB_ASIDE="${SMB_FLAG}.rf35h-usb"
+
+net_up() {
+	# Il gadget crea due link: usb0 (RNDIS, lo usa Windows) e usb1 (ECM, lo
+	# usano Mac e Linux). Non sappiamo quale il PC sceglie: li si unisce in
+	# un bridge con un solo IP e un solo server DHCP. Se il kernel non avesse
+	# il bridging, si ripiega sullo stesso IP su entrambi e DHCP su tutti e due.
+	if brctl addbr "${BR}" 2>/dev/null; then
+		for ifn in usb0 usb1; do
+			[ -d "/sys/class/net/${ifn}" ] || continue
+			ip link set "${ifn}" up 2>/dev/null
+			brctl addif "${BR}" "${ifn}" 2>/dev/null
+		done
+		ip addr flush dev "${BR}" 2>/dev/null
+		ip addr add "${IP}/24" dev "${BR}" 2>/dev/null
+		ip link set "${BR}" up 2>/dev/null
+		dhcp_ifs="${BR}"
+	else
+		dhcp_ifs=""
+		for ifn in usb0 usb1; do
+			[ -d "/sys/class/net/${ifn}" ] || continue
+			ip addr flush dev "${ifn}" 2>/dev/null
+			ip addr add "${IP}/24" dev "${ifn}" 2>/dev/null
+			ip link set "${ifn}" up 2>/dev/null
+			dhcp_ifs="${dhcp_ifs} ${ifn}"
+		done
+	fi
+
+	command -v udhcpd >/dev/null 2>&1 || { log "udhcpd non c'e': il PC dovra' darsi un IP in ${NET}.0/24 da solo"; }
+	# Niente "option router" ne' "option dns": la console non fa NAT, e con una
+	# default route verso di lei il PC perderebbe internet appena collegato.
+	# Solo la subnet: il PC raggiunge 192.168.7.1 e tiene la sua rete.
+	n=0
+	for ifn in ${dhcp_ifs}; do
+		conf="${UDHCPD_CONF}.${ifn}"
+		cat > "${conf}" <<EOF
+start ${NET}.$((10 + n * 10))
+end ${NET}.$((19 + n * 10))
+interface ${ifn}
+lease_file ${LEASES}.${ifn}
+pidfile /run/rf35h-udhcpd.${ifn}.pid
+option subnet 255.255.255.0
+option lease 3600
+EOF
+		touch "${LEASES}.${ifn}"
+		pkill -f "udhcpd ${conf}" 2>/dev/null
+		command -v udhcpd >/dev/null 2>&1 && udhcpd "${conf}" 2>/dev/null
+		n=$((n + 1))
+	done
+
+	# Samba e' la via dei file. Lakka lo spegne con un file-flag
+	# (ConditionPathExists=!samba.disabled in smbd.service): se l'utente lo
+	# aveva spento, "transfer" lo accende per la sessione mettendo il flag da
+	# parte; "host" lo rimette. Scegliere "transfer" e' chiedere i file.
+	if [ -e "${SMB_FLAG}" ]; then
+		mv "${SMB_FLAG}" "${SMB_ASIDE}" 2>/dev/null && log "Samba era spento nelle impostazioni: acceso per il trasferimento"
+	fi
+	systemctl start samba-config.service 2>/dev/null
+	systemctl start nmbd.service smbd.service 2>/dev/null
+}
+
+net_down() {
+	for c in "${UDHCPD_CONF}".*; do [ -e "$c" ] || continue; pkill -f "udhcpd ${c}" 2>/dev/null; rm -f "$c"; done
+	ip link set "${BR}" down 2>/dev/null
+	for ifn in usb0 usb1; do brctl delif "${BR}" "${ifn}" 2>/dev/null; ip link set "${ifn}" down 2>/dev/null; done
+	brctl delbr "${BR}" 2>/dev/null
+	# se Samba lo avevamo acceso noi, torna come lo aveva lasciato l'utente
+	if [ -e "${SMB_ASIDE}" ]; then
+		mv "${SMB_ASIDE}" "${SMB_FLAG}" 2>/dev/null
+		systemctl stop smbd.service nmbd.service 2>/dev/null
+	fi
+}
+
+do_host() {
+	net_down
+	gadget_down
+	set_role host || return 1
+}
+
+do_transfer() {
+	set_role device || return 1
+	sleep 0.5                    # l'UDC compare dopo il cambio di ruolo
+	gadget_up || { set_role host; return 1; }
+	sleep 0.5                    # usb0 compare dopo il bind
+	net_up
+}
+
+save() { mkdir -p "${STATE}" 2>/dev/null && printf '%s\n' "$1" > "${SAVED}" 2>/dev/null || true; }
+
+status() {
+	r="$(role_path 2>/dev/null)"
+	echo "modo salvato: $(cat "${SAVED}" 2>/dev/null || echo "(nessuno, default ${DEFAULT})")"
+	echo "ruolo porta:  $([ -n "$r" ] && cat "$r" || echo "(nessun role switch)")"
+	if [ -L "${GADGET}/configs/c.1/rndis.usb0" ]; then
+		echo "gadget:       attivo, UDC=$(cat "${GADGET}/UDC" 2>/dev/null)"
+		dev="${BR}"; [ -d "/sys/class/net/${BR}" ] || dev=usb0
+		echo "rete:         $(ip -4 addr show "${dev}" 2>/dev/null | sed -n 's/.*inet \([0-9./]*\).*/\1/p' | head -1) su ${dev}"
+		echo "dhcp:         $(pgrep -f "udhcpd ${UDHCPD_CONF}" >/dev/null && echo "udhcpd attivo" || echo "spento")"
+		for l in "${LEASES}".*; do [ -s "$l" ] && echo "PC collegato: lease in $(basename "$l")"; done
+		[ -e "${SMB_ASIDE}" ] && echo "samba:        acceso per la sessione (era spento nelle impostazioni)"
+		echo "dal PC:       \\\\\\\\lakka.local  oppure  smb://${IP}   ssh root@${IP}"
+	else
+		echo "gadget:       spento (modo host)"
+		n=0; for d in /sys/bus/usb/devices/[0-9]-[0-9]*; do [ -e "$d" ] && n=$((n + 1)); done
+		echo "host:         ${n} device collegati"
+	fi
+}
+
+case "${1:-}" in
+	"") status ;;
+	host)     do_host && save host ;;
+	transfer) do_transfer && save transfer ;;
+	--restore)
+		m="$(cat "${SAVED}" 2>/dev/null || echo "${DEFAULT}")"
+		case "$m" in transfer) do_transfer ;; *) do_host ;; esac
+		;;
+	*) echo "rf35h-usb: uso: rf35h-usb [host|transfer|--restore]" >&2; exit 1 ;;
+esac

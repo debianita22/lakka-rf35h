@@ -1,0 +1,121 @@
+Subject: retroarch: tasti volume su scala cubica a passi del 5 %
+
+RetroArch avanzava a passi fissi in dB e il widget mostra l ampiezza lineare:
+qualunque passo fisso in dB, letto in percentuale, e enorme in alto e minuscolo
+in basso. Scala cubica (la curva di PipeWire/PulseAudio, usata da ROCKNIX su
+questo hardware): passi del 5 % uguali a schermo e volume percepito
+equilibrato. Il widget mostra la stessa scala, arrotonda invece di troncare, e
+mostra 0 al muto. I tasti restano fra muto e 0 dB.
+
+---
+--- a/retroarch.c
++++ b/retroarch.c
+@@ -5430,7 +5430,7 @@
+          }
+          break;
+       case CMD_EVENT_VOLUME_UP:
+-         command_event_set_volume(settings, 0.5f,
++         command_event_set_volume(settings, 1.0f,
+ #if defined(HAVE_GFX_WIDGETS)
+                dispwidget_get_ptr()->active,
+ #else
+@@ -5440,7 +5440,7 @@
+          );
+          break;
+       case CMD_EVENT_VOLUME_DOWN:
+-         command_event_set_volume(settings, -0.5f,
++         command_event_set_volume(settings, -1.0f,
+ #if defined(HAVE_GFX_WIDGETS)
+                dispwidget_get_ptr()->active,
+ #else
+--- a/command.c
++++ b/command.c
+@@ -18,6 +18,7 @@
+ #include "input/input_driver.h"
+ #include <stdio.h>
+ #include <stdlib.h>
++#include <math.h>
+ #include <stddef.h>
+ #include <locale.h>
+ #ifdef HAVE_NETWORKING
+@@ -1161,7 +1162,47 @@
+ {
+    size_t _len;
+    char msg[128];
+-   float new_volume = settings->floats.audio_volume + gain;
++   float cur        = settings->floats.audio_volume;
++   float new_volume;
++   /* devaOS RF35H: i tasti si muovono su una scala CUBICA, in passi del 5 %.
++    *
++    * RetroArch avanzava a passi fissi in dB, e il widget mostra l'ampiezza
++    * lineare, pow(10, dB/20): qualunque passo fisso in dB, letto in
++    * percentuale, e' enorme in alto e minuscolo in basso. Con 0,5 dB
++    * servivano 160 pressioni per arrivare al silenzio; con 2 dB la cima
++    * saltava 94 -> 74 -> 59 -> 47 %.
++    *
++    * La posizione x in [0,1] e' la radice cubica dell'ampiezza, e il volume
++    * in dB vale 60*log10(x). E' la curva di PipeWire e PulseAudio, e quella
++    * che ROCKNIX usa su questo stesso hardware (volumealign): passi uguali a
++    * schermo, e un volume percepito equilibrato fra cima e fondo.
++    *
++    * I tasti restano fra muto e 0 dB. Sopra 0 dB RetroArch applica un
++    * guadagno digitale che su materiale vicino al fondo scala satura (suono
++    * gracchiante): se l'utente l'ha impostato dal menu, "su" lo lascia
++    * com'e' invece di abbassarlo, "giu'" scende dalla cima della scala.
++    *
++    * Solo CMD_EVENT_VOLUME_UP/DOWN chiamano questa funzione: il cursore del
++    * menu scrive audio_volume direttamente e resta in dB. */
++   if (gain > 0.0f && cur >= -0.001f)
++      new_volume = cur;
++   else
++   {
++      float x = (cur <= -79.9f) ? 0.0f : cbrtf(powf(10.0f, cur / 20.0f));
++      if (x > 1.0f)
++         x = 1.0f;
++      /* prossimo punto della griglia del 5 % nella direzione del tasto: da
++       * un valore fuori griglia (ereditato dal menu o dai vecchi passi in dB)
++       * si va al punto adiacente, senza saltarne uno. L'epsilon assorbe
++       * l'errore di arrotondamento dei punti gia' sulla griglia. */
++      if (gain > 0.0f)
++         x = (floorf(x * 20.0f + 1e-4f) + 1.0f) / 20.0f;
++      else
++         x = (ceilf(x * 20.0f - 1e-4f) - 1.0f) / 20.0f;
++      if (x > 1.0f)
++         x = 1.0f;
++      new_volume = (x <= 0.001f) ? -80.0f : 60.0f * log10f(x);
++   }
+    new_volume       = MAX(new_volume, -80.0f);
+    new_volume       = MIN(new_volume, 12.0f);
+    configuration_set_float(settings, settings->floats.audio_volume, new_volume);
+--- a/gfx/widgets/gfx_widget_volume.c
++++ b/gfx/widgets/gfx_widget_volume.c
+@@ -15,6 +15,7 @@
+  *  If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
++#include <math.h>
+ #include <retro_miscellaneous.h>
+ 
+ #include "../gfx_widgets.h"
+@@ -262,7 +263,7 @@
+             state->db);
+ 
+          snprintf(percentage_msg, sizeof(percentage_msg), "%d%%",
+-            (int)(state->percent * 100.0f));
++            (int)(state->percent * 100.0f + 0.5f));  /* arrotonda: 0,9499 -> 95 */
+ 
+          gfx_widgets_draw_text(font_regular,
+                msg,
+@@ -311,7 +312,11 @@
+    gfx_animation_kill_by_tag(&state->tag);
+ 
+    state->db         = new_volume;
+-   state->percent    = pow(10, new_volume/20);
++   /* devaOS RF35H: percentuale sulla stessa scala cubica dei tasti (vedi
++    * command_event_set_volume), cosi' i passi del 5 % appaiono uguali a
++    * schermo. Al muto (-80 dB) la radice cubica varrebbe ~4,6 %: si forza 0. */
++   state->percent    = (new_volume <= -79.9f) ? 0.0f
++                     : (float)cbrt(pow(10, new_volume/20));
+    state->alpha      = DEFAULT_BACKDROP;
+    state->text_alpha = 1.0f;
+    state->mute       = mute;

@@ -1,0 +1,109 @@
+#!/bin/sh
+# rf35h-zram start|stop|status - RAM compressa come swap.
+#
+# La board ha 730 MB e Lakka non abilita swap (il suo e' un file sulla SD:
+# lento e logora la card). zram comprime le pagine fredde in RAM: con LZ4 su
+# questo A35 la decompressione costa qualche microsecondo contro i millisecondi
+# di una lettura da SD, e i core grossi (mame2010, flycast, melondsds) smettono
+# di finire uccisi dall'OOM killer quando la memoria si frammenta.
+#
+# Dimensione: meta' della RAM totale. Con un rapporto tipico di 2,5:1 sono
+# circa 900 MB di pagine in ~365 MB fisici, senza togliere troppo alle pagine
+# attive. swappiness alto perche' qui "swappare" non significa toccare il disco.
+# Misurato su arm64 (tools/zram-bench, qemu: i rapporti sono affidabili, i
+# MB/s relativi): su pagine di codice e di testo lz4 decomprime 3x piu' veloce
+# di lzo-rle (il default del kernel) con lo stesso rapporto, e 4-5x piu'
+# veloce di zstd, che in cambio comprime il 30-45%% meglio. Su un handheld
+# ogni page fault durante il gioco paga la decompressione: lz4. Chi preferisce
+# piu' RAM effettiva a costo di piu' CPU puo' mettere zstd in zram.conf.
+SIZE_PCT="${RF35H_ZRAM_PCT:-50}"
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+ENABLED="${STATE}/zram"
+CONF="${STATE}/zram.conf"
+DEV="${RF35H_ZRAM_DEV:-/dev/zram0}"
+SYS="${RF35H_ZRAM_SYS:-/sys/block/zram0}"
+SWAPS="${RF35H_SWAPS:-/proc/swaps}"
+ALGO="${RF35H_ZRAM_ALGO:-lz4}"
+# zram.conf: ALGO=lz4|lzo-rle|zstd  PCT=50
+if [ -r "${CONF}" ]; then
+	while IFS='=' read -r k v; do
+		case "${k}" in
+			ALGO) [ -n "${v}" ] && ALGO="${v}" ;;
+			PCT)  [ -n "${v}" ] && SIZE_PCT="${v}" ;;
+		esac
+	done < "${CONF}"
+fi
+# PCT viene da zram.conf, scritto a mano: va validato prima dell'aritmetica.
+# Prima "PCT=50%" - il modo naturale di scrivere una percentuale - dava
+# "Illegal number" e la zram non partiva affatto; "PCT=500" era accettato, una
+# zram cinque volte la RAM; "PCT=0" dava bytes=0 e il messaggio falso "non
+# riesco a leggere MemTotal". Oltre il 150% i dati, anche compressi con lz4
+# (~2-2,5:1), non entrano piu' in memoria.
+SIZE_PCT="${SIZE_PCT%"%"}"
+case "${SIZE_PCT}" in
+	''|*[!0-9]*) echo "rf35h-zram: PCT non valido (${SIZE_PCT}), uso 50" >&2; SIZE_PCT=50 ;;
+esac
+if [ "${SIZE_PCT}" -lt 1 ] || [ "${SIZE_PCT}" -gt 150 ]; then
+	echo "rf35h-zram: PCT fuori da 1-150 (${SIZE_PCT}), uso 50" >&2; SIZE_PCT=50
+fi
+
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+# comp_algorithm elenca tutti gli algoritmi e mette fra [ ] quello attivo
+algo_now() { for a in $(rd "${SYS}/comp_algorithm"); do case "${a}" in \[*\]) printf '%s' "${a#[}" | tr -d ']'; return 0 ;; esac; done; printf '%s' "${1:-?}"; }
+
+mem_kb() {
+	# MemTotal in kB, senza spawn: e' la prima riga di /proc/meminfo
+	while IFS= read -r line; do
+		case "${line}" in MemTotal:*) set -- ${line}; printf '%s' "$2"; return 0 ;; esac
+	done < /proc/meminfo
+	printf '0'
+}
+
+case "${1:-status}" in
+	boot)
+		# all'avvio: parte solo se il menu lo ha lasciato acceso (default: si')
+		case "$(rd "${ENABLED}" on)" in on) ;; *) echo "zram: disattivato dal menu"; exit 0 ;; esac
+		exec "$0" start
+		;;
+	on|off)
+		mkdir -p "${STATE}" 2>/dev/null || true
+		printf '%s\n' "$1" > "${ENABLED}" 2>/dev/null || true
+		[ "$1" = on ] && exec "$0" start || exec "$0" stop
+		;;
+	start)
+		[ -d "${SYS}" ] || modprobe zram num_devices=1 2>/dev/null
+		[ -d "${SYS}" ] || { echo "rf35h-zram: zram non disponibile nel kernel" >&2; exit 1; }
+		grep -q "^${DEV} " "${SWAPS}" 2>/dev/null && { echo "gia' attivo"; exit 0; }
+		# reset: se il device e' stato usato prima, disksize non si puo' cambiare
+		echo 1 > "${SYS}/reset" 2>/dev/null || true
+		# l'algoritmo va scelto PRIMA di disksize
+		echo "${ALGO}" > "${SYS}/comp_algorithm" 2>/dev/null || true
+		bytes=$(( $(mem_kb) * 1024 / 100 * SIZE_PCT ))
+		[ "${bytes}" -gt 0 ] || { echo "rf35h-zram: non riesco a leggere MemTotal" >&2; exit 1; }
+		echo "${bytes}" > "${SYS}/disksize" || { echo "rf35h-zram: disksize rifiutata" >&2; exit 1; }
+		mkswap "${DEV}" >/dev/null 2>&1 || { echo "rf35h-zram: mkswap fallita" >&2; exit 1; }
+		# priorita' alta: se un giorno ci fosse anche uno swapfile, zram va prima
+		swapon -p 100 "${DEV}" || { echo "rf35h-zram: swapon fallita" >&2; exit 1; }
+		echo 100 > /proc/sys/vm/swappiness 2>/dev/null || true
+		echo 0   > /proc/sys/vm/page-cluster 2>/dev/null || true
+		echo "zram attivo: $(( bytes / 1024 / 1024 )) MB, $(algo_now "${ALGO}")"
+		;;
+	stop)
+		grep -q "^${DEV} " "${SWAPS}" 2>/dev/null && swapoff "${DEV}" 2>/dev/null
+		echo 1 > "${SYS}/reset" 2>/dev/null || true
+		echo "zram fermo"
+		;;
+	status)
+		if grep -q "^${DEV} " "${SWAPS}" 2>/dev/null; then
+			orig="$(rd "${SYS}/mm_stat")"
+			set -- ${orig}
+			echo "attivo:       $(( $(rd "${SYS}/disksize" 0) / 1024 / 1024 )) MB, algoritmo $(algo_now)"
+			[ -n "${1:-}" ] && echo "in uso:       $(( ${1:-0} / 1024 )) kB non compressi in $(( ${2:-0} / 1024 )) kB reali"
+			echo "swappiness:   $(rd /proc/sys/vm/swappiness ?)"
+		else
+			echo "non attivo"
+		fi
+		;;
+	*)
+		echo "uso: rf35h-zram on|off|start|stop|status|boot" >&2; exit 2 ;;
+esac

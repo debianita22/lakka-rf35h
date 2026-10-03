@@ -1,0 +1,74 @@
+Subject: rocknix-joypad: Linux 7.2 ha rimosso of_gpio.h e of_get_named_gpio - ricostruita con gpio_device
+
+---
+--- a/of_gpio_compat.h
++++ b/of_gpio_compat.h
+@@ -8,7 +8,9 @@
+ #define ROCKNIX_OF_GPIO_COMPAT_H
+ #include <linux/version.h>
+ #include <linux/of.h>
++#ifdef ROCKNIX_OF_GPIO_LEGACY_PRESENT
+ #include <linux/of_gpio.h>
++#endif
+ 
+ /* devaOS/Lakka: su un kernel dove <linux/of_gpio.h> porta ancora l'API legacy
+  * qui non serve niente, e ridefinirla non compila. Lakka la reintroduce con
+@@ -21,9 +23,47 @@
+  * veniva ridefinito comunque. Era questo il bug. */
+ #ifndef ROCKNIX_OF_GPIO_LEGACY_PRESENT
+ 
+-#ifndef OF_GPIO_ACTIVE_LOW
++#include <linux/err.h>
++/* <linux/of_gpio.h> includeva <linux/gpio.h>, e il driver riceveva da li' -
++ * indirettamente - l'API a interi (gpio_is_valid, gpio_set_value,
++ * devm_gpio_request_one...). Senza of_gpio.h va inclusa esplicitamente: nella
++ * 7.2 sta in <linux/gpio/legacy.h>, che gpio.h include con
++ * CONFIG_GPIOLIB_LEGACY (def_bool y). */
++#include <linux/gpio.h>
++#include <linux/gpio/consumer.h>
++#include <linux/gpio/driver.h>
++
++/* Linux 7.2 ha rimosso <linux/of_gpio.h> per intero, e con lui
++ * of_get_named_gpio(), su cui la ricostruzione qui sotto si appoggiava. La si
++ * ricostruisce com'era nel kernel, con primitive esportate: phandle e argomenti
++ * dal device tree, gpio_device del controller, descrittore del pin, numero
++ * globale. NON riserva il GPIO, come l'originale: lo riserva il driver dopo,
++ * con devm_gpio_request_one(). Pin = prima cella: e' la traduzione predefinita
++ * (of_gpio_simple_xlate), e gpio-rockchip non ne definisce una propria. Se il
++ * controller non e' ancora pronto, -EPROBE_DEFER come l'originale. Senza
++ * of_gpio.h nessuno definisce l'enum, quindi niente guardia. */
+ enum of_gpio_flags { OF_GPIO_ACTIVE_LOW = 0x1 };
+-#endif
++
++static inline int rocknix_of_get_named_gpio(const struct device_node *np,
++		const char *propname, int index)
++{
++	struct of_phandle_args args;
++	struct gpio_device *gdev;
++	struct gpio_desc *desc;
++	int ret, gpio;
++
++	ret = of_parse_phandle_with_args(np, propname, "#gpio-cells", index, &args);
++	if (ret)
++		return ret;
++	gdev = gpio_device_find_by_fwnode(of_fwnode_handle(args.np));
++	of_node_put(args.np);
++	if (!gdev)
++		return -EPROBE_DEFER;
++	desc = gpio_device_get_desc(gdev, args.args[0]);
++	gpio = IS_ERR(desc) ? PTR_ERR(desc) : desc_to_gpio(desc);
++	gpio_device_put(gdev);
++	return gpio;
++}
+ 
+ static inline int rocknix_of_get_named_gpio_flags(const struct device_node *np,
+ 		const char *propname, int index, enum of_gpio_flags *flags)
+@@ -31,7 +71,7 @@
+ 	struct of_phandle_args args;
+ 	int gpio, ret;
+ 
+-	gpio = of_get_named_gpio(np, propname, index);
++	gpio = rocknix_of_get_named_gpio(np, propname, index);
+ 	if (gpio < 0)
+ 		return gpio;
+ 	if (flags) {

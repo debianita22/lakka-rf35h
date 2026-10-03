@@ -1,0 +1,104 @@
+Subject: retroarch: niente context odroidgo2 su rf35h, audio 44100, stamp su DISPLAYSERVER
+
+---
+--- a/packages/lakka/retroarch_base/retroarch/package.mk
++++ b/packages/lakka/retroarch_base/retroarch/package.mk
+@@ -5,6 +5,16 @@
+ PKG_URL="${PKG_SITE}.git"
+ PKG_DEPENDS_TARGET="toolchain freetype zlib ffmpeg libass libxkbcommon glsl_shaders slang_shaders systemd libpng fontconfig SDL2_input"
+ PKG_LONGDESC="Reference frontend for the libretro API."
++
++# devaOS RF35H: lo stamp di LibreELEC e' l'hash di PKG_DIR, quindi NON cambia
++# quando cambia DISPLAYSERVER. Ma makeinstall_target scrive WAYLAND_DISPLAY,
++# SWAYSOCK e XDG_RUNTIME_DIR in retroarch-env.conf solo se DISPLAYSERVER="wl":
++# passando da "no" a "wl" (o viceversa) il pacchetto viene riusato dalla cache
++# con l'ambiente sbagliato, e RetroArch parte senza sapere che c'e' un
++# compositore. Ripiega sul context kms, sbatte contro sway che ha il master
++# DRM e muore in un ciclo di riavvii: sintomo osservato dopo la prova con la
++# patch KMS. Stesso rimedio gia' usato per connman con WIRELESS_DAEMON.
++PKG_STAMP="${DISPLAYSERVER}"
+ PKG_LR_UPDATE_TAG="yes"
+ 
+ PKG_CONFIGURE_OPTS_TARGET="--disable-vg \
+@@ -109,8 +119,31 @@
+ fi
+ 
+ if [ "${DEVICE}" = "RK3326" ]; then
+-  PKG_DEPENDS_TARGET+=" librga"
+-  PKG_CONFIGURE_OPTS_TARGET+=" --enable-odroidgo2"
++  # devaOS RF35H: niente --enable-odroidgo2 su questa board.
++  #
++  # Il flag non aggiunge solo il video driver "oga" - che comunque
++  # retroarch-0002 commenta via dalla lista - ma anche il context driver
++  # gfx/drivers_context/drm_go2_ctx.o, libgo2 e "-lrga -lpng -lz". E in
++  # gfx/video_driver.c quel context e' registrato PRIMA di quello generico:
++  #
++  #     #if defined(HAVE_KMS)
++  #     #if defined(HAVE_ODROIDGO2)
++  #        &gfx_ctx_go2_drm,
++  #     #endif
++  #        &gfx_ctx_drm,
++  #
++  # RetroArch scorre la lista in ordine e prende il primo che inizializza,
++  # quindi su una build KMS proverebbe il context dell'Odroid Go Advance su
++  # un pannello che non e' il suo: libgo2 e' scritto per i 480x320 dell'OGA,
++  # con la sua rotazione e lo scaling RGA. Sotto Wayland non si vede perche'
++  # vince il context wayland, ma con optional/kms-no-compositor.patch si'.
++  #
++  # Senza il flag resta gfx_ctx_drm, quello generico, e cadono anche libgo2 e
++  # librga: codice che qui non serviva comunque.
++  if [ "${UBOOT_SYSTEM}" != "rf35h" ]; then
++    PKG_DEPENDS_TARGET+=" librga"
++    PKG_CONFIGURE_OPTS_TARGET+=" --enable-odroidgo2"
++  fi
+ fi
+ 
+ if [ "${OPENGLES}" = "bcm2835-driver" ]; then
+@@ -197,9 +230,46 @@
+   # RK3326 - HARDKERNEL OdroidGoAdvance or compatible devices
+   if [ "${DEVICE}" = "RK3326" ]; then
+     sed -i ${ra_config} -e 's|^xmb_layout = .*|xmb_layout = "2"|'
+-    sed -i ${ra_config} -e 's|^input_menu_toggle_gamepad_combo = .*|input_menu_toggle_gamepad_combo = "4"|'
++    # devaOS RF35H: niente combo Select+Start. Il pad la fa gia' via hotkey
++    # (input_enable_hotkey_btn=Select, input_menu_toggle_btn=Start nel suo
++    # autoconfig), e in RetroArch 1.22 quel toggle scatta al RILASCIO. Con
++    # anche la combo, che scatta alla pressione, il menu si apriva premendo e
++    # si richiudeva lasciando. La combo poi non regge la hotkey su Select:
++    # dopo input_hotkey_block_delay frame il bit di Select viene tolto e la
++    # combo diventa falsa se Select e' premuto un attimo prima di Start.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      sed -i ${ra_config} -e 's|^input_menu_toggle_gamepad_combo = .*|input_menu_toggle_gamepad_combo = "0"|'
++      # devaOS RF35H: log verboso su journal finche' il porting e' in corso. Un
++      # crash all'avvio, con Restart=always, e' altrimenti un loop muto: con
++      # questo l'ultima riga prima della morte finisce nel crash log
++      # (rf35h-crashlog, OnFailure). Si spegne da Settings > Logging.
++      sed -i ${ra_config} -e 's|^log_verbosity = .*|log_verbosity = "true"|'
++      # devaOS RF35H: 44100 e qualita' 2 sono i valori di ROCKNIX/AURKNIX e di
++      # ArkOS4Clone, i due sistemi che su questo hardware suonano bene. A 48000
++      # con qualita' 3 il ricampionatore sinc fa piu' lavoro per ogni buffer, e
++      # su un Cortex-A35 a 1,2 GHz con governor ondemand e' proprio il profilo
++      # che produce glitch periodici. La maggior parte dei core retro emette a
++      # 44100 o sotto, quindi 44100 riduce anche il ricampionamento.
++      sed -i ${ra_config} -e 's|^audio_out_rate = .*|audio_out_rate = "44100"|'
++      sed -i ${ra_config} -e 's|^audio_resampler_quality = .*|audio_resampler_quality = "2"|'
++    else
++      sed -i ${ra_config} -e 's|^input_menu_toggle_gamepad_combo = .*|input_menu_toggle_gamepad_combo = "4"|'
++    fi
+     sed -i ${ra_config} -e 's|^menu_widget_scale_auto = .*|menu_widget_scale_auto = "false"|'
+     sed -i ${ra_config} -e 's|^menu_widget_scale_factor = .*|menu_widget_scale_factor = "2.250000"|'
++
++    # devaOS RF35H: il 2.25 qui sopra e' tarato sui 480x320 dell'Odroid Go
++    # Advance. Il pannello dell'RF35H e' 640x480 sullo stesso 3.5": stessa
++    # dimensione fisica, altezza in pixel 1.5 volte maggiore. RetroArch scala i
++    # widget dall'altezza dello schermo (riferimento 1080), quindi per avere la
++    # stessa dimensione a occhio il fattore va diviso per 1.5:
++    #   OGA   320/1080 * 2.25 = 0.667
++    #   RF35H 480/1080 * 1.50 = 0.667
++    # Lasciato a 2.25, notifiche e widget sarebbero una volta e mezza piu'
++    # grandi del voluto. xmb_layout e il combo Start+Select restano validi.
++    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++      sed -i ${ra_config} -e 's|^menu_widget_scale_factor = .*|menu_widget_scale_factor = "1.500000"|'
++    fi
+   fi
+ 
+   # RPiZero/RPiZero2 + GPiCase (1st Gen Retroflag GPiCase)

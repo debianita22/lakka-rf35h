@@ -1,0 +1,187 @@
+#!/bin/sh
+# rf35h-bench - le misure su cui decidere se un'ottimizzazione serve.
+#
+# Nato da un errore: avevo dato per scontato che rf35h-state rallentasse il
+# boot di 1,5 s e stavo per cambiarlo. Misurato: 7 ms, perche' nel device tree
+# joyled-power ha default-state="on" e l'MCU al boot e' gia' acceso. La
+# modifica sarebbe stata inutile e rischiosa. Da li' questo script: prima i
+# numeri, poi le modifiche.
+#
+#   rf35h-bench            tutto
+#   rf35h-bench boot       solo la catena di avvio
+#   rf35h-bench clocks     CPU, GPU e DDR (con e senza carico)
+#   rf35h-bench zram       quanto comprime davvero
+#   rf35h-bench thermal    temperatura e throttling sotto carico
+#   rf35h-bench audio      stato della catena audio
+#   rf35h-bench --save     scrive /storage/rf35h-bench-<data>.txt per confronti
+#
+# Le misure sotto carico usano il carico vero (i core, mentre giochi) se ne
+# trova uno in esecuzione, altrimenti ne generano uno sintetico con dd.
+
+set -u
+
+DEBUGFS="${RF35H_DEBUGFS:-/sys/kernel/debug}"
+THERMAL="${RF35H_THERMAL:-/sys/class/thermal}"
+CPUFREQ="${RF35H_CPUFREQ:-/sys/devices/system/cpu/cpu0/cpufreq}"
+GPUDIR="${RF35H_GPU:-/sys/class/devfreq}"
+
+rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
+sec() { printf '\n=== %s\n' "$1"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+# busybox non ha nproc: i core si contano da /proc/cpuinfo
+ncpu() { n=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null); [ "${n:-0}" -ge 1 ] && printf '%s' "$n" || printf '1'; }
+
+# debugfs serve per clk_summary: se non e' montato lo monta (e lo dice)
+need_debugfs() {
+	[ -d "${DEBUGFS}/clk" ] && return 0
+	mount -t debugfs none "${DEBUGFS}" 2>/dev/null
+	[ -d "${DEBUGFS}/clk" ]
+}
+
+# carico: usa quello che c'e', altrimenti lo fabbrica
+load_start() {
+	LOADPIDS=""
+	if pgrep -f "retroarch" >/dev/null 2>&1 && [ "$(awk -v c="$(ncpu)" '{print int($1*100/c)}' /proc/loadavg)" -gt 40 ]; then
+		echo "  (carico reale in corso: misuro quello)"
+		return 0
+	fi
+	echo "  (nessun carico: ne genero uno su $(ncpu) core per 12 s)"
+	i=0
+	while [ "$i" -lt "$(ncpu)" ]; do
+		( end=$(( $(date +%s) + 12 )); while [ "$(date +%s)" -lt "$end" ]; do
+			dd if=/dev/zero of=/dev/null bs=1M count=200 2>/dev/null; done ) &
+		LOADPIDS="${LOADPIDS} $!"
+		i=$((i + 1))
+	done
+	sleep 4
+}
+load_stop() { [ -n "${LOADPIDS:-}" ] && kill ${LOADPIDS} 2>/dev/null; wait 2>/dev/null; true; }
+
+bench_boot() {
+	sec "avvio"
+	if have systemd-analyze; then
+		systemd-analyze time 2>/dev/null | sed 's/^/  /'
+		echo "  --- i dieci servizi piu' lenti"
+		systemd-analyze blame 2>/dev/null | head -10 | sed 's/^/    /'
+		echo "  --- catena critica fino a RetroArch (chi fa aspettare chi)"
+		systemd-analyze critical-chain retroarch.target 2>/dev/null | tail -n +2 | head -14 | sed 's/^/    /'
+	else
+		echo "  systemd-analyze non disponibile"
+	fi
+	echo "  --- le nostre unit"
+	for u in rf35h-audio rf35h-volkeys rf35h-state rf35h-idle rf35h-ledd rf35h-zram rf35h-bootlog; do
+		t="$(systemctl show -p ExecMainStartTimestampMonotonic --value "${u}.service" 2>/dev/null)"
+		[ -n "${t}" ] && [ "${t}" != "0" ] \
+			&& printf '    %-16s avviata a %s s dal boot\n' "${u}" "$(( t / 1000000 )).$(( (t / 100000) % 10 ))" \
+			|| printf '    %-16s (non attiva)\n' "${u}"
+	done
+}
+
+bench_clocks() {
+	sec "frequenze"
+	if need_debugfs; then
+		echo "  --- DDR, CPU, GPU a riposo (MHz)"
+		awk '/(dpll|ddr|clk_ddr|armclk|aclk_gpu|clk_gpu|sclk_gpu)/ {printf "    %-24s %8.1f\n", $1, $5/1000000}' \
+			"${DEBUGFS}/clk/clk_summary" 2>/dev/null | sort -u | head -12
+	else
+		echo "  debugfs non montabile: niente clk_summary"
+	fi
+	echo "  cpufreq: $(rd "${CPUFREQ}/scaling_cur_freq" ?) kHz  governor $(rd "${CPUFREQ}/scaling_governor" ?)"
+	echo "  disponibili: $(rd "${CPUFREQ}/scaling_available_frequencies" ?)"
+	for d in "${GPUDIR}"/*; do
+		[ -e "${d}/cur_freq" ] || continue
+		echo "  gpu $(basename "${d}"): $(( $(rd "${d}/cur_freq" 0) / 1000000 )) MHz  governor $(rd "${d}/governor" ?)"
+	done
+	echo "  --- sotto carico"
+	load_start
+	echo "    cpu: $(rd "${CPUFREQ}/scaling_cur_freq" ?) kHz"
+	for d in "${GPUDIR}"/*; do
+		[ -e "${d}/cur_freq" ] || continue
+		echo "    gpu $(basename "${d}"): $(( $(rd "${d}/cur_freq" 0) / 1000000 )) MHz"
+	done
+	if need_debugfs; then
+		awk '/(dpll|clk_ddr)/ {printf "    %-24s %8.1f MHz\n", $1, $5/1000000}' "${DEBUGFS}/clk/clk_summary" 2>/dev/null | sort -u | head -4
+	fi
+	load_stop
+}
+
+bench_thermal() {
+	sec "temperatura e throttling"
+	for z in "${THERMAL}"/thermal_zone*; do
+		[ -e "${z}/temp" ] || continue
+		echo "  $(basename "${z}") ($(rd "${z}/type" ?)): $(( $(rd "${z}/temp" 0) / 1000 )) C a riposo"
+	done
+	load_start
+	i=0
+	while [ "$i" -lt 4 ]; do
+		sleep 2
+		for z in "${THERMAL}"/thermal_zone*; do
+			[ -e "${z}/temp" ] || continue
+			printf '    %ss: %s C, cpu %s kHz\n' "$(( i * 2 + 4 ))" "$(( $(rd "${z}/temp" 0) / 1000 ))" "$(rd "${CPUFREQ}/scaling_cur_freq" ?)"
+		done
+		i=$((i + 1))
+	done
+	load_stop
+	echo "  (se la frequenza cala mentre la temperatura sale, sta limitando:"
+	echo "   le soglie del device tree sono 70/85/115 C)"
+}
+
+bench_zram() {
+	sec "zram"
+	if ! grep -q zram /proc/swaps 2>/dev/null; then
+		echo "  non attivo (accendilo da Device Settings o con rf35h-zram on)"
+		return 0
+	fi
+	s=/sys/block/zram0
+	echo "  dimensione:  $(( $(rd ${s}/disksize 0) / 1024 / 1024 )) MB, algoritmo $(rd ${s}/comp_algorithm ? | tr ' ' '\n' | grep '\[' | tr -d '[]')"
+	# shellcheck disable=SC2046  # mm_stat e' una riga di numeri: lo split serve
+	set -- $(rd "${s}/mm_stat")
+	if [ -n "${2:-}" ] && [ "${2}" -gt 0 ]; then
+		echo "  in uso:      $(( ${1:-0} / 1024 )) kB di pagine in $(( ${2} / 1024 )) kB di RAM"
+		echo "  rapporto:    $(awk -v o="${1:-0}" -v c="${2}" 'BEGIN{printf "%.2fx", c?o/c:0}')"
+		echo "  risparmio:   $(( (${1:-0} - ${2}) / 1024 / 1024 )) MB"
+	else
+		echo "  ancora vuoto: nessuna pagina compressa (la memoria basta)"
+	fi
+	echo "  --- memoria"
+	awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree|Dirty):/ {printf "    %-14s %8d MB\n", $1, $2/1024}' /proc/meminfo
+}
+
+bench_audio() {
+	sec "audio"
+	if [ -r /proc/asound/cards ]; then
+		echo "  schede: $(tr -s ' ' < /proc/asound/cards | grep -c '^ *[0-9]')"
+	else
+		echo "  nessuna scheda ALSA (/proc/asound assente)"
+	fi
+	for p in /proc/asound/card*/pcm*p/sub*/hw_params; do
+		[ -r "$p" ] || continue
+		v="$(tr '\n' ' ' < "$p")"
+		case "$v" in *closed*) echo "  $(echo "$p" | cut -d/ -f4-5): chiuso" ;; *) echo "  $(echo "$p" | cut -d/ -f4-5): ${v}" ;; esac
+	done
+	if need_debugfs && [ -r "${DEBUGFS}/clk/clk_summary" ]; then
+		if grep -q clk_i2s1 "${DEBUGFS}/clk/clk_summary"; then
+			awk '/clk_i2s1/ {printf "  %-20s %8.3f MHz\n", $1, $5/1000000}' "${DEBUGFS}/clk/clk_summary" | head -4
+			echo "  (a 48 kHz clk_i2s1 dev'essere 12,288 MHz)"
+		fi
+	fi
+	[ -x /usr/bin/rf35h-i2c ] && echo "  codec 0x38 (MIXCTL): $(/usr/bin/rf35h-i2c 0 0x20 0x38 2>/dev/null || echo '?')  - il bit 5 dev'essere 0"
+}
+
+run_all() {
+	echo "rf35h-bench - $(date '+%Y-%m-%d %H:%M:%S')"
+	echo "kernel $(uname -r), $(rd /proc/device-tree/model ?)"
+	bench_boot; bench_clocks; bench_thermal; bench_zram; bench_audio
+	printf '\n(ripeti dopo una modifica e confronta: e il confronto che dice se e servita)\n'
+}
+
+case "${1:-all}" in
+	boot)    bench_boot ;;
+	clocks)  bench_clocks ;;
+	thermal) bench_thermal ;;
+	zram)    bench_zram ;;
+	audio)   bench_audio ;;
+	all)     run_all ;;
+	--save)  f="/storage/rf35h-bench-$(date +%Y%m%d-%H%M%S).txt"; run_all > "$f" 2>&1; echo "scritto ${f}" ;;
+	*)       echo "uso: rf35h-bench [boot|clocks|thermal|zram|audio|all|--save]" >&2; exit 2 ;;
+esac

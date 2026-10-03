@@ -1,0 +1,40 @@
+[Unit]
+Description=XiFan RF35H headphone sense and speaker routing
+Before=retroarch.target
+# Nessun limite agli avvii: se qualcosa va storto meglio continuare a provare
+# ogni dieci secondi che smettere. (Va qui in [Unit], non in [Service].)
+StartLimitIntervalSec=0
+
+[Service]
+Environment=HOME=/storage
+# La scheda deve esserci: il modulo i2s lo carichiamo in sysinit
+# (modules-load.d), ma il probe resta asincrono. Senza questa attesa il
+# servizio partiva prima che card0 esistesse e headphone-sense non trovava il
+# device del jack. Bounded: dopo 20 s si parte comunque.
+ExecStartPre=/usr/bin/rf35h-audio-wait
+# Volume digitale del DAC al livello del vendor (vedi rf35h-dac-volume). Dopo
+# l'attesa della scheda, prima di headphone-sense. "-": se amixer fallisce non
+# si blocca l'audio per questo.
+ExecStartPre=-/usr/bin/rf35h-dac-volume --restore
+# Niente ExecStartPre con amixer: girerebbe PRIMA che headphone-sense aspetti
+# la scheda audio. Se la scheda non e' ancora su, amixer fallisce, ExecStart
+# non parte, Restart=on-failure riprova a raffica e in dieci secondi systemd
+# marca l'unita' failed per sempre - niente audio.
+#
+# Il Mux viaggia invece dentro i due comandi: headphone-sense li esegue dopo
+# aver trovato il device del jack, che viene creato dalla stessa scheda, quindi
+# a quel punto amixer funziona. Lo applica subito allo stato iniziale
+# (EVIOCGSW) e a ogni transizione.
+#
+# Playback Mux DEVE restare su HP: l'amplificatore esterno e' alimentato da
+# HPOL/HPOR e SPK spegne l'audio (e' anche il default del driver, enum
+# {HP, SPK} con indice 0). Lo speaker si accende e spegne con il pin switch
+# della simple-card, "Internal Speakers Switch".
+ExecStart=/usr/bin/headphone-sense 'rk817_ext Headphones' \
+  "amixer -q cset name='Playback Mux' HP; amixer -q cset name='Internal Speakers Switch' off" \
+  "amixer -q cset name='Playback Mux' HP; amixer -q cset name='Internal Speakers Switch' on"
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

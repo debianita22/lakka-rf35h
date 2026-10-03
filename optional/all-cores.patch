@@ -1,0 +1,28 @@
+Subject: libretro_cores (opzionale): permettere di includere tutti i core
+
+Con RF35H_ALL_CORES=1 non si escludono lr_moonlight e vitaquake3. Lakka li
+esclude su OGNI progetto, quindi molto probabilmente non compilano da nessuna
+parte: la build puo fallire dopo ore. Senza la variabile il comportamento e
+quello di sempre.
+
+---
+--- a/packages/lakka/libretro_cores/package.mk
++++ b/packages/lakka/libretro_cores/package.mk
+@@ -252,8 +252,15 @@
+                             vitaquake3"
+ 
+ elif [ "${PROJECT}" = "Rockchip" ]; then
+-  EXCLUDE_LIBRETRO_CORES+=" lr_moonlight \
+-                            vitaquake3"
++  # devaOS RF35H: con RF35H_ALL_CORES=1 si prova a costruire anche
++  # lr_moonlight e vitaquake3. Lakka li esclude su OGNI progetto
++  # (Allwinner, Amlogic, Ayn, Generic, RPi, Rockchip), il che suggerisce che
++  # non compilino da nessuna parte: se la build fallisce, e' quasi
++  # certamente uno di questi due, e basta rilanciare senza la variabile.
++  if [ "${RF35H_ALL_CORES:-0}" != 1 ]; then
++    EXCLUDE_LIBRETRO_CORES+=" lr_moonlight \
++                              vitaquake3"
++  fi
+ 
+ elif [ "${PROJECT}" = "RPi" ]; then
+   EXCLUDE_LIBRETRO_CORES+=" lr_moonlight \

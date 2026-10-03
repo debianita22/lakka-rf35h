@@ -1,0 +1,48 @@
+Subject: kconfig: togliere i controlli di debug del kernel
+
+Confronto con AURKNIX (fork ROCKNIX, kernel mainline, audio funzionante sullo
+stesso RF35H), e con i messaggi del boot:
+
+  CONFIG_DEBUG_PREEMPT    loro assente, noi =y
+  CONFIG_DEBUG_GPIO       loro assente, noi =y
+  CONFIG_REGULATOR_DEBUG  noi =y
+
+DEBUG_PREEMPT inserisce un controllo a ogni operazione su preempt_count, cioe
+a ogni presa e rilascio di lock in tutto il kernel: un costo continuo che
+colpisce per primi i percorsi a bassa latenza come il trasferimento DMA di un
+flusso audio, e su un Cortex-A35 a 1,2 GHz non e trascurabile. DEBUG_GPIO e
+REGULATOR_DEBUG aggiungono -DDEBUG a tutti i driver della loro directory:
+debug attivo senza motivo in produzione. REGULATOR_DEBUG era l'unica, fra le
+40 opzioni che fanno questo, rimasta accesa, e stampava una trentina di
+dev_dbg ("Looking up ...-supply", "supplying ...uV") a ogni boot.
+
+---
+--- a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
++++ b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+@@ -2721,7 +2721,7 @@
+ CONFIG_GPIOLIB_FASTPATH_LIMIT=512
+ CONFIG_OF_GPIO=y
+ CONFIG_GPIOLIB_IRQCHIP=y
+-CONFIG_DEBUG_GPIO=y
++# CONFIG_DEBUG_GPIO is not set
+ CONFIG_GPIO_SYSFS=y
+ CONFIG_GPIO_CDEV=y
+ CONFIG_GPIO_CDEV_V1=y
+@@ -3251,7 +3251,7 @@
+ # end of Multifunction device drivers
+ 
+ CONFIG_REGULATOR=y
+-CONFIG_REGULATOR_DEBUG=y
++# CONFIG_REGULATOR_DEBUG is not set
+ CONFIG_REGULATOR_FIXED_VOLTAGE=y
+ CONFIG_REGULATOR_VIRTUAL_CONSUMER=y
+ CONFIG_REGULATOR_USERSPACE_CONSUMER=y
+@@ -6906,7 +6906,7 @@
+ # end of Scheduler Debugging
+ 
+ # CONFIG_DEBUG_TIMEKEEPING is not set
+-CONFIG_DEBUG_PREEMPT=y
++# CONFIG_DEBUG_PREEMPT is not set
+ 
+ #
+ # Lock Debugging (spinlocks, mutexes, etc...)

@@ -1,0 +1,268 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: devaOS RF35H <devaos@rf35h>
+Date: Fri, 25 Sep 2026 15:33:22 +0200
+Subject: [PATCH 1/2] Linux: OpenGL ES 3.2 renderer (tag gles), no GTK (tag
+ nodialog)
+
+- render_gles32.go/font_gles32.go build with "android || gles"; on
+  desktop Linux the GL function pointers come from SDL (EGL), see
+  util_gles_desktop.go. selectRenderer accepts "OpenGL ES 3.2" when the
+  renderer is compiled in and falls back to OpenGL 3.3 otherwise.
+- rendererAvailable() + Lua isRendererAvailable(): the options menu
+  lists only the renderers compiled into the binary, and "default
+  values" picks OpenGL ES 3.2 when it is available.
+- Dialogs split out of util_desktop.go: GTK (default) or stderr with
+  the "nodialog" tag, for devices without a desktop (no GTK needed).
+---
+ external/script/options.lua | 12 +++++++++---
+ src/font_gles32.go          |  2 +-
+ src/render_gles32.go        |  2 +-
+ src/script.go               |  9 +++++++++
+ src/util_android.go         |  4 ++++
+ src/util_desktop.go         | 29 ++++++++++++++++++++---------
+ src/util_dialog_gtk.go      | 14 ++++++++++++++
+ src/util_dialog_stderr.go   | 19 +++++++++++++++++++
+ src/util_gles_desktop.go    | 21 +++++++++++++++++++++
+ src/util_nogles_desktop.go  |  8 ++++++++
+ 10 files changed, 106 insertions(+), 14 deletions(-)
+ create mode 100644 src/util_dialog_gtk.go
+ create mode 100644 src/util_dialog_stderr.go
+ create mode 100644 src/util_gles_desktop.go
+ create mode 100644 src/util_nogles_desktop.go
+
+diff --git a/external/script/options.lua b/external/script/options.lua
+index e00db22..76e4259 100644
+--- a/external/script/options.lua
++++ b/external/script/options.lua
+@@ -174,7 +174,7 @@ options.t_itemname = {
+ 			--modifyGameOption('Debug.SpeedTest', 100)
+ 			-- This is platform dependent now
+ 			local runtimeOS = getRuntimeOS()
+-			if runtimeOS == 'android' then
++			if runtimeOS == 'android' or isRendererAvailable('OpenGL ES 3.2') then
+ 				modifyGameOption('Video.RenderMode', 'OpenGL ES 3.2')
+ 			else
+ 				modifyGameOption('Video.RenderMode', "OpenGL 3.3")
+@@ -1787,9 +1787,15 @@ function options.f_start()
+ 	end
+ 	-- Runtime platform filtering
+ 	local runtimeOS = getRuntimeOS()
+-	local excluded = {gles32 = true}
++	local excluded = {}
+ 	if runtimeOS == 'android' then
+-		excluded = {keyboard = true, gl33 = true, vk13 = true}
++		excluded.keyboard = true
++	end
++	-- Only offer the renderers compiled into this binary
++	for k, v in pairs({gles32 = 'OpenGL ES 3.2', gl33 = 'OpenGL 3.3', vk13 = 'Vulkan 1.3'}) do
++		if not isRendererAvailable(v) then
++			excluded[k] = true
++		end
+ 	end
+ 	main.f_pruneMenu(options.menu, excluded)
+ 	main.f_prunePointers(options.t_vardisplayPointers, excluded)
+diff --git a/src/font_gles32.go b/src/font_gles32.go
+index b681dda..ce00bdc 100644
+--- a/src/font_gles32.go
++++ b/src/font_gles32.go
+@@ -1,4 +1,4 @@
+-//go:build android
++//go:build android || gles
+ 
+ package main
+ 
+diff --git a/src/render_gles32.go b/src/render_gles32.go
+index b6f27a1..5281644 100644
+--- a/src/render_gles32.go
++++ b/src/render_gles32.go
+@@ -2,7 +2,7 @@
+ // for GLES 3.2 which is the main version that runs on modern
+ // Android (ARM). Work adapted from Leon Kasovan
+ 
+-//go:build android
++//go:build android || gles
+ 
+ package main
+ 
+diff --git a/src/script.go b/src/script.go
+index 201f6d4..56b2c21 100644
+--- a/src/script.go
++++ b/src/script.go
+@@ -4051,6 +4051,15 @@ func systemScriptInit(l *lua.LState) {
+ 		l.Push(lua.LString(runtime.GOOS))
+ 		return 1
+ 	})
++	luaRegister(l, "isRendererAvailable", func(l *lua.LState) int {
++		/*Check whether a renderer is compiled into this binary.
++		@function isRendererAvailable
++		@tparam string name RenderMode value (for example `"Vulkan 1.3"`).
++		@treturn boolean available `true` if the renderer can be selected.
++		function isRendererAvailable(name) end*/
++		l.Push(lua.LBool(rendererAvailable(strArg(l, 1))))
++		return 1
++	})
+ 	luaRegister(l, "getSelectNo", func(*lua.LState) int {
+ 		/*[redirectable] Get the character's select slot index.
+ 		@function getSelectNo
+diff --git a/src/util_android.go b/src/util_android.go
+index bdd8d49..660f4a8 100644
+--- a/src/util_android.go
++++ b/src/util_android.go
+@@ -146,6 +146,10 @@ func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+ 	return &Renderer_GLES32{}, &FontRenderer_GLES32{}
+ }
+ 
++func rendererAvailable(name string) bool {
++	return name == "OpenGL ES 3.2"
++}
++
+ func getAndroidFilesDir() string {
+ 	path := C.SDL_AndroidGetExternalStoragePath()
+ 	return C.GoString(path)
+diff --git a/src/util_desktop.go b/src/util_desktop.go
+index ebd02a8..2fa1b54 100644
+--- a/src/util_desktop.go
++++ b/src/util_desktop.go
+@@ -8,7 +8,6 @@ import (
+ 	"os"
+ 
+ 	findfont "github.com/flopp/go-findfont"
+-	"github.com/sqweek/dialog"
+ )
+ 
+ // Log writer implementation
+@@ -16,14 +15,6 @@ func NewLogWriter() io.Writer {
+ 	return os.Stderr
+ }
+ 
+-// Message box implementation
+-func ShowInfoDialog(message, title string) {
+-	dialog.Message(message).Title(title).Info()
+-}
+-
+-func ShowErrorDialog(message string) {
+-	dialog.Message(message).Title("I.K.E.M.E.N Error").Error()
+-}
+ 
+ // TTF font loading
+ func LoadFntTtf(f *Fnt, fontfile string, filename string, height int32) {
+@@ -69,6 +60,13 @@ func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+ 	case "Vulkan 1.3":
+ 		gfx = &Renderer_VK{}
+ 		gfxFont = &FontRenderer_VK{}
++	case "OpenGL ES 3.2":
++		// Only present when built with the "gles" tag (util_gles_desktop.go).
++		if gfx, gfxFont = newRendererGLES32(); gfx == nil {
++			fmt.Printf("Error: RenderMode '%s' not compiled in. Defaulting to OpenGL 3.3.\n", cfgVal)
++			gfx = &Renderer_GL33{}
++			gfxFont = &FontRenderer_GL33{}
++		}
+ 	default:
+ 		fmt.Printf("Error: Invalid RenderMode '%s'. Defaulting to OpenGL 3.3.\n", cfgVal)
+ 		gfx = &Renderer_GL33{}
+@@ -78,6 +76,19 @@ func selectRenderer(cfgVal string) (Renderer, FontRenderer) {
+ 	return gfx, gfxFont
+ }
+ 
++// rendererAvailable reports whether a RenderMode value is compiled into this
++// binary. The options menu uses it to hide renderers that cannot be selected.
++func rendererAvailable(name string) bool {
++	switch name {
++	case "OpenGL 3.3", "Vulkan 1.3":
++		return true
++	case "OpenGL ES 3.2":
++		gfx, _ := newRendererGLES32()
++		return gfx != nil
++	}
++	return false
++}
++
+ func Logcat(s string) {
+ 	fmt.Println(s)
+ }
+diff --git a/src/util_dialog_gtk.go b/src/util_dialog_gtk.go
+new file mode 100644
+index 0000000..268a703
+--- /dev/null
++++ b/src/util_dialog_gtk.go
+@@ -0,0 +1,14 @@
++//go:build !raw && !android && !nodialog
++
++package main
++
++import "github.com/sqweek/dialog"
++
++// Message box implementation
++func ShowInfoDialog(message, title string) {
++	dialog.Message(message).Title(title).Info()
++}
++
++func ShowErrorDialog(message string) {
++	dialog.Message(message).Title("I.K.E.M.E.N Error").Error()
++}
+diff --git a/src/util_dialog_stderr.go b/src/util_dialog_stderr.go
+new file mode 100644
+index 0000000..7e6d2bd
+--- /dev/null
++++ b/src/util_dialog_stderr.go
+@@ -0,0 +1,19 @@
++//go:build !raw && !android && nodialog
++
++package main
++
++import (
++	"fmt"
++	"os"
++)
++
++// Message box implementation for builds without GTK (tag "nodialog"), e.g.
++// embedded Linux handhelds running a bare Wayland compositor: there is no
++// desktop to show a dialog on, so the text goes to stderr (and the log).
++func ShowInfoDialog(message, title string) {
++	fmt.Fprintf(os.Stderr, "%s\n\n%s\n", title, message)
++}
++
++func ShowErrorDialog(message string) {
++	fmt.Fprintf(os.Stderr, "I.K.E.M.E.N Error\n\n%s\n", message)
++}
+diff --git a/src/util_gles_desktop.go b/src/util_gles_desktop.go
+new file mode 100644
+index 0000000..7a9c27a
+--- /dev/null
++++ b/src/util_gles_desktop.go
+@@ -0,0 +1,21 @@
++//go:build gles && !android && !raw
++
++package main
++
++import (
++	"unsafe"
++
++	"github.com/veandco/go-sdl2/sdl"
++)
++
++// OpenGL ES 3.2 renderer on desktop Linux (tag "gles"), for ARM boards whose
++// driver exposes GLES but only an old desktop GL (e.g. Panfrost on Mali).
++// SDL owns the EGL display, so function pointers come from SDL: it asks
++// eglGetProcAddress first and falls back to the GLES library it loaded.
++func eglGetProcAddress(name string) unsafe.Pointer {
++	return sdl.GLGetProcAddress(name)
++}
++
++func newRendererGLES32() (Renderer, FontRenderer) {
++	return &Renderer_GLES32{}, &FontRenderer_GLES32{}
++}
+diff --git a/src/util_nogles_desktop.go b/src/util_nogles_desktop.go
+new file mode 100644
+index 0000000..8314cc8
+--- /dev/null
++++ b/src/util_nogles_desktop.go
+@@ -0,0 +1,8 @@
++//go:build !gles && !android && !raw
++
++package main
++
++// Without the "gles" tag the OpenGL ES renderer is not compiled in.
++func newRendererGLES32() (Renderer, FontRenderer) {
++	return nil, nil
++}

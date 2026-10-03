@@ -1,0 +1,51 @@
+Subject: RK3326 kernel: zram (lz4), gamepad USB, ntfs3, niente Bluetooth per RF35H
+
+zram perche la board ha 730 MB e nessuno swap; lz4 scelto per misura
+contro
+lzo-rle e zstd. xpad/nintendo/playstation/steam perche in modo host i pad
+non-HID-generici non funzionerebbero (playstation tira dentro
+LEDS_CLASS_MULTICOLOR, senza il quale kconfig lo scarta). ntfs3 per le
+chiavette USB. Bluetooth spento: la board non ce lha in nessuna forma.
+
+---
+--- a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
++++ b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+@@ -7002,3 +7002,38 @@
+ #
+ # end of Rust hacking
+ # end of Kernel hacking
++
++#
++# devaOS RF35H: zram, gamepad USB, NTFS, niente Bluetooth
++#
++# La board ha 730 MB di RAM e nessuno swap (Lakka offre un file di swap sulla
++# SD, lento e logorante per la card). zram e' RAM compressa: il kernel comprime
++# le pagine fredde invece di scriverle sulla SD. LZ4 misurato contro lzo-rle e
++# zstd su arm64 (tools/zram-bench.c): stesso rapporto di lzo-rle ma decompressione
++# 3x piu' veloce, e 4-5x piu' veloce di zstd. ZRAM seleziona ZSMALLOC e
++# ZRAM_BACKEND_LZ4 seleziona LZ4_COMPRESS/LZ4_DECOMPRESS: non servono altrove.
++CONFIG_ZRAM=y
++CONFIG_ZRAM_BACKEND_LZ4=y
++CONFIG_ZRAM_DEF_COMP_LZ4=y
++# Gamepad USB in modo host: senza questi solo i pad HID generici funzionano,
++# e i piu' diffusi fra chi gioca in emulazione non lo sono. HID_PLAYSTATION
++# dipende da LEDS_CLASS_MULTICOLOR (le barre luminose del pad): senza quello
++# kconfig lo scarta in silenzio.
++CONFIG_LEDS_CLASS_MULTICOLOR=y
++CONFIG_JOYSTICK_XPAD=m
++CONFIG_JOYSTICK_XPAD_FF=y
++CONFIG_JOYSTICK_XPAD_LEDS=y
++CONFIG_HID_NINTENDO=m
++CONFIG_HID_PLAYSTATION=m
++CONFIG_HID_STEAM=m
++# Chiavette e dischi USB formattati NTFS: ntfs3 e' il driver in-kernel con
++# scrittura (l'ntfs storico era di sola lettura).
++CONFIG_NTFS3_FS=m
++CONFIG_NTFS3_LZX_XPRESS=y
++# Niente Bluetooth: la board non ha ne' un nodo nel device tree (nemmeno in
++# quello di ArkOS, stesso hardware) ne' una UART per un modulo BT, e
++# CONFIG_BT_HCIBTUSB non era comunque abilitato, quindi neppure una chiavetta
++# USB funzionerebbe. Spegnerlo toglie 4 moduli dall'immagine; kconfig porta via
++# solo voci Bluetooth (piu' HID_NVIDIA_SHIELD, che dipende dal BT ed era gia'
++# disattivato). Va insieme a BLUETOOTH_SUPPORT="no" nelle opzioni del device.
++# CONFIG_BT is not set

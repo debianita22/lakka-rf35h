@@ -1,0 +1,36 @@
+# Software Information
+display_name = "IKEMEN GO"
+authors = "IKEMEN GO team"
+supported_extensions = ""
+corename = "IKEMEN GO"
+categories = "Game"
+license = "MIT"
+permissions = ""
+display_version = "1.0.0"
+
+# Hardware Information
+systemname = "IKEMEN GO"
+systemid = "ikemen_go"
+manufacturer = "N/A"
+
+# Libretro Features
+# supports_no_game + single_purpose: e' cio' che fa comparire IKEMEN GO in
+# "Core senza contenuto" col filtro predefinito di RetroArch ("Monouso").
+# database: il nome dell'icona (assets/xmb/<tema>/png/IKEMEN GO.png).
+database = "IKEMEN GO"
+supports_no_game = "true"
+single_purpose = "true"
+savestate = "false"
+cheats = "false"
+input_descriptors = "false"
+memory_descriptors = "false"
+libretro_saves = "false"
+core_options = "true"
+core_options_version = "1.0"
+load_subsystem = "false"
+hw_render = "false"
+needs_fullpath = "true"
+disk_control = "false"
+is_experimental = "false"
+
+description = "Motore di picchiaduro compatibile MUGEN (devaOS RF35H). Questo core e' un lanciatore: chiude RetroArch, avvia IKEMEN GO e torna qui quando esci dal suo menu principale. Il renderer (OpenGL ES o OpenGL) sta nelle opzioni del core."

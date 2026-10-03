@@ -1,0 +1,145 @@
+Subject: wifi: attendere connman dopo il restart e l' associazione prima di dire fallito
+
+Dopo aver scritto la password RetroArch fa "systemctl restart
+connman.service"
+e subito "connmanctl connect": systemd torna appena il processo e partito,
+non
+quando connman ha scansionato, quindi il connect trova l elenco dei
+servizi
+vuoto. Fallisce, il codice cancella il file con la password, e solo
+spegnendo
+e riaccendendo il Wi-Fi ci si connette - con le credenziali che connman
+aveva
+gia letto in memoria. Inoltre "connmanctl connect" torna prima di
+associazione, handshake e DHCP: lo stato veniva letto troppo presto e una
+connessione riuscita risultava fallita. Le attese hanno una scadenza a
+orologio perche ogni giro costa anche un "connmanctl services".
+Le attese leggono lo stato con una chiamata privata a "connmanctl services" e
+non ricostruiscono la lista che il thread del menu sta leggendo: un solo
+aggiornamento alla fine, come nel codice originale.
+
+---
+--- a/network/drivers_wifi/connmanctl.c
++++ b/network/drivers_wifi/connmanctl.c
+@@ -318,6 +318,84 @@
+    return true;
+ }
+ 
++/* devaOS RF35H: stato di un servizio letto da "connmanctl services" senza
++ * toccare connman->scan.net_list. Quella lista e' condivisa col thread del
++ * menu, e connmanctl_refresh_services() la libera e la ricostruisce: i cicli
++ * di attesa qui sotto la ricostruivano ogni 300 ms per fino a 25 s, dal thread
++ * dei task, allargando di molto la finestra in cui il menu puo' leggere
++ * memoria liberata. Il formato e' quello che legge refresh_services: 4
++ * caratteri di stato ("*AO ", "*AR ", "    "), poi SSID e id, l'id per ultimo. */
++static bool connmanctl_service_state(const char *netid, bool *connected)
++{
++   char line[512];
++   bool found      = false;
++   FILE *serv_file = popen("connmanctl services", "r");
++
++   if (connected)
++      *connected = false;
++   if (!serv_file)
++      return false;
++
++   while (fgets(line, sizeof(line), serv_file))
++   {
++      const char *id;
++      size_t _len = strlen(line);
++      while (_len > 0 && (line[_len - 1] == '\n'
++               || line[_len - 1] == '\r' || line[_len - 1] == ' '))
++         line[--_len] = '\0';
++      /* si legge comunque fino in fondo: la pipe va svuotata */
++      if (_len < 5 || found)
++         continue;
++      id = strrchr(line + 4, ' ');
++      id = id ? id + 1 : line + 4;
++      if (string_is_equal(id, netid))
++      {
++         found = true;
++         if (connected)
++            *connected = (line[2] == 'R' || line[2] == 'O');
++      }
++   }
++
++   pclose(serv_file);
++   return found;
++}
++
++/* devaOS RF35H: "systemctl restart connman.service" torna appena il processo
++ * e' partito, non quando connman ha finito di registrarsi con wpa_supplicant
++ * e di scansionare. Aspetta che il servizio ricompaia nell'elenco. */
++static bool connmanctl_wait_for_service(const char *netid, unsigned timeout_s)
++{
++   /* Scadenza a orologio, non somma delle pause: ogni giro costa anche un
++    * "connmanctl services" (fork + D-Bus), che su questa board sono qualche
++    * centinaio di ms. Sommando solo le usleep il timeout avrebbe voluto dire
++    * quasi il doppio del tempo reale, e l'interfaccia resta ferma nel
++    * frattempo. */
++   time_t deadline = time(NULL) + (time_t)timeout_s;
++   for (;;)
++   {
++      if (connmanctl_service_state(netid, NULL))
++         return true;
++      if (time(NULL) >= deadline)
++         return false;
++      usleep(300000);
++   }
++}
++
++/* Vero quando il servizio risulta connesso. */
++static bool connmanctl_wait_connected(const char *netid, unsigned timeout_s)
++{
++   time_t deadline = time(NULL) + (time_t)timeout_s;
++   for (;;)
++   {
++      bool connected = false;
++      if (connmanctl_service_state(netid, &connected) && connected)
++         return true;
++      if (time(NULL) >= deadline)
++         return false;
++      usleep(300000);
++   }
++}
++
+ static bool connmanctl_connect_ssid(
+       void *data, const wifi_network_info_t *netinfo)
+ {
+@@ -365,6 +443,12 @@
+ 
+       /* connman does not pick this up automatically, so hack: */
+       system("systemctl restart connman.service");
++      /* Senza questa attesa il "connmanctl connect" qui sotto arrivava con
++       * l'elenco dei servizi ancora vuoto: falliva, il codice cancellava il
++       * file con la password, e solo spegnendo e riaccendendo il Wi-Fi ci si
++       * connetteva - con le credenziali che connman aveva gia' letto in
++       * memoria. E' il "la prima volta non si connette" dell'RF35H. */
++      connmanctl_wait_for_service(netid, 10);
+    }
+    else
+    {
+@@ -392,7 +476,13 @@
+ 
+    pclose(popen(connman->command, "r"));
+ 
+-   /* Refresh status to reflect the updated state */
++   /* connmanctl connect torna appena la richiesta e' partita: associazione,
++    * handshake e DHCP vengono dopo. Prima si guardava lo stato subito, e una
++    * connessione perfettamente riuscita veniva contata come fallita. */
++   success = connmanctl_wait_connected(netid, 15);
++
++   /* Un solo aggiornamento della lista condivisa, a cose fatte, come faceva
++    * il codice originale: serve al menu per mostrare la rete connessa. */
+    connmanctl_refresh_services(connman);
+ 
+    /* connman is a PITA, return code is not meaningful at all :( */
+@@ -400,8 +490,6 @@
+    {
+       if (!strcmp(netid, connman->scan.net_list[i].netid))
+       {
+-         /* Found it! Check if we are connected now */
+-         success = connman->scan.net_list[i].connected;
+          if (!success)
+          {
+             /* TODO: Add forget password option, which gets rid of this hack */

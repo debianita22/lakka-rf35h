@@ -1,0 +1,18 @@
+Subject: wlroots: niente renderer Vulkan sull'RF35H
+
+---
+--- a/packages/wayland/lib/wlroots/package.mk
++++ b/packages/wayland/lib/wlroots/package.mk
+@@ -19,7 +19,11 @@
+ fi
+ 
+ # Vulkan Support
+-if [ "${VULKAN_SUPPORT}" = "yes" ]; then
++# devaOS RF35H: niente renderer Vulkan per sway. Il compositore disegna gia'
++# con GLES e RetroArch a schermo intero lo scavalca (direct scanout); su
++# Bifrost PanVK e' "non conforme", e il renderer Vulkan di wlroots vorrebbe
++# glslang sull'host, che qui nessuno garantisce prima di wlroots.
++if [ "${VULKAN_SUPPORT}" = "yes" ] && [ "${UBOOT_SYSTEM}" != "rf35h" ]; then
+   PKG_DEPENDS_TARGET+=" ${VULKAN}"
+   PKG_RENDERERS+=" vulkan"
+ fi

@@ -1,0 +1,30 @@
+#!/bin/sh
+# rf35h-overrides - installa gli override per-core di default di RetroArch.
+#
+# Copia /usr/share/rf35h/retroarch-overrides/<core>/<core>.cfg in
+# /storage/.config/retroarch/config/<core>/ SOLO se il file non esiste gia':
+# le modifiche dell'utente non vengono mai sovrascritte, e per tornare al
+# default basta cancellare il file.
+#
+# <core> e' il library_name dichiarato dal core, NON il nome del .so: e' quello
+# che RetroArch usa per cercare gli override, e un nome sbagliato viene
+# ignorato in silenzio. Diversi contengono spazi ("TGB Dual", "Beetle NeoPop"),
+# quindi ogni percorso va sempre tra virgolette.
+set -u
+SRC="${RF35H_OVERRIDES_SRC:-/usr/share/rf35h/retroarch-overrides}"
+DST="${RF35H_OVERRIDES_DST:-/storage/.config/retroarch/config}"
+[ -d "${SRC}" ] || exit 0
+
+# Ogni file della cartella del core: <core>.cfg (override di RetroArch) e
+# <core>.opt (opzioni del core), ciascuno copiato solo se manca.
+for dir in "${SRC}"/*/; do
+	[ -d "${dir}" ] || continue
+	name="$(basename "${dir}")"
+	for src in "${dir}"*; do
+		[ -f "${src}" ] || continue
+		dst="${DST}/${name}/$(basename "${src}")"
+		[ -e "${dst}" ] && continue
+		mkdir -p "${DST}/${name}" && cp "${src}" "${dst}"
+	done
+done
+exit 0

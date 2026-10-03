@@ -1,0 +1,192 @@
+Subject: eventservice: spkeys-service con modificatore (Select+volume), gettimems corretto, e attesa di TUTTI i device richiesti
+
+Senza l\x27attesa, con il joypad caricato in sysinit e adc-keys al
+coldplug di
+udev, il servizio si fermava al primo device trovato e i tasti volume
+restavano senza ascoltatore.
+
+---
+--- a/projects/Rockchip/devices/RK3326/packages/eventservice/sources/spkeys-service.c
++++ b/projects/Rockchip/devices/RK3326/packages/eventservice/sources/spkeys-service.c
+@@ -55,7 +55,45 @@
+ static uint64_t gettimems() {
+   struct timespec spec;
+   clock_gettime(CLOCK_REALTIME, &spec);
+-  return ((uint64_t)spec.tv_sec) + (spec.tv_nsec / 1000000);
++  // devaOS: era "tv_sec + tv_nsec/1000000", cioe' secondi piu' un resto 0..999:
++  // la differenza fra due letture non era un tempo e "longpressed" non poteva
++  // funzionare. Finora non si notava perche' il valore veniva calcolato e poi
++  // ignorato; serve adesso, per la ripetizione con il modificatore.
++  return ((uint64_t)spec.tv_sec) * 1000 + (spec.tv_nsec / 1000000);
++}
++
++// devaOS RF35H: un tasto puo' fare due cose diverse a seconda che un altro sia
++// premuto. Qui serve per la luminosita': Select + vol+/vol-, perche' questo
++// device non ha tasti dedicati e i soli adc-keys sono vol+ e vol-.
++// Il modificatore sta su un device diverso (il joypad) dai tasti volume
++// (adc-keys), ma spkeys-service apre gia' piu' device, quindi basta passarli
++// entrambi. Tutto e' dietro opzioni nuove: senza --mod il comportamento e'
++// identico a prima.
++static int mod_code = -1;
++static const char *mod_cmd[MAX_KEYS];
++
++// Comando da eseguire per questo tasto quando il modificatore e' premuto,
++// oppure NULL se vale il comportamento normale (comando a RetroArch).
++static const char *modified_cmd(unsigned keyid, bool mod_held) {
++  if (!mod_held || keyid == 0 || keyid >= MAX_KEYS)
++    return NULL;
++  return mod_cmd[keyid];
++}
++
++// Consuma le opzioni iniziali, restituisce l'indice del primo nome di device.
++static int parse_opts(int argc, char **argv) {
++  int i = 1;
++  for (; i < argc; i++) {
++    if (!strcmp(argv[i], "--mod") && i + 1 < argc)
++      mod_code = atoi(argv[++i]);
++    else if (!strcmp(argv[i], "--mod-up") && i + 1 < argc)
++      mod_cmd[1] = argv[++i];
++    else if (!strcmp(argv[i], "--mod-down") && i + 1 < argc)
++      mod_cmd[2] = argv[++i];
++    else
++      break;
++  }
++  return i;
+ }
+ 
+ static int connectsocket() {
+@@ -81,6 +119,10 @@
+   int numdevs = 0;
+   signal(SIGPIPE, SIG_IGN);
+ 
++  int firstdev = parse_opts(argc, argv);
++  int wanted = argc - firstdev;
++  int waited = 0;
++
+   while (1) {
+     // Scan devices to find relevant devices
+     struct dirent **namelist;
+@@ -96,16 +138,30 @@
+       char devname[512];
+       ioctl(fd, EVIOCGNAME(sizeof(devname)), devname);
+ 
+-      if (inlist(&argv[1], argc-1, devname))
++      if (inlist(&argv[firstdev], argc-firstdev, devname))
+         devfds[numdevs++] = fd;
+       else
+         close(fd);
+     }
+-    if (numdevs)
++    /* devaOS RF35H: aspettare TUTTI i device richiesti, non il primo.
++     * I moduli input arrivano in momenti diversi (il joypad da modules-load
++     * a +5 s, adc-keys dal coldplug di udev a +20 s): fermarsi al primo
++     * lasciava i tasti volume senza nessuno in ascolto, e il combo
++     * Select+volume, che vuole entrambi, non partiva mai. Dopo 60 s si va
++     * con quello che c'e'. */
++    if (numdevs >= wanted)
+       break;
+-
+-    printf("Could not find any device, retrying in 10s ...\n");
+-    sleep(10);
++    if (numdevs && waited >= 60) {
++      printf("Only %d of %d devices found after %ds, going on with those\n", numdevs, wanted, waited);
++      break;
++    }
++    for (int i = 0; i < numdevs; i++)
++      close(devfds[i]);
++    numdevs = 0;
++    if (waited % 10 == 0)
++      printf("Waiting for %d input device(s) (%ds) ...\n", wanted, waited);
++    sleep(1);
++    waited++;
+   }
+ 
+   // Assume all keys are unpressed by default
+@@ -113,6 +169,7 @@
+   memset(keystate, 0, sizeof(keystate));
+ 
+   int clientfd = connectsocket();
++  bool mod_held = false;
+ 
+   // Loop on events
+   while (1) {
+@@ -122,8 +179,14 @@
+       fds[i].events = POLLIN;
+     }
+ 
+-    // Wake up every 100ms to allow for repeated key tracking
+-    poll(fds, numdevs, 100);
++    // Il timeout serve solo per la pressione lunga: con nessun tasto premuto
++    // si blocca fino al prossimo evento invece di svegliarsi 10 volte al
++    // secondo a console ferma. (devaOS RF35H)
++    bool any_held = false;
++    for (int i = 0; i < numdevs && !any_held; i++)
++      for (int j = 1; j < MAX_KEYS; j++)
++        if (keystate[i][j]) { any_held = true; break; }
++    poll(fds, numdevs, any_held ? 100 : -1);
+ 
+     for (int i = 0; i < numdevs; i++) {
+       if (fds[i].revents & POLLIN) {
+@@ -135,18 +198,30 @@
+         for (unsigned j = 0; j < readb / sizeof(struct input_event); j++) {
+           int keycode = ev[j].code;
+           if (ev[j].type == EV_KEY && keycode < KEY_MAX) {
++            if (keycode == mod_code) {
++              mod_held = ev[j].value != 0;
++              continue;
++            }
+             unsigned keyid = event_map[keycode];
+             if (keyid) {
+               const char *cmd = cmd_map[keyid];
++              const char *mcmd = modified_cmd(keyid, mod_held);
+               // Just pressed now (was not pressed before)
+               bool pressed = !keystate[i][keyid] && ev[j].value;
+               if (pressed) {
+-                // Send command over the client socket
+-                int wr = write(clientfd, cmd, strlen(cmd));
+-                // Reconnect on error!
+-                if (wr <= 0) {
+-                  close(clientfd);
+-                  clientfd = connectsocket();
++                if (mcmd) {
++                  // Col modificatore il comando va alla shell, e a RetroArch
++                  // non arriva niente: altrimenti Select+vol+ alzerebbe sia la
++                  // luminosita' sia il volume.
++                  if (system(mcmd)) { /* ignore */ }
++                } else {
++                  // Send command over the client socket
++                  int wr = write(clientfd, cmd, strlen(cmd));
++                  // Reconnect on error!
++                  if (wr <= 0) {
++                    close(clientfd);
++                    clientfd = connectsocket();
++                  }
+                 }
+                 // Just track the time it was pressed
+                 keystate[i][keyid] = gettimems();
+@@ -167,9 +242,22 @@
+           // Has been pressed for more than some time
+           bool longpressed = keystate[i][j] &&
+                              (gettimems() - keystate[i][j]) > REPRESS_MS;
+-          // Inject the event
+-          const char *cmd = cmd_map[j];
+-          write(clientfd, cmd, strlen(cmd));
++          // devaOS: la ripetizione parte solo dopo REPRESS_MS, che e' quello
++          // che il nome della costante e il commento sopra dicono da sempre.
++          // Finora "longpressed" veniva calcolato e buttato via, quindi ogni
++          // singola pressione mandava il comando due volte - una alla lettura
++          // dell'evento e una subito dopo da qui, prima ancora del rilascio.
++          // Su un tap del volume significava due passi invece di uno.
++          if (!longpressed)
++            continue;
++          const char *mcmd = modified_cmd(j, mod_held);
++          if (mcmd) {
++            if (system(mcmd)) { /* ignore */ }
++          } else {
++            // Inject the event
++            const char *cmd = cmd_map[j];
++            write(clientfd, cmd, strlen(cmd));
++          }
+           // Update pressed time for the next repeat
+           keystate[i][j] = gettimems();
+         }

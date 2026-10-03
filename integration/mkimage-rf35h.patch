@@ -1,0 +1,76 @@
+diff --git a/projects/Rockchip/bootloader/mkimage b/projects/Rockchip/bootloader/mkimage
+index 0c92f0fa..2e734dc7 100644
+--- a/projects/Rockchip/bootloader/mkimage
++++ b/projects/Rockchip/bootloader/mkimage
+@@ -28,7 +28,50 @@ if [ -n "${UBOOT_SYSTEM}" ]; then
+   fi
+ fi
+ 
+-if [ "${DEVICE}" = "RK3326" ]; then
++# devaOS RF35H: niente boot.ini. Il loader di questa board e' U-Boot 2025.10
++# con bootstd e CONFIG_BOOTCOMMAND="bootmeth order script; bootflow scan -b":
++# l'ordine dei metodi e' "script" e basta, quindi cerca boot.scr. Non legge
++# boot.ini, e nemmeno extlinux.conf direttamente: un'immagine col solo
++# extlinux.conf si costruisce pulita e poi resta al prompt di U-Boot.
++#
++# Qui si aggiunge SOLO boot.scr. Il DTB e /extlinux/extlinux.conf li ha gia'
++# copiati scripts/mkimage (righe 342-365) prima di sorgere questo file, con
++# la nostra EXTRA_CMDLINE; ricopiarli farebbe fallire mcopy, che non
++# sovrascrive un file esistente ed esce 1.
++#
++# boot.scr fa sysboot su quell'extlinux.conf. E' esattamente cio' che fa
++# devaOS con lo stesso blob, e su questa board parte. kernel_addr_r alzato a
++# 0x09000000: il KERNEL di Lakka e' un Image non compresso di decine di MB e
++# con il default finirebbe sopra il device tree. devtype, devnum e
++# distro_bootpart li imposta bootstd prima di eseguire lo script.
++if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++  echo "image: creating boot.scr for the bootstd script method..."
++  cat <<EOF >"${IMG_TMP}/boot.cmd"
++setenv kernel_addr_r "0x09000000"
++setenv fdtoverlay_addr_r "0x08000000"
++sysboot \${devtype} \${devnum}:\${distro_bootpart} any 0x100000 /extlinux/extlinux.conf
++EOF
++  # mkimage: prima quello della toolchain, se c'e', poi quello di sistema.
++  #
++  # Non dipendiamo da u-boot-tools:host apposta. Quel package e' rotto per
++  # RK3326 a monte - il suo unpack() cerca un .tar.bz2 fisso mentre il u-boot
++  # di questo device arriva da github come .tar.gz - e comunque vorrebbe dire
++  # compilare i tool di uno U-Boot del 2018 col compilatore di oggi, per
++  # ottenere un binario che fa una cosa sola e stabile da vent'anni:
++  # impacchettare uno script in un legacy image. Quello della distro va bene.
++  MKIMAGE="${TOOLCHAIN}/bin/mkimage"
++  [ -x "${MKIMAGE}" ] || MKIMAGE="$(command -v mkimage 2>/dev/null || true)"
++  if [ -z "${MKIMAGE}" ]; then
++    echo "image: mkimage non trovato."
++    echo "image: installalo (Debian/Ubuntu: u-boot-tools, Arch: uboot-tools)"
++    echo "image: oppure costruisci u-boot-tools:host."
++    exit 1
++  fi
++  "${MKIMAGE}" -A arm64 -T script -C none -n "Lakka RF35H" \
++    -d "${IMG_TMP}/boot.cmd" "${IMG_TMP}/boot.scr" >"${SAVE_ERROR}" 2>&1 || show_error
++  mcopy "${IMG_TMP}/boot.scr" :: >"${SAVE_ERROR}" 2>&1 || show_error
++
++elif [ "${DEVICE}" = "RK3326" ]; then
+   if [ -f "${RELEASE_DIR}/3rdparty/bootloader/boot.ini" ]; then
+     # remove " fbcon=rotate:3" in /boot.ini when UBOOT_SYSTEM is rg351v
+     # because ANBERNIC RG351V does not need rotatation
+diff --git a/scripts/mkimage b/scripts/mkimage
+index ec9db9d5..d242f582 100755
+--- a/scripts/mkimage
++++ b/scripts/mkimage
+@@ -130,7 +130,14 @@ alias mmd='mmd -i "${IMG_TMP}/part1.fat"'
+ echo "image: creating filesystem on part1..."
+ 
+ if [ "${BOOTLOADER}" = "syslinux" -o "${BOOTLOADER}" = "bcm2835-bootloader" -o "${BOOTLOADER}" = "u-boot" ]; then
+-  mformat -i "${IMG_TMP}/part1.fat" -v "${DISTRO_BOOTLABEL}" -N "${UUID_SYSTEM//-/}" :: >"${SAVE_ERROR}" 2>&1 || show_error
++  # devaOS RF35H: 32 settori per cluster (16 KiB), come la card AURKNIX che
++  # su questa board parte. Con i 2 GiB di SYSTEM mformat ne sceglierebbe 8
++  # (4 KiB), e un Image da ~25 MB diventa ~6000 cluster da concatenare per il
++  # driver FAT di U-Boot invece di ~1500. Non e' un'ottimizzazione: e' il
++  # punto in cui devaOS ha visto il boot fermarsi.
++  MFORMAT_CLUSTER=""
++  [ "${UBOOT_SYSTEM}" = "rf35h" ] && MFORMAT_CLUSTER="-c 32"
++  mformat -i "${IMG_TMP}/part1.fat" ${MFORMAT_CLUSTER} -v "${DISTRO_BOOTLABEL}" -N "${UUID_SYSTEM//-/}" :: >"${SAVE_ERROR}" 2>&1 || show_error
+ fi
+ sync
+ 

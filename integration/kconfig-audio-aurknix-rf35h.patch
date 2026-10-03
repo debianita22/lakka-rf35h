@@ -1,0 +1,37 @@
+Subject: kconfig: I2S Rockchip built-in, amplificatore come modulo
+
+AURKNIX (fork ROCKNIX, kernel mainline) ha audio funzionante su questo stesso
+RF35H, con lo stesso device tree e senza alcuna patch al codec rk817. La sua
+configurazione del kernel pero differisce dalla nostra proprio qui:
+
+  CONFIG_SND_SOC_ROCKCHIP_I2S      loro =y, noi =m
+  CONFIG_SND_SOC_SIMPLE_AMPLIFIER  loro =m, noi =y
+
+L ordine di probe cambia di conseguenza: con l I2S nel kernel il controller e
+gia registrato quando simple-audio-card compone la scheda, mentre da noi
+arrivava dal coldplug dei moduli. Sul device si vedeva come audio presente al
+primo flusso dopo il boot e assente nei successivi.
+
+Allineate alle sue.
+
+---
+--- a/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
++++ b/projects/Rockchip/devices/RK3326/linux/linux.aarch64.conf
+@@ -4096,7 +4096,7 @@
+ # CONFIG_SND_SOC_IMG is not set
+ # CONFIG_SND_SOC_MTK_BTCVSD is not set
+ CONFIG_SND_SOC_ROCKCHIP=m
+-CONFIG_SND_SOC_ROCKCHIP_I2S=m
++CONFIG_SND_SOC_ROCKCHIP_I2S=y
+ CONFIG_SND_SOC_ROCKCHIP_I2S_TDM=m
+ CONFIG_SND_SOC_ROCKCHIP_PDM=m
+ CONFIG_SND_SOC_ROCKCHIP_SPDIF=m
+@@ -4226,7 +4226,7 @@
+ # CONFIG_SND_SOC_RT5659 is not set
+ # CONFIG_SND_SOC_RT9120 is not set
+ # CONFIG_SND_SOC_SGTL5000 is not set
+-CONFIG_SND_SOC_SIMPLE_AMPLIFIER=y
++CONFIG_SND_SOC_SIMPLE_AMPLIFIER=m
+ # CONFIG_SND_SOC_SIMPLE_MUX is not set
+ # CONFIG_SND_SOC_SMA1303 is not set
+ CONFIG_SND_SOC_SPDIF=y

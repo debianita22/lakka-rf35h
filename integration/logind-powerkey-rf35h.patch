@@ -1,0 +1,51 @@
+Subject: logind su rf35h: pressione breve sospende, lunga spegne
+
+Il tasto power di questa board e il PMIC (cella mfd rk805-pwrkey del
+rk817),
+non un gpio-key. Il ramo generico mette HandlePowerKey=ignore quando ce un
+display server, e con DISPLAYSERVER="wl" il device resterebbe senza modo
+di
+spegnersi.
+
+Breve = suspend, lunga (5 s) = poweroff: e il comportamento di devaOS
+sullo
+stesso hardware. La soglia dei 5 s la misura logind, quindi la via duscita
+resta anche se la ripresa non funziona.
+
+---
+diff --git a/packages/sysutils/systemd/package.mk b/packages/sysutils/systemd/package.mk
+index b9c05301..dbdc6910 100644
+--- a/packages/sysutils/systemd/package.mk
++++ b/packages/sysutils/systemd/package.mk
+@@ -226,6 +226,31 @@ post_makeinstall_target() {
+     sed -e "s,^.*HandlePowerKey=.*$,HandlePowerKey=poweroff,g" -i $INSTALL/etc/systemd/logind.conf
+   fi
+ 
++  # devaOS RF35H: il tasto power di questa board e' quello del PMIC (cella
++  # mfd rk805-pwrkey del rk817, input device "rk805 pwrkey"), non un gpio-key,
++  # e non compare nel device tree. Gli altri RK3326 di Lakka non ce l'hanno:
++  # l'Odroid Go stacca l'alimentazione con un interruttore meccanico.
++  # Il ramo sopra mette HandlePowerKey=ignore quando c'e' un display server,
++  # e con DISPLAYSERVER="wl" questo device resterebbe senza modo di spegnersi.
++  if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
++    # Pressione breve: sospende. Lunga (5 s, soglia fissa di logind): spegne.
++    # E' il comportamento che ci si aspetta da un portatile, ed e' quello che
++    # fa devaOS sullo stesso hardware.
++    #
++    # Se la ripresa non funzionasse, la via d'uscita resta: tieni premuto e
++    # dopo cinque secondi si spegne comunque, perche' quella soglia la misura
++    # logind sui soli eventi di pressione e rilascio del PMIC.
++    #
++    # rf35h-suspend.service mette anche pm_async=0 prima di sospendere:
++    # con la sospensione dei device in parallelo il rk817 e la SDIO della
++    # RK915 si pestano i piedi in ripresa.
++    sed -e "s,^.*HandlePowerKey=.*$,HandlePowerKey=suspend,g" \
++        -e "s,^.*HandlePowerKeyLongPress=.*$,HandlePowerKeyLongPress=poweroff,g" \
++        -i ${INSTALL}/etc/systemd/logind.conf
++    grep -q "^HandlePowerKeyLongPress=" ${INSTALL}/etc/systemd/logind.conf \
++      || echo "HandlePowerKeyLongPress=poweroff" >> ${INSTALL}/etc/systemd/logind.conf
++  fi
++
+   # replace systemd-machine-id-setup with ours
+   safe_remove ${INSTALL}/usr/lib/systemd/system/systemd-machine-id-commit.service
+   safe_remove ${INSTALL}/usr/lib/systemd/system/*.target.wants/systemd-machine-id-commit.service
