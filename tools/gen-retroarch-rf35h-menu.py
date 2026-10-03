@@ -12,6 +12,13 @@ Quattro voci:
   Screen brightness   (5..100 %)          -> rf35h-brightness N
   Joystick LEDs       (17 modi di mcu_led)-> rf35h-led <modo>
   Status LEDs         (charge/red/blue/both/off) -> rf35h-statusled <modo>
+(poi ne sono arrivate altre: audio, USB, zram, NTP, scraper, aggiornamento)
+
+System Update e' un'azione, come lo scraper: avvia o ferma
+rf35h-update.service, il sottotitolo mostra lo stato che scrive rf35h-update,
+e con un aggiornamento pronto riavvia. Sull'RF35H toglie "Update Lakka"
+dall'Online Updater: quelle immagini sono per un RK3326 generico (kernel,
+SYSTEM e loader), e installate qui lasciano la console senza avvio.
 
 Ogni voce e' un setting vero di RetroArch (finisce in retroarch.cfg), con un
 change_handler che applica subito. Quando il menu si apre, i valori vengono
@@ -59,6 +66,7 @@ edit("msg_hash.h", [
      "   MENU_LABEL(RF35H_RUMBLE),\n"
      "   MENU_LABEL(RF35H_SPEAKER_VOLUME),\n"
      "   MENU_LABEL(RF35H_NTP_SERVER),\n"
+     "   MENU_LABEL(RF35H_UPDATE),\n"
      "#endif\n"),
     ("   MENU_LABEL(LAKKA_SERVICES),\n#ifdef HAVE_LAKKA_SWITCH\n",
      "   MENU_LABEL(LAKKA_SERVICES),\n"
@@ -89,6 +97,7 @@ edit("intl/msg_hash_lbl.h", [
      "MSG_HASH(\n   MENU_ENUM_LABEL_RF35H_RUMBLE,\n   \"rf35h_rumble\"\n   )\n"
      "MSG_HASH(\n   MENU_ENUM_LABEL_RF35H_SPEAKER_VOLUME,\n   \"rf35h_speaker_volume\"\n   )\n"
      "MSG_HASH(\n   MENU_ENUM_LABEL_RF35H_NTP_SERVER,\n   \"rf35h_ntp_server\"\n   )\n"
+     "MSG_HASH(\n   MENU_ENUM_LABEL_RF35H_UPDATE,\n   \"rf35h_update\"\n   )\n"
      "#endif\n"
      "#ifdef HAVE_LAKKA_SWITCH\nMSG_HASH(\n   MENU_ENUM_LABEL_DEFERRED_LAKKA_SWITCH_OPTIONS_LIST,\n"),
 ])
@@ -222,6 +231,14 @@ MSG_HASH(
    MENU_ENUM_SUBLABEL_RF35H_SCRAPE_REGION,
    "Preferred region for box art when a game has several: Europe, USA, Japan or World."
    )
+MSG_HASH(
+   MENU_ENUM_LABEL_VALUE_RF35H_UPDATE,
+   "System Update"
+   )
+MSG_HASH(
+   MENU_ENUM_SUBLABEL_RF35H_UPDATE,
+   "Download the latest release of this system from GitHub, check it, and install it at the next restart. ROMs, saves and settings stay. Select again to stop the download."
+   )
 '''
 # ATTENZIONE all'ancora: la voce dello Switch sta DENTRO #ifdef HAVE_LAKKA_SWITCH.
 # Inserire subito prima della MSG_HASH la metteva dentro quell'ifdef: stringhe
@@ -279,7 +296,10 @@ STRINGS_IT = STRINGS_US.replace("Device Settings", "Impostazioni dispositivo") \
     .replace('"Scrape Only Missing Thumbnails"', '"Scarica solo le miniature mancanti"') \
     .replace("Skip games that already have box art. Off fetches everything again.", "Salta i giochi che hanno gia' la copertina. Spento, riscarica tutto.") \
     .replace('"Scraper Region"', '"Regione dello scraper"') \
-    .replace("Preferred region for box art when a game has several: Europe, USA, Japan or World.", "Regione preferita per le copertine quando un gioco ne ha piu' d'una: Europa, USA, Giappone o Mondo.")
+    .replace("Preferred region for box art when a game has several: Europe, USA, Japan or World.", "Regione preferita per le copertine quando un gioco ne ha piu' d'una: Europa, USA, Giappone o Mondo.") \
+    .replace('"System Update"', '"Aggiornamento di sistema"') \
+    .replace("Download the latest release of this system from GitHub, check it, and install it at the next restart. ROMs, saves and settings stay. Select again to stop the download.",
+             "Scarica da GitHub l'ultima release di questo sistema, la controlla e la installa al prossimo riavvio. ROM, salvataggi e impostazioni restano. Premi di nuovo per fermare il download.")
 edit("intl/msg_hash_it.h", [
     ("#ifdef HAVE_LAKKA_SWITCH\nMSG_HASH(\n   MENU_ENUM_LABEL_VALUE_LAKKA_SWITCH_OPTIONS,\n",
      "#ifdef HAVE_LAKKA\n" + STRINGS_IT + "#endif\n"
@@ -515,10 +535,50 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);\n"
      "   return 0;\n"
      "}\n"
+     "/* Aggiornamento di sistema: rf35h-update con la sua unit, come lo scraper.\n"
+     " * Se sta girando, la stessa voce lo ferma (il file a meta' resta, il giro\n"
+     " * dopo riprende). Con un aggiornamento pronto in /storage/.update riavvia:\n"
+     " * l'init lo installa all'avvio. */\n"
+     "static int action_ok_rf35h_update(const char *path,\n"
+     "      const char *label, unsigned type, size_t idx, size_t entry_idx)\n"
+     "{\n"
+     "   const char *msg = NULL;\n"
+     "   char ready[PATH_MAX_LENGTH];\n"
+     "   FILE *f;\n"
+     "   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;\n"
+     "   ready[0] = '\\0';\n"
+     "   if (path_is_valid(\"/run/systemd/units/invocation:rf35h-update.service\"))\n"
+     "   {\n"
+     "      if (system(\"systemctl stop rf35h-update.service >/dev/null 2>&1\")) { }\n"
+     "      msg = \"System update stopped: select again to resume\";\n"
+     "   }\n"
+     "   else\n"
+     "   {\n"
+     "      if ((f = fopen(\"/storage/.config/rf35h/update.ready\", \"r\")))\n"
+     "      {\n"
+     "         if (!fgets(ready, sizeof(ready), f))\n"
+     "            ready[0] = '\\0';\n"
+     "         fclose(f);\n"
+     "         ready[strcspn(ready, \"\\r\\n\")] = '\\0';\n"
+     "      }\n"
+     "      /* pronto e ancora li': si riavvia (CMD_EVENT_REBOOT salva la\n"
+     "       * configurazione, come il riavvio del menu) */\n"
+     "      if (ready[0] && path_is_valid(ready))\n"
+     "      {\n"
+     "         command_event(CMD_EVENT_REBOOT, NULL);\n"
+     "         return 0;\n"
+     "      }\n"
+     "      if (system(\"systemctl start rf35h-update.service >/dev/null 2>&1\")) { }\n"
+     "      msg = \"Checking for updates, progress below the menu entry\";\n"
+     "   }\n"
+     "   runloop_msg_queue_push(msg, strlen(msg), 1, 180, true, NULL,\n"
+     "         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);\n"
+     "   return 0;\n"
+     "}\n"
      "#endif\n"),
     ("#ifdef HAVE_LAKKA_SWITCH\n         {MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS,                action_ok_lakka_switch_options},\n#endif\n",
      "#ifdef HAVE_LAKKA_SWITCH\n         {MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS,                action_ok_lakka_switch_options},\n#endif\n"
-     "#ifdef HAVE_LAKKA\n         {MENU_ENUM_LABEL_RF35H_SETTINGS,                      action_ok_rf35h_settings},\n         {MENU_ENUM_LABEL_RF35H_SCRAPE,                        action_ok_rf35h_scrape},\n#endif\n"),
+     "#ifdef HAVE_LAKKA\n         {MENU_ENUM_LABEL_RF35H_SETTINGS,                      action_ok_rf35h_settings},\n         {MENU_ENUM_LABEL_RF35H_SCRAPE,                        action_ok_rf35h_scrape},\n         {MENU_ENUM_LABEL_RF35H_UPDATE,                        action_ok_rf35h_update},\n#endif\n"),
 ])
 
 # ------------------------------------------------------ cbs/menu_cbs_title.c
@@ -583,6 +643,59 @@ edit("menu/cbs/menu_cbs_sublabel.c", [
      "         st[0] ? st : \"idle\");\n"
      "   return 1;\n"
      "}\n"
+     "/* Lo stato dell'aggiornamento: la riga che scrive rf35h-update, o la\n"
+     " * versione installata (VERSION di /etc/os-release) se non c'e' niente in\n"
+     " * corso. Riletta al massimo due volte al secondo, come quella dello scraper. */\n"
+     "static int action_bind_sublabel_rf35h_update(\n"
+     "      file_list_t *list, unsigned type, unsigned i,\n"
+     "      const char *label, const char *path,\n"
+     "      char *s, size_t len)\n"
+     "{\n"
+     "   static char st[112];\n"
+     "   static retro_time_t last_read = 0;\n"
+     "   retro_time_t now = cpu_features_get_time_usec();\n"
+     "   if (!last_read || now - last_read > 500000)\n"
+     "   {\n"
+     "      FILE *f   = fopen(\"/storage/.config/rf35h/update.status\", \"r\");\n"
+     "      last_read = now;\n"
+     "      st[0]     = '\\0';\n"
+     "      if (f)\n"
+     "      {\n"
+     "         if (fgets(st, sizeof(st), f))\n"
+     "            string_remove_all_chars(st, '\\n');\n"
+     "         else\n"
+     "            st[0] = '\\0';\n"
+     "         fclose(f);\n"
+     "      }\n"
+     "      /* a meta' ma senza il servizio: fermato, o RetroArch riavviato */\n"
+     "      if ((!strncmp(st, \"checking\", 8) || !strncmp(st, \"downloading\", 11)\n"
+     "               || !strncmp(st, \"verifying\", 9))\n"
+     "            && !path_is_valid(\"/run/systemd/units/invocation:rf35h-update.service\"))\n"
+     "         strlcpy(st, \"interrupted: select to resume\", sizeof(st));\n"
+     "      if (!st[0])\n"
+     "      {\n"
+     "         char line[128];\n"
+     "         FILE *o = fopen(\"/etc/os-release\", \"r\");\n"
+     "         strlcpy(st, \"installed: ?\", sizeof(st));\n"
+     "         if (o)\n"
+     "         {\n"
+     "            while (fgets(line, sizeof(line), o))\n"
+     "            {\n"
+     "               if (!strncmp(line, \"VERSION=\", 8))\n"
+     "               {\n"
+     "                  string_remove_all_chars(line, '\"');\n"
+     "                  string_remove_all_chars(line, '\\n');\n"
+     "                  snprintf(st, sizeof(st), \"installed: %s\", line + 8);\n"
+     "                  break;\n"
+     "               }\n"
+     "            }\n"
+     "            fclose(o);\n"
+     "         }\n"
+     "      }\n"
+     "   }\n"
+     "   snprintf(s, len, \"%s\\n%s\", msg_hash_to_str(MENU_ENUM_SUBLABEL_RF35H_UPDATE), st);\n"
+     "   return 1;\n"
+     "}\n"
      "#endif\n"
      "#ifdef HAVE_LAKKA_SWITCH\nDEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_options,                MENU_ENUM_SUBLABEL_LAKKA_SWITCH_OPTIONS)\n"),
     ("#ifdef HAVE_LAKKA_SWITCH\n         case MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_switch_options);\n",
@@ -603,6 +716,7 @@ edit("menu/cbs/menu_cbs_sublabel.c", [
      "         case MENU_ENUM_LABEL_RF35H_SCRAPE:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_scrape);\n            break;\n"
      "         case MENU_ENUM_LABEL_RF35H_SCRAPE_MISSING:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_scrape_missing);\n            break;\n"
      "         case MENU_ENUM_LABEL_RF35H_SCRAPE_REGION:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_scrape_region);\n            break;\n"
+     "         case MENU_ENUM_LABEL_RF35H_UPDATE:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_update);\n            break;\n"
      "#endif\n"
      "#ifdef HAVE_LAKKA_SWITCH\n         case MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS:\n            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_switch_options);\n"),
 ])
@@ -750,6 +864,7 @@ edit("menu/menu_displaylist.c", [
      "               {MENU_ENUM_LABEL_RF35H_SCRAPE,                                          PARSE_ACTION},\n"
      "               {MENU_ENUM_LABEL_RF35H_SCRAPE_MISSING,                                  PARSE_ONLY_BOOL},\n"
      "               {MENU_ENUM_LABEL_RF35H_SCRAPE_REGION,                                   PARSE_ONLY_STRING_OPTIONS},\n"
+     "               {MENU_ENUM_LABEL_RF35H_UPDATE,                                          PARSE_ACTION},\n"
      "            };\n\n"
      "            rf35h_sync_settings(settings);\n\n"
      "            for (i = 0; i < ARRAY_SIZE(build_list); i++)\n"
@@ -781,6 +896,17 @@ edit("menu/menu_displaylist.c", [
      "                     break;\n"
      "#endif\n"
      "                     /* MISSING:\n                      * MENU_ENUM_LABEL_BLUETOOTH_SETTINGS\n"),
+    # Online Updater: "Update Lakka" scarica le immagini di Lakka per un RK3326
+    # generico. Installate qui lascerebbero la console senza avvio (il loader
+    # e il kernel non sono i nostri), e il download sta tutto in RAM. Sull'RF35H
+    # si aggiorna da Device Settings > System Update.
+    ("#ifdef HAVE_LAKKA\n               if (menu_entries_append(info->list,\n                        msg_hash_to_str(MENU_ENUM_LABEL_VALUE_UPDATE_LAKKA),\n",
+     "#ifdef HAVE_LAKKA\n"
+     "               /* RF35H: gli aggiornamenti di Lakka sono per un RK3326\n"
+     "                * generico e lascerebbero la console senza avvio: si\n"
+     "                * aggiorna da Device Settings > System Update. */\n"
+     "               if (!rf35h_present() && menu_entries_append(info->list,\n"
+     "                        msg_hash_to_str(MENU_ENUM_LABEL_VALUE_UPDATE_LAKKA),\n"),
     # il case che manda la lista al parser generico
     ("         case DISPLAYLIST_LAKKA_SERVICES_LIST:\n#ifdef HAVE_LAKKA_SWITCH\n         case DISPLAYLIST_LAKKA_SWITCH_OPTIONS_LIST:\n#endif\n",
      "         case DISPLAYLIST_LAKKA_SERVICES_LIST:\n"
@@ -1293,6 +1419,15 @@ SETTINGS_BLOCK = r'''#if defined(HAVE_LAKKA)
                   general_write_handler,
                   general_read_handler);
             (*list)[list_info->index - 1].action_ok = setting_action_ok_uint;
+
+            /* System Update: un'azione (action_ok_rf35h_update in menu_cbs_ok.c) */
+            CONFIG_ACTION(
+                  list, list_info,
+                  MENU_ENUM_LABEL_RF35H_UPDATE,
+                  MENU_ENUM_LABEL_VALUE_RF35H_UPDATE,
+                  &group_info,
+                  &subgroup_info,
+                  parent_group);
 
             END_SUB_GROUP(list, list_info, parent_group);
             END_GROUP(list, list_info, parent_group);

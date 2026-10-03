@@ -1,0 +1,25 @@
+Subject: lakka-update: sull'RF35H aggiorna dalle release del port
+
+"lakka-update" (da ssh) scarica l'ultima immagine di Lakka per RK3326.aarch64
+dal server di Lakka: kernel, SYSTEM e loader di un RK3326 generico, che
+installati su questa console la lascerebbero senza avvio (bootloader/update.sh
+riscrive il loader a 32K con quello del nuovo SYSTEM). Se c'e' rf35h-update,
+lo script passa a lui. La voce "Update Lakka" del menu la toglie la 1003.
+
+---
+--- a/packages/lakka/lakka_tools/lakka_update/sources/lakka-update.sh
++++ b/packages/lakka/lakka_tools/lakka_update/sources/lakka-update.sh
+@@ -1,5 +1,13 @@
+ #!/bin/bash
+ 
++# devaOS RF35H: le immagini di Lakka sono per un RK3326 generico (kernel,
++# SYSTEM e loader): installate su questa console la lascerebbero senza avvio.
++# Qui si aggiorna dalle release del port, con rf35h-update.
++if [ -x /usr/bin/rf35h-update ]; then
++	echo "XiFan RF35H: aggiornamento dalle release del port (rf35h-update run)"
++	exec /usr/bin/rf35h-update run
++fi
++
+ MIRROR=@LAKKA_UPDATE_SERVER_URL@/@LAKKA_TARGET_DEVICE_ARCH@
+ 
+ FILE=`wget $MIRROR/.index -q -O - | head -1`

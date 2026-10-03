@@ -68,6 +68,10 @@ mkimg() { # nome, loader, drop-in timesyncd, quanti script[, core dei giochi]
 		"${r}/usr/lib/systemd/system/systemd-timesyncd.service.d" \
 		"${r}/usr/lib/systemd/system/retroarch.service.d" "${t}/$1/target"
 	for g in ${5:-}; do echo core > "${r}/usr/lib/libretro/${g}_libretro.so"; done
+	# aggiornamenti: il repository e la versione (NOREPO=1 per l'immagine senza)
+	mkdir -p "${r}/usr/share/rf35h" "${r}/etc"
+	[ -n "${NOREPO:-}" ] || echo "o/r" > "${r}/usr/share/rf35h/update-repo"
+	echo 'VERSION="v9.9.9"' > "${r}/etc/os-release"
 	cp "$2" "${r}/usr/share/bootloader/u-boot-rockchip.bin"
 	echo dtb > "${r}/usr/share/bootloader/rk3326-xifan-rf35h.dtb"
 	cp "$3" "${r}/usr/lib/systemd/system/systemd-timesyncd.service.d/rf35h-timesyncd.conf"
@@ -98,6 +102,11 @@ if command -v mksquashfs >/dev/null 2>&1 && command -v unsquashfs >/dev/null 2>&
 	ok "timesyncd dopo la rete: NO" '[ "$(vi "${W}/target/bad-ts.tar")" = 1 ] && grep -q "ordina dopo la rete" "${T}/vi.out"'
 	mkimg few "${BOARD}/loader/known-good.bin" "${TS}" 5
 	ok "pochi script rf35h-*: NO" '[ "$(vi "${W}/target/few.tar")" = 1 ] && grep -q "solo 5 script" "${T}/vi.out"'
+	ok "aggiornamenti: repository e versione elencati" '[ "$(vi "${W}/target/${G}.tar")" = 0 ] && grep -q "rf35h-update dalle release di o/r, versione v9.9.9" "${T}/vi.out"'
+	NOREPO=1 mkimg norepo "${BOARD}/loader/known-good.bin" "${TS}" 99
+	ok "rf35h-update senza repository: NO" '[ "$(vi "${W}/target/norepo.tar")" = 1 ] && grep -q "senza repository" "${T}/vi.out"'
+	ok "RF35H_VERSION diversa da os-release: NO" '[ "$(RF35H_VERSION=v1.0.0 vi "${W}/target/${G}.tar")" = 1 ] && grep -q "attesa v1.0.0" "${T}/vi.out"'
+	ok "RF35H_VERSION uguale: conforme" '[ "$(RF35H_VERSION=v9.9.9 vi "${W}/target/${G}.tar")" = 0 ]'
 	# i giochi: RF35H_GAMES la mette build-lakka-rf35h.sh a fine build
 	vig() { RF35H_GAMES="$1" sh "${O}/tools/verify-image.sh" "$2" "${BOARD}" > "${T}/vi.out" 2>&1; echo $?; }
 	ok "senza RF35H_GAMES i giochi si elencano e basta" '[ "$(vi "${W}/target/${G}.tar")" = 0 ] && grep -q "giochi nell.immagine: nessuno" "${T}/vi.out"'

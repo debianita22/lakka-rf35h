@@ -196,7 +196,7 @@
  #endif
 --- a/intl/msg_hash_it.h
 +++ b/intl/msg_hash_it.h
-@@ -15555,6 +15555,160 @@
+@@ -15555,6 +15555,168 @@
     MENU_ENUM_LABEL_HELP_TIMEZONE,
     "Visualizza un elenco di fusi orari disponibili. Dopo aver selezionato un fuso orario, l'ora e la data vengono regolate al fuso orario selezionato. Suppone, che l'orologio di sistema/hardware sia impostato su UTC."
     )
@@ -353,13 +353,21 @@
 +   MENU_ENUM_SUBLABEL_RF35H_SCRAPE_REGION,
 +   "Regione preferita per le copertine quando un gioco ne ha piu' d'una: Europa, USA, Giappone o Mondo."
 +   )
++MSG_HASH(
++   MENU_ENUM_LABEL_VALUE_RF35H_UPDATE,
++   "Aggiornamento di sistema"
++   )
++MSG_HASH(
++   MENU_ENUM_SUBLABEL_RF35H_UPDATE,
++   "Scarica da GitHub l'ultima release di questo sistema, la controlla e la installa al prossimo riavvio. ROM, salvataggi e impostazioni restano. Premi di nuovo per fermare il download."
++   )
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
  MSG_HASH(
     MENU_ENUM_LABEL_VALUE_LAKKA_SWITCH_OPTIONS,
 --- a/intl/msg_hash_lbl.h
 +++ b/intl/msg_hash_lbl.h
-@@ -3869,6 +3869,100 @@
+@@ -3869,6 +3869,104 @@
     )
  #endif
  
@@ -456,13 +464,17 @@
 +   MENU_ENUM_LABEL_RF35H_NTP_SERVER,
 +   "rf35h_ntp_server"
 +   )
++MSG_HASH(
++   MENU_ENUM_LABEL_RF35H_UPDATE,
++   "rf35h_update"
++   )
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
  MSG_HASH(
     MENU_ENUM_LABEL_DEFERRED_LAKKA_SWITCH_OPTIONS_LIST,
 --- a/intl/msg_hash_us.h
 +++ b/intl/msg_hash_us.h
-@@ -16607,6 +16607,160 @@
+@@ -16607,6 +16607,168 @@
     MENU_ENUM_LABEL_HELP_TIMEZONE,
     "Displays a list of available timezones. After selecting a time zone, time and date is adjusted to the selected time zone. It assumes, that system/hardware clock is set to UTC."
     )
@@ -619,6 +631,14 @@
 +   MENU_ENUM_SUBLABEL_RF35H_SCRAPE_REGION,
 +   "Preferred region for box art when a game has several: Europe, USA, Japan or World."
 +   )
++MSG_HASH(
++   MENU_ENUM_LABEL_VALUE_RF35H_UPDATE,
++   "System Update"
++   )
++MSG_HASH(
++   MENU_ENUM_SUBLABEL_RF35H_UPDATE,
++   "Download the latest release of this system from GitHub, check it, and install it at the next restart. ROMs, saves and settings stay. Select again to stop the download."
++   )
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
  MSG_HASH(
@@ -683,7 +703,7 @@
        case ACTION_OK_DL_USER_SETTINGS_LIST:
        case ACTION_OK_DL_DIRECTORY_SETTINGS_LIST:
        case ACTION_OK_DL_PRIVACY_SETTINGS_LIST:
-@@ -6571,6 +6587,45 @@
+@@ -6571,6 +6587,85 @@
  #ifdef HAVE_LAKKA_SWITCH
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_lakka_switch_options, ACTION_OK_DL_LAKKA_SWITCH_OPTIONS_LIST)
  #endif
@@ -725,11 +745,51 @@
 +         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
 +   return 0;
 +}
++/* Aggiornamento di sistema: rf35h-update con la sua unit, come lo scraper.
++ * Se sta girando, la stessa voce lo ferma (il file a meta' resta, il giro
++ * dopo riprende). Con un aggiornamento pronto in /storage/.update riavvia:
++ * l'init lo installa all'avvio. */
++static int action_ok_rf35h_update(const char *path,
++      const char *label, unsigned type, size_t idx, size_t entry_idx)
++{
++   const char *msg = NULL;
++   char ready[PATH_MAX_LENGTH];
++   FILE *f;
++   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;
++   ready[0] = '\0';
++   if (path_is_valid("/run/systemd/units/invocation:rf35h-update.service"))
++   {
++      if (system("systemctl stop rf35h-update.service >/dev/null 2>&1")) { }
++      msg = "System update stopped: select again to resume";
++   }
++   else
++   {
++      if ((f = fopen("/storage/.config/rf35h/update.ready", "r")))
++      {
++         if (!fgets(ready, sizeof(ready), f))
++            ready[0] = '\0';
++         fclose(f);
++         ready[strcspn(ready, "\r\n")] = '\0';
++      }
++      /* pronto e ancora li': si riavvia (CMD_EVENT_REBOOT salva la
++       * configurazione, come il riavvio del menu) */
++      if (ready[0] && path_is_valid(ready))
++      {
++         command_event(CMD_EVENT_REBOOT, NULL);
++         return 0;
++      }
++      if (system("systemctl start rf35h-update.service >/dev/null 2>&1")) { }
++      msg = "Checking for updates, progress below the menu entry";
++   }
++   runloop_msg_queue_push(msg, strlen(msg), 1, 180, true, NULL,
++         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
++   return 0;
++}
 +#endif
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_user_list, ACTION_OK_DL_USER_SETTINGS_LIST)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_netplay_sublist, ACTION_OK_DL_NETPLAY)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_directory_list, ACTION_OK_DL_DIRECTORY_SETTINGS_LIST)
-@@ -9366,6 +9421,13 @@
+@@ -9366,6 +9461,14 @@
  #ifdef HAVE_LAKKA_SWITCH
           {MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS,                action_ok_lakka_switch_options},
  #endif
@@ -739,13 +799,14 @@
 +         {MENU_ENUM_LABEL_RF35H_SCRAPER_SETTINGS,                   action_ok_rf35h_scraper},
 +         {MENU_ENUM_LABEL_RF35H_NTP_SETTINGS,                       action_ok_rf35h_ntp_settings},
 +         {MENU_ENUM_LABEL_RF35H_SCRAPE,                        action_ok_rf35h_scrape},
++         {MENU_ENUM_LABEL_RF35H_UPDATE,                        action_ok_rf35h_update},
 +#endif
           {MENU_ENUM_LABEL_NETPLAY_SETTINGS,                    action_ok_netplay_sublist},
           {MENU_ENUM_LABEL_USER_SETTINGS,                       action_ok_user_list},
           {MENU_ENUM_LABEL_DIRECTORY_SETTINGS,                  action_ok_directory_list},
 --- a/menu/cbs/menu_cbs_sublabel.c
 +++ b/menu/cbs/menu_cbs_sublabel.c
-@@ -392,6 +392,59 @@
+@@ -392,6 +392,112 @@
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_localap_enable,                MENU_ENUM_SUBLABEL_LOCALAP_ENABLE )
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_timezone,                      MENU_ENUM_SUBLABEL_TIMEZONE)
  #endif
@@ -801,11 +862,64 @@
 +         st[0] ? st : "idle");
 +   return 1;
 +}
++/* Lo stato dell'aggiornamento: la riga che scrive rf35h-update, o la
++ * versione installata (VERSION di /etc/os-release) se non c'e' niente in
++ * corso. Riletta al massimo due volte al secondo, come quella dello scraper. */
++static int action_bind_sublabel_rf35h_update(
++      file_list_t *list, unsigned type, unsigned i,
++      const char *label, const char *path,
++      char *s, size_t len)
++{
++   static char st[112];
++   static retro_time_t last_read = 0;
++   retro_time_t now = cpu_features_get_time_usec();
++   if (!last_read || now - last_read > 500000)
++   {
++      FILE *f   = fopen("/storage/.config/rf35h/update.status", "r");
++      last_read = now;
++      st[0]     = '\0';
++      if (f)
++      {
++         if (fgets(st, sizeof(st), f))
++            string_remove_all_chars(st, '\n');
++         else
++            st[0] = '\0';
++         fclose(f);
++      }
++      /* a meta' ma senza il servizio: fermato, o RetroArch riavviato */
++      if ((!strncmp(st, "checking", 8) || !strncmp(st, "downloading", 11)
++               || !strncmp(st, "verifying", 9))
++            && !path_is_valid("/run/systemd/units/invocation:rf35h-update.service"))
++         strlcpy(st, "interrupted: select to resume", sizeof(st));
++      if (!st[0])
++      {
++         char line[128];
++         FILE *o = fopen("/etc/os-release", "r");
++         strlcpy(st, "installed: ?", sizeof(st));
++         if (o)
++         {
++            while (fgets(line, sizeof(line), o))
++            {
++               if (!strncmp(line, "VERSION=", 8))
++               {
++                  string_remove_all_chars(line, '"');
++                  string_remove_all_chars(line, '\n');
++                  snprintf(st, sizeof(st), "installed: %s", line + 8);
++                  break;
++               }
++            }
++            fclose(o);
++         }
++      }
++   }
++   snprintf(s, len, "%s\n%s", msg_hash_to_str(MENU_ENUM_SUBLABEL_RF35H_UPDATE), st);
++   return 1;
++}
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_options,                MENU_ENUM_SUBLABEL_LAKKA_SWITCH_OPTIONS)
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_oc_enable,              MENU_ENUM_SUBLABEL_SWITCH_OC_ENABLE)
-@@ -5485,6 +5538,65 @@
+@@ -5485,6 +5591,68 @@
              BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_cpu_perf_mode);
              break;
  #endif
@@ -866,6 +980,9 @@
 +            break;
 +         case MENU_ENUM_LABEL_RF35H_SCRAPE_REGION:
 +            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_scrape_region);
++            break;
++         case MENU_ENUM_LABEL_RF35H_UPDATE:
++            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_rf35h_update);
 +            break;
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
@@ -1024,7 +1141,7 @@
  unsigned menu_displaylist_build_list(
        file_list_t *list,
        settings_t *settings,
-@@ -10248,6 +10351,93 @@
+@@ -10248,6 +10351,94 @@
  
              for (i = 0; i < ARRAY_SIZE(build_list); i++)
              {
@@ -1109,6 +1226,7 @@
 +               {MENU_ENUM_LABEL_RF35H_ZRAM,                                            PARSE_ONLY_BOOL},
 +               {MENU_ENUM_LABEL_RF35H_SCRAPER_SETTINGS,                                  PARSE_ACTION},
 +               {MENU_ENUM_LABEL_RF35H_NTP_SETTINGS,                                      PARSE_ACTION},
++               {MENU_ENUM_LABEL_RF35H_UPDATE,                                          PARSE_ACTION},
 +            };
 +
 +            rf35h_sync_settings(settings);
@@ -1118,7 +1236,7 @@
                 if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(list,
                          build_list[i].enum_idx,  build_list[i].parse_type,
                          false) == 0)
-@@ -11142,6 +11332,9 @@
+@@ -11142,6 +11333,9 @@
                 {MENU_ENUM_LABEL_ACCESSIBILITY_SETTINGS,      PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_POWER_MANAGEMENT_SETTINGS,   PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_BLUETOOTH_SETTINGS,          PARSE_ACTION, true},
@@ -1128,7 +1246,7 @@
  #ifdef HAVE_NETWORKING
                 {MENU_ENUM_LABEL_WIFI_SETTINGS,               PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_NETWORK_SETTINGS,            PARSE_ACTION, true},
-@@ -11236,6 +11429,14 @@
+@@ -11236,6 +11430,14 @@
                       build_list[i].checked = settings->bools.settings_show_steam;
                       break;
  #endif
@@ -1143,7 +1261,7 @@
                       /* MISSING:
                        * MENU_ENUM_LABEL_BLUETOOTH_SETTINGS
                        * MENU_ENUM_LABEL_WIFI_SETTINGS
-@@ -14652,6 +14853,12 @@
+@@ -14652,6 +14854,12 @@
           case DISPLAYLIST_MENU_FILE_BROWSER_SETTINGS_LIST:
           case DISPLAYLIST_MENU_VIEWS_SETTINGS_LIST:
           case DISPLAYLIST_LAKKA_SERVICES_LIST:
@@ -1156,6 +1274,18 @@
  #ifdef HAVE_LAKKA_SWITCH
           case DISPLAYLIST_LAKKA_SWITCH_OPTIONS_LIST:
  #endif
+@@ -14855,7 +15063,10 @@
+                video_context_driver_get_flags(&flags);
+ #endif
+ #ifdef HAVE_LAKKA
+-               if (menu_entries_append(info->list,
++               /* RF35H: gli aggiornamenti di Lakka sono per un RK3326
++                * generico e lascerebbero la console senza avvio: si
++                * aggiorna da Device Settings > System Update. */
++               if (!rf35h_present() && menu_entries_append(info->list,
+                         msg_hash_to_str(MENU_ENUM_LABEL_VALUE_UPDATE_LAKKA),
+                         msg_hash_to_str(MENU_ENUM_LABEL_UPDATE_LAKKA),
+                         MENU_ENUM_LABEL_UPDATE_LAKKA,
 --- a/menu/menu_displaylist.h
 +++ b/menu/menu_displaylist.h
 @@ -241,6 +241,12 @@
@@ -1494,7 +1624,7 @@
           CONFIG_ACTION(
                 list, list_info,
                 MENU_ENUM_LABEL_PLAYLIST_SETTINGS,
-@@ -23565,6 +23858,296 @@
+@@ -23565,6 +23858,305 @@
  #endif
           }
           break;
@@ -1783,6 +1913,15 @@
 +                  general_read_handler);
 +            (*list)[list_info->index - 1].action_ok = setting_action_ok_uint;
 +
++            /* System Update: un'azione (action_ok_rf35h_update in menu_cbs_ok.c) */
++            CONFIG_ACTION(
++                  list, list_info,
++                  MENU_ENUM_LABEL_RF35H_UPDATE,
++                  MENU_ENUM_LABEL_VALUE_RF35H_UPDATE,
++                  &group_info,
++                  &subgroup_info,
++                  parent_group);
++
 +            END_SUB_GROUP(list, list_info, parent_group);
 +            END_GROUP(list, list_info, parent_group);
 +         }
@@ -1791,7 +1930,7 @@
  #ifdef HAVE_LAKKA_SWITCH
        case SETTINGS_LIST_LAKKA_SWITCH_OPTIONS:
           {
-@@ -24908,6 +25491,9 @@
+@@ -24908,6 +25500,9 @@
        SETTINGS_LIST_CORE_UPDATER,
        SETTINGS_LIST_NETPLAY,
        SETTINGS_LIST_LAKKA_SERVICES,
@@ -1814,7 +1953,7 @@
     MENU_ENUM_LABEL_DEFERRED_USER_SETTINGS_LIST,
     MENU_ENUM_LABEL_DEFERRED_DIRECTORY_SETTINGS_LIST,
     MENU_ENUM_LABEL_DEFERRED_PRIVACY_SETTINGS_LIST,
-@@ -2514,6 +2518,21 @@
+@@ -2514,6 +2518,22 @@
     MENU_LABEL(BLUETOOTH_ENABLE),
     MENU_LABEL(LOCALAP_ENABLE),
     MENU_LBL_H(TIMEZONE),
@@ -1833,10 +1972,11 @@
 +   MENU_LABEL(RF35H_RUMBLE),
 +   MENU_LABEL(RF35H_SPEAKER_VOLUME),
 +   MENU_LABEL(RF35H_NTP_SERVER),
++   MENU_LABEL(RF35H_UPDATE),
  #endif
  #ifdef HAVE_LAKKA_SWITCH
     MENU_LABEL(SWITCH_OC_ENABLE),
-@@ -3363,6 +3382,12 @@
+@@ -3363,6 +3383,12 @@
  
     MENU_LABEL(CORE_UPDATER_SETTINGS),
     MENU_LABEL(LAKKA_SERVICES),

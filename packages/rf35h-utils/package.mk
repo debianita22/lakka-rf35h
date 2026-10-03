@@ -16,6 +16,11 @@ PKG_LONGDESC="Supporto per l'XiFan RF35H: audio, tasti volume, retroilluminazion
 # scripts/unpack copia sources/ nel build dir e il toolchain "make" (default)
 # compila rf35h-tty con il CC del target. E' lo schema di eventservice.
 PKG_URL=""
+# Il repository delle release per gli aggiornamenti (rf35h-update): la CI ci
+# mette il suo (RF35H_UPDATE_REPO), a mano resta quello ufficiale. Nello stamp,
+# o un repository diverso riuserebbe il pacchetto dalla cache.
+RF35H_UPDATE_REPO="${RF35H_UPDATE_REPO:-debianita22/lakka-rf35h}"
+PKG_STAMP="update-repo=${RF35H_UPDATE_REPO}"
 
 makeinstall_target() {
   # il binario, dal Makefile in sources/
@@ -59,6 +64,15 @@ makeinstall_target() {
     cp -v ${PKG_DIR}/scripts/* ${INSTALL}/usr/bin
     chmod +x ${INSTALL}/usr/bin/rf35h-*
 
+  # Da dove rf35h-update prende gli aggiornamenti (owner/repository)
+  case "${RF35H_UPDATE_REPO}" in
+    */*/*|*[!A-Za-z0-9._/-]*|/*|*/) die "rf35h-utils: RF35H_UPDATE_REPO='${RF35H_UPDATE_REPO}' non e' owner/repository" ;;
+    */*) ;;
+    *) die "rf35h-utils: RF35H_UPDATE_REPO='${RF35H_UPDATE_REPO}' non e' owner/repository" ;;
+  esac
+  mkdir -p ${INSTALL}/usr/share/rf35h
+    echo "${RF35H_UPDATE_REPO}" > ${INSTALL}/usr/share/rf35h/update-repo
+
   # Override per-core di RetroArch: i default stanno nell'immagine e
   # rf35h-overrides.service li copia in /storage solo se mancano. cp -r
   # conserva le cartelle con gli spazi nel nome ("TGB Dual", "Beetle NeoPop").
@@ -92,4 +106,6 @@ post_install() {
   enable_service rf35h-dacvol.service
   enable_service rf35h-rk915-load.service
   enable_service rf35h-bootlog-late.timer
+  # rf35h-update.service no: la avvia il menu
+  enable_service rf35h-update-boot.service
 }

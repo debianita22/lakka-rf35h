@@ -1,0 +1,14 @@
+[Unit]
+Description=XiFan RF35H system update (download from the GitHub releases)
+# Non si abilita: la avvia e la ferma il menu di RetroArch (Device Settings >
+# System Update), come rf35h-scrape.service. Una unit e non un "&" da
+# RetroArch: un figlio di RetroArch muore con lui a ogni restart, e "sta
+# girando?" lo si chiede a systemd. Fermarla lascia il .part: il giro dopo
+# riprende il download da li'.
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/rf35h-update run
+Nice=10
+TimeoutStopSec=15

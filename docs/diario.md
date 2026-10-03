@@ -148,11 +148,12 @@ Prima build: alcune ore, ~100 GB di disco.
     patches/linux-default/    9901 di Lakka (suspend asincrono), rigenerata
     packages/rk915/           driver Wi-Fi SDIO + firmware, patch per 7.0 e 7.2
     packages/rocknix-joypad/  driver joypad ADC multiplexato (of_gpio per 7.2)
-    packages/rf35h-utils/     18 script e 16 unit: volume DAC, tasti volume,
+    packages/rf35h-utils/     19 script e 18 unit: volume DAC, tasti volume,
                               LED, luminosita', sospensione, idle, zram, USB,
                               caricamento Wi-Fi, crash log, override per-core
                               (overrides/: 10 .cfg portatili + 1 .opt N64),
-                              ripiego da Vulkan a gl per RetroArch
+                              ripiego da Vulkan a gl per RetroArch,
+                              aggiornamento dalle release (rf35h-update)
     packages/ikemen-go/       IKEMEN GO 1.0 (3 patch: OpenGL ES su Linux, fix
                               GLES/Vulkan, Vulkan spegnibile), lanciatore
                               rf35h-ikemen, servizio, core ikemen_libretro per
@@ -182,7 +183,7 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              32 patch all'albero Lakka (kernel 7.2.7, perf,
+    integration/              33 patch all'albero Lakka (kernel 7.2.7, perf,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, ...)
@@ -4863,3 +4864,76 @@ container (`RF35H_CONTAINER`) per fermarlo da fuori; passa `RF35H_VERSION` e
   versione nel nome dei file, gli sha256. Con "Run workflow" e una versione,
   il tag viene creato alla pubblicazione; una release latest solo dal ramo
   principale, e un tag gia' esistente si rifiuta prima delle ore di build.
+
+## Aggiornamento di sistema dalle release (4/10/2026)
+
+**Perche' non l'updater di Lakka.** "Update Lakka" (Online Updater) legge
+l'indice del server di Lakka per `RK3326.aarch64`: immagini per un RK3326
+generico, che qui installerebbero un altro kernel, un altro SYSTEM e, con
+`bootloader/update.sh` del nuovo SYSTEM, un altro loader a 32K. La console
+non ripartirebbe. In piu' il client HTTP di RetroArch tiene tutto il download
+in RAM (realloc a raddoppio), cioe' 600 MB su 730. Sull'RF35H la voce ora non
+c'e' (`!rf35h_present()` nella 1003) e `lakka-update` da ssh passa a
+`rf35h-update` (`integration/lakka-update-rf35h.patch`).
+
+**`rf35h-update`** (rf35h-utils, busybox sh):
+
+- legge `update.txt` dell'ultima release, sempre allo stesso indirizzo
+  (`/releases/latest/download/update.txt`, le pre-release no) del repository
+  scritto alla build in `/usr/share/rf35h/update-repo` (la CI ci mette il
+  suo, `PKG_STAMP` lo segue); `update.conf` in `/storage/.config/rf35h` puo'
+  dire `TAG=`, `REPO=` o `URL=`. Ogni campo validato prima dell'uso: version
+  e nome del tar senza caratteri strani, nome senza `/`, url solo https,
+  sha256 di 64 cifre esadecimali, size numerica;
+- versione uguale a `VERSION` di `/etc/os-release` (la CI la mette con
+  `CUSTOM_VERSION`): "up to date". Altrimenti controlla batteria (30% o in
+  carica) e spazio (il .tar due volte, perche' l'init lo estrae accanto, piu'
+  100 MB), toglie da `/storage/.update` gli altri aggiornamenti (l'init
+  applica il primo .tar che trova) e scarica con curl in `.part`, in
+  background: l'avanzamento nello stato ogni 2 s. Niente `--retry` di curl:
+  quattro tentativi propri, sempre con `-C -`;
+- dimensione e sha256 giusti, poi `mv` nel nome vero e `update.ready`; solo
+  allora "ready: vX, select to restart and install". Al riavvio l'init di
+  LibreELEC fa il resto (con i suoi md5 su KERNEL e SYSTEM);
+- la dimensione dei file da `ls -ln`, non da `wc -c`: la busybox conta i
+  byte leggendo il file, e `stat -c` qui non c'e';
+- lo stop dal menu (`systemctl stop`, SIGTERM a script e curl) lascia il
+  `.part` e scrive "stopped: select to resume": il giro dopo riprende;
+- `rf35h-update boot` (`rf35h-update-boot.service`, prima di RetroArch):
+  con il .tar consumato dall'init lo stato "ready" non vale piu';
+- **re3**: le release non lo hanno mai. Se l'immagine in uso ce l'ha (build
+  personale), prima di dare "ready" lo script copia core, `.info` e
+  `system/re3` in `/storage` (in `/tmp/cores` e `/tmp/system`, overlay,
+  vince la copia di /storage) con un marcatore; `boot` toglie la copia solo
+  se c'e' il marcatore e l'immagine ha di nuovo re3 di suo, altrimenti la
+  copia vecchia nasconderebbe quella nuova. Un re3 messo a mano senza
+  marcatore non si tocca.
+
+**Menu**: *Device Settings > System Update*, ultima voce. Un'azione come lo
+scraper: avvia `rf35h-update.service` (non abilitata), o la ferma se sta
+girando, o con un aggiornamento pronto riavvia (`CMD_EVENT_REBOOT`, che salva
+la configurazione). Il sottotitolo mostra la riga di stato, riletta al
+massimo due volte al secondo, oppure "installed: vX"; un avanzamento senza
+il servizio attivo diventa "interrupted: select to resume". Italiano:
+"Aggiornamento di sistema".
+
+### Verifiche
+
+- `tools/test-rf35h-update.sh`, 34 prove con busybox sh, curl e df finti:
+  gia' aggiornata, aggiornamento completo, ripresa da un `.part`, sha256 e
+  dimensione sbagliati (file tolto, niente "ready"), sei `update.txt`
+  rifiutati, batteria (scarica rifiuta, in carica no), spazio, rete assente,
+  certificato rifiutato, `TAG` e `REPO`, re3 copiato e poi tolto (e uno
+  messo a mano lasciato), stop durante il download.
+- 1003 rigenerata dai due generatori; sopra la nuova 1003 applicano a fuzz 0
+  tutte le patch dopo (1004-1010); compilati (x86_64, flag di Lakka con
+  HAVE_LAKKA) menu_cbs_ok, menu_cbs_sublabel, menu_displaylist,
+  menu_setting, menu_cbs_title, menu_cbs_deferred_push, configuration,
+  msg_hash_us e msg_hash (con l'italiano): nessun errore ne' avviso.
+  check-menu-labels: i 24 enum RF35H hanno la loro stringa;
+  check-ifdef-nesting pulito.
+- Dry run da un albero pulito: 161 verifiche (13 nuove), piano invariato.
+- `verify-image` controlla anche gli aggiornamenti: con `rf35h-update`
+  nell'immagine serve `usr/share/rf35h/update-repo`, e con `RF35H_VERSION`
+  (la CI) la `VERSION` di os-release deve essere quella. test-verify-tools:
+  36 prove (4 nuove).

@@ -225,6 +225,22 @@ chk "RetroArch: niente core dump"                    "grep -qx 'LimitCORE=0' '$P
 # systemctl enable a ogni boot faceva ricaricare systemd: ~5 s di boot fermo.
 chk "rf35h-ntp: niente ricaricamento di systemd"    "grep -q -- '--no-reload enable' '$P/scripts/rf35h-ntp' && ! grep -qE '^[[:space:]]*systemctl (enable|disable) ' '$P/scripts/rf35h-ntp'"
 
+echo "== aggiornamento di sistema e release"
+U="${P}/scripts/rf35h-update"
+chk "rf35h-update: script e due unit"          "[ -x '$U' ] && [ -f '$P/system.d/rf35h-update.service' ] && [ -f '$P/system.d/rf35h-update-boot.service' ]"
+chk "rf35h-update.service la avvia il menu"    "! grep -q 'enable_service rf35h-update.service' '$P/package.mk' && grep -q 'enable_service rf35h-update-boot.service' '$P/package.mk'"
+chk "repository delle release nell'immagine"   "grep -q 'usr/share/rf35h/update-repo' '$P/package.mk' && grep -q '^PKG_STAMP=\"update-repo=' '$P/package.mk'"
+chk "aggiornamento: dimensione e sha256 prima del pronto" "grep -q 'checksum mismatch' '$U' && grep -q 'wrong size' '$U' && [ \$(grep -n 'checksum mismatch' '$U' | cut -d: -f1) -lt \$(grep -n 'mv -f \"\${part}\" \"\${target}\"' '$U' | cut -d: -f1) ]"
+chk "aggiornamento: update.txt validato campo per campo" "grep -q '^read_info()' '$U' && grep -q 'https://\\*) ;;' '$U'"
+chk "aggiornamento: re3 conservato in /storage"  "grep -q '^preserve_re3()' '$U' && grep -q 're3-preserved' '$U'"
+chk "menu: System Update, ultima voce"          "grep -q 'action_ok_rf35h_update' '$M1003' && grep -q 'action_bind_sublabel_rf35h_update' '$M1003' && grep -A1 'MENU_ENUM_LABEL_RF35H_UPDATE, *PARSE_ACTION' '$M1003' | tail -1 | grep -q '};'"
+chk "menu: Update Lakka nascosto sull'RF35H"    "grep -q '!rf35h_present() && menu_entries_append' '$M1003'"
+chk "lakka-update da ssh passa a rf35h-update"  "grep -q 'exec /usr/bin/rf35h-update run' '${W}/packages/lakka/lakka_tools/lakka_update/sources/lakka-update.sh'"
+chk "versione della release in os-release"      "grep -q 'CUSTOM_VERSION=\"\${RF35H_VERSION}\"' '$O/build-lakka-rf35h.sh'"
+chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '$O/tools/ci-build.sh'"
+chk "CI: un solo job con contents: write"       "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 1 ]"
+chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
+
 echo "== kernel"
 chk "GPU 600 MHz a 1,15 V"                   "grep -A2 opp-600000000 '$Z010' | grep -q 1150000"
 chk "GPU: un solo blocco OPP"                "[ \$(grep -c '&gpu_opp_table' '$Z010') = 1 ]"

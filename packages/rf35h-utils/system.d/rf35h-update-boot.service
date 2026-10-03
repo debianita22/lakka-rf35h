@@ -1,0 +1,18 @@
+[Unit]
+Description=XiFan RF35H system update: state after boot
+# Dopo un aggiornamento installato dall'init (o tolto), lo stato "pronto"
+# di prima non vale piu'; e la copia di GTA III (re3) fatta prima di un
+# aggiornamento si toglie quando l'immagine lo riporta da se' (in
+# /tmp/cores vincerebbe la copia vecchia). Prima di RetroArch, che legge
+# entrambe le cose.
+After=local-fs.target
+Before=retroarch.target
+ConditionPathExists=/storage/.config/rf35h
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/rf35h-update boot
+
+[Install]
+WantedBy=multi-user.target

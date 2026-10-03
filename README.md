@@ -23,7 +23,8 @@ GitHub Actions.
   WonderSwan, Lynx).
 - **Device Settings** in RetroArch: speaker volume, audio output, brightness,
   sleep timer, status and joystick LEDs, rumble, compressed RAM (zram), USB-C
-  port mode, network time, a thumbnail scraper.
+  port mode, network time, a thumbnail scraper, and System Update from the
+  GitHub releases.
 - **Hardware support**: Wi-Fi (RK915, WPA3), the analog joypad, rumble,
   volume and power keys, battery, suspend.
 - **IKEMEN GO** (fighting game engine) with its official screenpack and Kung
@@ -73,11 +74,23 @@ Useful options (`--help` for all):
 
 ## Install and update
 
-- First time: `sudo ./lakka-rf35h/flash-sd.sh target/<image>.img.gz /dev/sdX`
+- First time: `sudo ./lakka-rf35h/flash-sd.sh <image>.img.gz /dev/sdX`
   (refuses non-removable disks, unmounts, checks both partitions after
-  writing, enables ssh).
-- Updates without rewriting the card: copy `target/<image>.tar` to
-  `/storage/.update` and reboot; ROMs, saves and settings stay.
+  writing, enables ssh), with an image you built or one from the releases.
+- **From the console**: *Settings > Device Settings > System Update* checks
+  the latest release, downloads its `.tar` (resuming if stopped), checks
+  size and SHA-256 against the release's `update.txt`, and asks to restart:
+  LibreELEC's init installs it at boot. ROMs, saves and settings stay. It
+  needs the network, the right time (Network Time) and 30% battery or the
+  charger. Over ssh: `rf35h-update run`.
+- By hand: copy the `.tar` to `/storage/.update` and reboot.
+
+Lakka's own *Update Lakka* entry is hidden on this console, and `lakka-update`
+hands over to `rf35h-update`: Lakka's images are for a generic RK3326 and
+would leave this one unable to boot. `/storage/.config/rf35h/update.conf` can
+point the updater elsewhere: `TAG=v1.2.0` (a specific release, also a
+pre-release or an older one), `REPO=user/repository`, or
+`URL=https://.../update.txt`.
 
 To update the overlay, `git pull` and run the same command again. If what
 goes into the Lakka tree changed, the build stops with "overlay disallineato"
@@ -104,15 +117,21 @@ built packages.
   - a push to a `ci-test/...` branch: test build, never a release.
 
 A release has the image (`.img.gz`), the update (`.tar`), `update.txt`
-(version, name, size and SHA-256 of the `.tar`) and `SHA256SUMS`. Tags with a
-dash (`v1.1.0-rc1`) and "pre-release" runs are published as pre-releases.
+(version, name, size and SHA-256 of the `.tar`: what System Update reads,
+always from the latest release) and `SHA256SUMS`. Tags with a dash
+(`v1.1.0-rc1`) and "pre-release" runs are published as pre-releases, which
+the consoles do not install unless `update.conf` names them.
 
 ## GTA III (re3)
 
 re3 is a reverse-engineered GTA III with no license: Take-Two had it removed
-from GitHub in 2021. It is not in this repository. With its package, kept
-privately, `--re3 <dir>` adds it to the image (`build-in-docker.sh` mounts
-the folder). An image that contains re3 is for personal use only.
+from GitHub in 2021. It is not in this repository and never in a release.
+With its package, kept privately, `--re3 <dir>` adds it to the image
+(`build-in-docker.sh` mounts the folder). An image that contains re3 is for
+personal use only. On a console running such an image, System Update first
+copies the core and its files to `/storage/cores` and `/storage/system/re3`,
+so GTA III survives an update to a release; the copy is removed again when a
+personal image brings its own re3.
 
 ## License
 

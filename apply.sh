@@ -160,6 +160,9 @@ echo "[6/8] userspace: audio, tasti volume"
 cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 cp -r "$O"/packages/wpa_supplicant "$RK/packages/"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/odroidgo2-utils-rf35h.patch"
+# lakka-update (da ssh) installerebbe l'immagine di Lakka per un RK3326
+# generico: sull'RF35H passa a rf35h-update (la voce del menu la toglie la 1003)
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/lakka-update-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/eventservice-modifier-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/fcft-checksum-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/foot-checksum-rf35h.patch"

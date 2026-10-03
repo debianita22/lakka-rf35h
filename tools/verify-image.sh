@@ -19,7 +19,8 @@
 # RF35H_GAMES="gtasa re3 openxeenng deva_adventures" (anche vuota) dice quali
 # giochi devono esserci: ognuno che manca e' un NO. La mette
 # build-lakka-rf35h.sh a fine build, quando sa quali giochi ha costruito. Senza,
-# i giochi trovati si elencano e basta.
+# i giochi trovati si elencano e basta. RF35H_VERSION (la CI), se c'e', deve
+# essere la VERSION di /etc/os-release.
 #
 # Le due modalita' NON si sostituiscono a vicenda: --tree guarda lo stato
 # attuale dell'albero di build, che dopo una ricompilazione non dice piu' nulla
@@ -112,6 +113,8 @@ else
 			'usr/lib/systemd/system/systemd-timesyncd.service.d' \
 			'usr/lib/systemd/system/retroarch.service.d' \
 			'usr/bin' \
+			'usr/share/rf35h/update-repo' \
+			'etc/os-release' \
 			'usr/lib/libretro/gtasa_libretro.so' \
 			'usr/lib/libretro/re3_libretro.so' \
 			'usr/lib/libretro/openxeenng_libretro.so' \
@@ -183,6 +186,22 @@ else
 		[ -f "${LR}/${g}_libretro.so" ] && found="${found} ${g}"
 	done
 	printf '  --   giochi nell'"'"'immagine:%s\n' "${found:- nessuno}"
+fi
+
+# 7. gli aggiornamenti dalle release: rf35h-update deve sapere da quale
+# repository, e la versione in os-release e' quella che confronta. Con
+# RF35H_VERSION (la CI) deve essere proprio quella.
+if [ -f "${S}/usr/bin/rf35h-update" ]; then
+	repo="$(cat "${S}/usr/share/rf35h/update-repo" 2>/dev/null)"
+	ver="$(sed -n 's/^VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "${S}/etc/os-release" 2>/dev/null | head -1)"
+	if [ -n "${repo}" ]; then
+		ok "aggiornamenti: rf35h-update dalle release di ${repo}, versione ${ver:-?}"
+	else
+		bad "rf35h-update senza repository (usr/share/rf35h/update-repo)"
+	fi
+	if [ -n "${RF35H_VERSION:-}" ] && [ "${ver}" != "${RF35H_VERSION}" ]; then
+		bad "versione in os-release ${ver:-assente}, attesa ${RF35H_VERSION}: gli aggiornamenti la confronterebbero male"
+	fi
 fi
 
 echo

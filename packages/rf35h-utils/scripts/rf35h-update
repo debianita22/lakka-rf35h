@@ -1,0 +1,356 @@
+#!/bin/sh
+# rf35h-update - aggiornamento di sistema dalle release di GitHub.
+#
+#   rf35h-update run      se l'ultima release e' diversa da quella installata,
+#                         scarica il suo .tar in /storage/.update e ne verifica
+#                         dimensione e sha256: al riavvio l'init di LibreELEC
+#                         lo installa (KERNEL, SYSTEM, device tree e il loader
+#                         known-good, che verify-image controlla in ogni
+#                         release). ROM, salvataggi e impostazioni restano.
+#   rf35h-update check    solo il controllo: esce 0 se c'e' un aggiornamento,
+#                         1 se no, 2 se non si e' potuto controllare
+#   rf35h-update status   la riga di stato, quella che mostra il menu
+#   rf35h-update cancel   toglie l'aggiornamento scaricato, o quello a meta'
+#   rf35h-update boot     all'avvio: lo stato di prima non vale piu'
+#
+# Lo avvia il menu (Device Settings > System Update) attraverso
+# rf35h-update.service, come lo scraper: un figlio di RetroArch morirebbe con
+# lui, e "sta girando?" lo si chiede a systemd. Fermare il servizio (la stessa
+# voce del menu) lascia il file a meta': il giro dopo riprende da li'.
+#
+# Da dove: update.txt dell'ultima release (le pre-release no) del repository
+# scritto alla build in /usr/share/rf35h/update-repo, cioe'
+#   https://github.com/<repo>/releases/latest/download/update.txt
+# e in /storage/.config/rf35h/update.conf si puo' cambiare:
+#   REPO=utente/repository    un altro repository
+#   TAG=v1.2.0                una release precisa (anche una pre-release, o una
+#                             vecchia per tornare indietro)
+#   URL=https://.../update.txt
+# update.txt (lo scrive la CI): version, tar, url, sha256, size.
+#
+# GTA III (re3) non e' mai in una release. Se la console lo ha da una build
+# personale, prima di finire lo copia in /storage (cores e system), dove
+# l'aggiornamento non arriva; "boot" toglie la copia quando l'immagine lo
+# riporta da se'.
+set -u
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+UPDATE_DIR="${RF35H_UPDATE_DIR:-/storage/.update}"
+OS_RELEASE="${RF35H_OS_RELEASE:-/etc/os-release}"
+REPO_FILE="${RF35H_UPDATE_REPO_FILE:-/usr/share/rf35h/update-repo}"
+PS_DIR="${RF35H_PS_DIR:-/sys/class/power_supply}"
+NTP_SYNCED="${RF35H_NTP_SYNCED:-/run/systemd/timesync/synchronized}"
+LOCK="${RF35H_UPDATE_LOCK:-/run/rf35h-update.lock}"
+LIBRETRO="${RF35H_LIBRETRO_DIR:-/usr/lib/libretro}"
+RA_SYSTEM="${RF35H_RA_SYSTEM_DIR:-/usr/share/retroarch/system}"
+STORAGE="${RF35H_STORAGE:-/storage}"
+CURL="${RF35H_CURL:-curl}"
+DEFAULT_REPO="debianita22/lakka-rf35h"
+# batteria minima senza alimentatore: un aggiornamento interrotto all'avvio
+# lascia la card da riscrivere
+MIN_BATTERY=30
+
+STATUS="${STATE}/update.status"
+READY="${STATE}/update.ready"
+RE3_MARK="${STATE}/re3-preserved"
+INFO="${STATE}/update.info"
+
+say() { echo "rf35h-update: $*" >&2; }
+# la riga del menu: in inglese come le altre di Device Settings, al massimo
+# ~90 caratteri (una riga del sottotitolo)
+status() {
+	mkdir -p "${STATE}" 2>/dev/null
+	printf '%s\n' "$*" > "${STATUS}.tmp" 2>/dev/null && mv -f "${STATUS}.tmp" "${STATUS}" 2>/dev/null
+	# da un terminale (ssh, lakka-update) anche a schermo, l'avanzamento
+	# sempre sulla stessa riga
+	if [ -t 2 ]; then
+		case "$*" in
+			downloading*) printf '\r%s ' "$*" >&2 ;;
+			*)            printf '\r%s\n' "$*" >&2 ;;
+		esac
+	fi
+}
+# nel journal (dal servizio) la stessa riga; a un terminale basta lo stato
+fail() { status "error: $1"; [ -t 2 ] || say "$1"; exit 2; }
+
+# una riga "CHIAVE=valore" (con o senza virgolette) da un file
+kv() { sed -n "s/^$1=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*\$/\1/p" "$2" 2>/dev/null | head -1; }
+
+installed_version() { kv VERSION "${OS_RELEASE}"; }
+
+# da dove leggere update.txt
+# (le funzioni chiamate dentro $(...) girano in una subshell: le loro
+# variabili non toccano quelle di chi le chiama; le altre usano nomi propri)
+source_url() {
+	_conf="${STATE}/update.conf"
+	_url="$(kv URL "${_conf}")"
+	if [ -n "${_url}" ]; then echo "${_url}"; return 0; fi
+	_repo="$(kv REPO "${_conf}")"
+	if [ -z "${_repo}" ] && [ -r "${REPO_FILE}" ]; then IFS= read -r _repo < "${REPO_FILE}" || true; fi
+	_repo="${_repo:-${DEFAULT_REPO}}"
+	_tag="$(kv TAG "${_conf}")"
+	if [ -n "${_tag}" ]; then
+		echo "https://github.com/${_repo}/releases/download/${_tag}/update.txt"
+	else
+		echo "https://github.com/${_repo}/releases/latest/download/update.txt"
+	fi
+}
+
+# KB liberi sulla partizione di un percorso
+free_kb() { df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'; }
+
+# la dimensione di un file, 0 se non c'e'. Da ls e non da "wc -c": la busybox
+# conta i byte leggendo il file, 600 MB ogni 2 secondi dalla SD. stat -c qui
+# non c'e' (FEATURE_STAT_FORMAT spenta).
+fsize() {
+	# shellcheck disable=SC2012  # un file nostro, nome senza sorprese
+	_s="$(ls -ln "$1" 2>/dev/null | awk '{ print $5 }')"
+	case "${_s}" in ''|*[!0-9]*) echo 0 ;; *) echo "${_s}" ;; esac
+}
+
+# la batteria: "ok", oppure la carica in % se e' sotto il minimo e scollegata
+battery_check() {
+	for _ps in "${PS_DIR}"/*; do
+		[ -r "${_ps}/type" ] || continue
+		IFS= read -r _t < "${_ps}/type" || continue
+		[ "${_t}" = Battery ] || continue
+		_cap=""; _st=""
+		[ -r "${_ps}/capacity" ] && IFS= read -r _cap < "${_ps}/capacity"
+		[ -r "${_ps}/status" ] && IFS= read -r _st < "${_ps}/status"
+		case "${_st}" in Charging|Full) echo ok; return 0 ;; esac
+		case "${_cap}" in ''|*[!0-9]*) echo ok; return 0 ;; esac
+		if [ "${_cap}" -lt "${MIN_BATTERY}" ]; then echo "${_cap}"; else echo ok; fi
+		return 0
+	done
+	echo ok
+}
+
+# Senza orologio tamponato la data giusta arriva solo dall'NTP. TLS con una
+# data sbagliata fallisce: si aspetta un po' la sincronizzazione, poi si prova
+# comunque (curl dira' se il certificato non torna).
+wait_clock() {
+	_n=0
+	while [ ! -e "${NTP_SYNCED}" ] && [ "${_n}" -lt "${RF35H_CLOCK_WAIT:-15}" ]; do
+		sleep 2; _n=$((_n + 1))
+	done
+}
+
+# curl con le opzioni di tutti i giri; il codice d'uscita e' quello di curl
+fetch() { "${CURL}" -fsSL --connect-timeout 20 --retry 2 "$@"; }
+
+curl_reason() {
+	case "$1" in
+		6|7)         echo "no network" ;;
+		28)          echo "network too slow (timeout)" ;;
+		35|51|53|54|58|59|60|77|80|82|83|90|91)
+		             echo "secure connection failed: is the clock right? (Network Time)" ;;
+		22)          echo "not found on the server (HTTP error)" ;;
+		23)          echo "cannot write to /storage" ;;
+		*)           echo "download failed (curl $1)" ;;
+	esac
+}
+
+# Legge update.txt e lo controlla campo per campo: arriva dalla rete, e i suoi
+# valori finiscono in nomi di file e nella riga di curl.
+read_info() {
+	U_VERSION="$(kv version "$1")"; U_TAR="$(kv tar "$1")"; U_URL="$(kv url "$1")"
+	U_SHA="$(kv sha256 "$1")"; U_SIZE="$(kv size "$1")"
+	case "${U_VERSION}" in ''|*[!A-Za-z0-9._+-]*) return 1 ;; esac
+	case "${U_TAR}" in ''|*/*|.*|*[!A-Za-z0-9._+-]*) return 1 ;; *.tar) ;; *) return 1 ;; esac
+	case "${U_URL}" in https://*) ;; *) return 1 ;; esac
+	case "${U_URL}" in *[!A-Za-z0-9._~:/?#@!\$\&\'\(\)*+,\;=%-]*) return 1 ;; esac
+	case "${U_SIZE}" in ''|*[!0-9]*) return 1 ;; esac
+	[ "${#U_SHA}" = 64 ] || return 1
+	case "${U_SHA}" in *[!0-9a-f]*) return 1 ;; esac
+	return 0
+}
+
+# re3 dalla build personale in /storage, prima che l'aggiornamento lo tolga
+preserve_re3() {
+	[ -f "${LIBRETRO}/re3_libretro.so" ] || return 0
+	mkdir -p "${STORAGE}/cores" "${STORAGE}/system" || return 1
+	cp -f "${LIBRETRO}/re3_libretro.so" "${STORAGE}/cores/" || return 1
+	[ -f "${LIBRETRO}/re3_libretro.info" ] && cp -f "${LIBRETRO}/re3_libretro.info" "${STORAGE}/cores/"
+	if [ -d "${RA_SYSTEM}/re3" ] && [ ! -e "${STORAGE}/system/re3" ]; then
+		cp -a "${RA_SYSTEM}/re3" "${STORAGE}/system/re3" || return 1
+		echo system > "${RE3_MARK}"
+	else
+		echo cores > "${RE3_MARK}"
+	fi
+	say "GTA III (re3) copiato in ${STORAGE}/cores: le release non lo hanno"
+}
+
+cmd_boot() {
+	# L'aggiornamento scaricato e' stato installato (o tolto): "ready" e una
+	# riga di avanzamento rimasta da un giro interrotto non valgono piu'.
+	if [ -f "${READY}" ]; then
+		IFS= read -r t < "${READY}" || t=""
+		if [ -z "${t}" ] || [ ! -f "${t}" ]; then rm -f "${READY}" "${STATUS}"; fi
+	fi
+	if [ -f "${STATUS}" ] && [ ! -f "${READY}" ]; then
+		case "$(cat "${STATUS}" 2>/dev/null)" in
+			ready*|checking*|downloading*|verifying*) rm -f "${STATUS}" ;;
+		esac
+	fi
+	# re3 copiato da noi, e l'immagine ora lo ha di suo: la copia lo
+	# nasconderebbe (in /tmp/cores vince /storage/cores)
+	if [ -f "${RE3_MARK}" ] && [ -f "${LIBRETRO}/re3_libretro.so" ]; then
+		rm -f "${STORAGE}/cores/re3_libretro.so" "${STORAGE}/cores/re3_libretro.info"
+		[ "$(cat "${RE3_MARK}")" = system ] && rm -rf "${STORAGE}/system/re3"
+		rm -f "${RE3_MARK}"
+		say "copia di re3 in ${STORAGE} tolta: l'immagine lo ha di nuovo"
+	fi
+	return 0
+}
+
+cmd_cancel() {
+	rm -f "${UPDATE_DIR}"/*.part "${UPDATE_DIR}/.rf35h-update.tmp"
+	if [ -f "${READY}" ]; then
+		IFS= read -r t < "${READY}" || t=""
+		case "${t}" in "${UPDATE_DIR}"/*.tar) rm -f "${t}" ;; esac
+		rm -f "${READY}"
+	fi
+	status "cancelled"
+	echo "aggiornamento tolto"
+}
+
+# check: la release da installare, in U_*. 0 = c'e', 1 = gia' installata
+cmd_check() {
+	src="$(source_url)"
+	mkdir -p "${STATE}" || fail "cannot write ${STATE}"
+	tmp="${STATE}/update.txt.tmp"
+	status "checking..."
+	wait_clock
+	rc=0; fetch --max-time 60 -o "${tmp}" "${src}" || rc=$?
+	if [ "${rc}" != 0 ]; then
+		rm -f "${tmp}"
+		fail "$(curl_reason "${rc}")"
+	fi
+	if ! read_info "${tmp}"; then
+		rm -f "${tmp}"
+		fail "invalid update.txt from ${src}"
+	fi
+	mv -f "${tmp}" "${INFO}"
+	cur="$(installed_version)"
+	if [ "${U_VERSION}" = "${cur}" ]; then
+		status "up to date (${cur})"
+		return 1
+	fi
+	say "installata ${cur:-?}, disponibile ${U_VERSION}"
+	return 0
+}
+
+on_term() {
+	[ -n "${CURL_PID:-}" ] && kill "${CURL_PID}" 2>/dev/null
+	status "stopped: select to resume the download"
+	exit 143
+}
+
+cmd_run() {
+	# un giro alla volta (il menu e un ssh potrebbero sovrapporsi)
+	if command -v flock >/dev/null 2>&1; then
+		exec 9> "${LOCK}" || fail "cannot create ${LOCK}"
+		flock -n 9 || { say "gia' in corso"; exit 2; }
+	fi
+	trap on_term TERM INT
+
+	if [ -f "${READY}" ]; then
+		IFS= read -r t < "${READY}" || t=""
+		if [ -n "${t}" ] && [ -f "${t}" ]; then
+			status "ready: $(kv version "${INFO}"), select to restart and install"
+			return 0
+		fi
+		rm -f "${READY}"
+	fi
+
+	rc=0; cmd_check || rc=$?
+	[ "${rc}" = 0 ] || return 0
+
+	bat="$(battery_check)"
+	[ "${bat}" = ok ] || fail "battery at ${bat}%: charge it or plug it in"
+
+	mkdir -p "${UPDATE_DIR}" || fail "cannot create ${UPDATE_DIR}"
+	target="${UPDATE_DIR}/${U_TAR}"
+	part="${target}.part"
+	# Un solo aggiornamento in .update: l'init applica il primo .tar che
+	# trova, e uno vecchio lasciato li' passerebbe davanti.
+	for t in "${UPDATE_DIR}"/*.tar "${UPDATE_DIR}"/*.img "${UPDATE_DIR}"/*.img.gz "${UPDATE_DIR}"/*.part; do
+		[ -e "${t}" ] || continue
+		[ "${t}" = "${part}" ] && continue
+		rm -f "${t}"
+	done
+
+	have="$(fsize "${part}")"
+	if [ "${have}" -gt "${U_SIZE}" ]; then rm -f "${part}"; have=0; fi
+	# il .tar, e l'init lo estrae accanto prima di installarlo: due volte la
+	# dimensione, piu' un margine
+	need=$(( (U_SIZE - have) / 1024 + U_SIZE / 1024 + 102400 ))
+	[ "$(free_kb "${UPDATE_DIR}")" -ge "${need}" ] 2>/dev/null \
+		|| fail "not enough space in /storage: $(( need / 1024 )) MB needed"
+
+	# Il download in background, per scrivere l'avanzamento ogni 2 s. Niente
+	# --retry di curl: i tentativi li fa questo ciclo, sempre con -C -, cosi'
+	# ognuno riprende da dove si era fermato il precedente.
+	tot=$(( U_SIZE / 1048576 ))
+	tries=0
+	while [ "${have}" -lt "${U_SIZE}" ]; do
+		tries=$((tries + 1))
+		say "scarico ${U_VERSION} (${tot} MB), tentativo ${tries}"
+		"${CURL}" -fL --connect-timeout 20 --speed-limit 2048 --speed-time 60 \
+			-s -C - -o "${part}" "${U_URL}" &
+		CURL_PID=$!
+		while kill -0 "${CURL_PID}" 2>/dev/null; do
+			have="$(fsize "${part}")"
+			status "downloading ${U_VERSION}: $(( have * 100 / U_SIZE ))% ($(( have / 1048576 ))/${tot} MB)"
+			sleep 2
+		done
+		rc=0; wait "${CURL_PID}" || rc=$?
+		CURL_PID=""
+		have="$(fsize "${part}")"
+		[ "${rc}" = 0 ] && break
+		case "${rc}" in
+			# il server non riprende da dove eravamo: da capo
+			33|36) rm -f "${part}"; have=0 ;;
+			# un 4xx/5xx non cambia riprovando subito; nemmeno un certificato
+			22|35|51|53|54|58|59|60|77|80|82|83|90|91) fail "$(curl_reason "${rc}")" ;;
+		esac
+		[ "${tries}" -lt 4 ] || fail "$(curl_reason "${rc}")"
+		sleep 5
+	done
+
+	status "verifying ${U_VERSION}..."
+	have="$(fsize "${part}")"
+	if [ "${have}" != "${U_SIZE}" ]; then
+		rm -f "${part}"
+		fail "wrong size (${have} instead of ${U_SIZE}), deleted: try again"
+	fi
+	sum="$(sha256sum "${part}" | cut -d' ' -f1)"
+	if [ "${sum}" != "${U_SHA}" ]; then
+		rm -f "${part}"
+		fail "checksum mismatch, deleted: try again"
+	fi
+
+	preserve_re3 || fail "cannot copy GTA III (re3) to ${STORAGE}"
+
+	mv -f "${part}" "${target}" || fail "cannot write ${target}"
+	sync
+	printf '%s\n' "${target}" > "${READY}"
+	status "ready: ${U_VERSION}, select to restart and install"
+	say "pronto: ${target}. Al riavvio l'init lo installa."
+	return 0
+}
+
+case "${1:-}" in
+	run)    cmd_run ;;
+	check)
+		rc=0; cmd_check || rc=$?
+		if [ "${rc}" = 0 ]; then echo "disponibile ${U_VERSION} (installata $(installed_version))"; fi
+		exit "${rc}" ;;
+	status)
+		if [ -s "${STATUS}" ]; then cat "${STATUS}"; else echo "installed: $(installed_version)"; fi ;;
+	cancel) cmd_cancel ;;
+	boot)   cmd_boot ;;
+	*)
+		echo "uso: rf35h-update run|check|status|cancel|boot" >&2
+		exit 2 ;;
+esac

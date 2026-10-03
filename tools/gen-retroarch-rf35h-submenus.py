@@ -9,6 +9,7 @@ menu Device Settings da piatto ad albero.
     +- LED Settings      -> Joystick LEDs, Status LEDs, LED Effect Speed
     +- Thumbnail Scraper -> Scrape Thumbnails, Only Missing, Region
     +- Network Time      -> NTP, Time Server
+    +- System Update     (ultima voce, un'azione)
 
 Perche' un secondo stadio e non un'estensione del primo: qui ogni ancora e' una
 riga che il primo stadio ha appena scritto, quindi e' unica e nota. Nel primo
@@ -223,12 +224,17 @@ assert removed == len(MOVED), f"spostate {removed} voci, attese {len(MOVED)}"
 # LED dopo la luminosita', poi porte/audio/zram gia' presenti, poi scraper e NTP
 actions = {s["U"]: f"               {{MENU_ENUM_LABEL_{L(s)},{' ' * max(1, 72 - len('MENU_ENUM_LABEL_' + L(s)))}PARSE_ACTION}}," for s in SUBS}
 out = []
+last = []   # System Update resta l'ultima voce, dopo i sottomenu
 for r in kept:
+    if "MENU_ENUM_LABEL_RF35H_UPDATE," in r:
+        last.append(r)
+        continue
     out.append(r)
     if "MENU_ENUM_LABEL_RF35H_BRIGHTNESS," in r:
         out.append(actions["LED"])
 out.append(actions["SCRAPER"])
 out.append(actions["NTP"])
+out += last
 dl = dl[:i] + "\n".join(out) + "\n" + dl[j:]
 # 3) la lista generica che manda le displaylist al parser
 GEN = "#ifdef HAVE_LAKKA\n         case DISPLAYLIST_RF35H_SETTINGS_LIST:\n#endif\n"
