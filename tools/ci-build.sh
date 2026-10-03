@@ -30,6 +30,14 @@ die()  { printf '\033[31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
 gb()   { df -Pk "$1" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'; }
 out()  { echo "$1" >> "${GITHUB_OUTPUT:-/dev/null}"; }
 summ() { echo "$*" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
+# Un'annotazione del job: si legge anche dall'API (check-runs/annotations),
+# senza scaricare il log. Le righe vanno codificate (%0A).
+note() {
+	local level="$1" title="$2" msg="$3"
+	[ -n "${GITHUB_ACTIONS:-}" ] || return 0
+	msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/}"; msg="${msg//$'\n'/'%0A'}"
+	echo "::${level} title=${title}::${msg}"
+}
 
 cmd_disk() {
 	say "Spazio prima"
@@ -65,6 +73,7 @@ cmd_disk() {
 	echo "  cartella di lavoro: ${W} ($(gb "${W}") GB liberi; / ${root} GB, /mnt ${mnt} GB)"
 	echo "W=${W}" >> "${GITHUB_ENV:-/dev/null}"
 	summ "- disco: ${W}, $(gb "${W}") GB liberi"
+	note notice "Disco" "${W}: $(gb "${W}") GB liberi (/ ${root} GB, /mnt ${mnt} GB), $(nproc) CPU, $(free -g | awk '/^Mem:/ {print $2}') GB RAM"
 }
 
 cmd_prepare() {
@@ -125,7 +134,39 @@ cmd_build() {
 	echo "uscita ${rc}: ${result}"
 	out "result=${result}"
 	summ "- build: uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti"
-	[ "${result}" != failed ] || exit "${rc}"
+	note notice "Build" "uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti; $(progress); disco: $(gb "${W}") GB liberi, albero $(du -sh "${W}/${TREE_NAME}" 2>/dev/null | cut -f1)"
+	if [ "${result}" = failed ]; then
+		note error "Build fallita" "$(failure_report)"
+		exit "${rc}"
+	fi
+}
+
+# il log completo dell'ultima build (build-rf35h-AAAAMMGG-hhmmss.log, non i
+# *-fallito.log dei pacchetti)
+mainlog() {
+	ls -t "${W}/${TREE_NAME}"/build-rf35h-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log 2>/dev/null | head -1
+}
+
+# Quanti passi del piano sono fatti, dal log dell'ultima build
+progress() {
+	local log
+	log="$(mainlog)"
+	[ -n "${log}" ] || { echo "nessun log"; return 0; }
+	echo "passi fatti $(grep -ac '\] \[DONE\] ' "${log}" || true) su $(sed -n 's/.*Package steps *: *//p' "${log}" | tail -1), ultimo: $(grep -a '\] \[DONE\] ' "${log}" | tail -1 | sed 's/.*\[DONE\] *//' | tr -s ' ')"
+}
+
+# Il pacchetto fallito e le ultime righe del suo log (quello del thread, che
+# --keep-going copia in *-fallito.log; se no la coda del log completo)
+failure_report() {
+	local log pkg flog
+	log="$(mainlog)"
+	[ -n "${log}" ] || { echo "nessun log della build: e' fallita prima (vedi il passo)"; return 0; }
+	pkg="$(sed -n 's|.*FAILURE: scripts/[a-z]* \([A-Za-z0-9_.+-]*\):[a-z]* has failed!.*|\1|p' "${log}" | tail -1)"
+	flog="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${pkg:-nessuno}"-fallito.log 2>/dev/null | head -1)"
+	echo "pacchetto: ${pkg:-?}"
+	grep -aE 'error|Error|FAILED|No such file' "${flog:-${log}}" | grep -av 'Werror\|error\.o\|_error\.' | tail -12 | cut -c1-200
+	echo "--- coda:"
+	tail -15 "${flog:-${log}}" | cut -c1-200
 }
 
 cmd_pack() {
@@ -146,6 +187,7 @@ cmd_pack() {
 		-I 'zstd -T0 -3' -cf "${W}/state-${n}.tar.zst" "${TREE_NAME}"
 	ls -la "${W}/state-${n}.tar.zst"
 	summ "- stato per la parte $(( n + 1 )): $(du -h "${W}/state-${n}.tar.zst" | cut -f1)"
+	note notice "Stato" "state-${n}.tar.zst $(du -h "${W}/state-${n}.tar.zst" | cut -f1), albero $(du -sh "${W}/${TREE_NAME}" | cut -f1)"
 }
 
 cmd_unpack() {
@@ -174,9 +216,12 @@ cmd_ccache_stats() {
 	: "${W:?}"
 	cd "${W}"
 	# il ccache della toolchain, eseguito nel container (e' linkato li')
-	./lakka-rf35h/build-in-docker.sh --sh \
+	local st
+	st="$(./lakka-rf35h/build-in-docker.sh --sh \
 		'for d in lakka-rf35h-build/build.*; do [ -x "$d/toolchain/bin/ccache" ] && "$d/toolchain/bin/ccache" -d "$d/.ccache" -s; done; true' \
-		2>/dev/null | grep -v '^>>' || true
+		2>/dev/null | grep -v '^>>' || true)"
+	echo "${st}"
+	note notice "ccache" "$(echo "${st}" | grep -iE 'hits|misses|cache size' | tr -s ' ' | tr '\n' ';')"
 }
 
 cmd_collect() {
@@ -231,6 +276,7 @@ cmd_collect() {
 	cat update.txt
 	summ "- immagine: $(basename "${img}") ($(du -h "$(basename "${img}")" | cut -f1)), aggiornamento: ${tb} ($(du -h "${tb}" | cut -f1))"
 	if [ -s dropped.txt ]; then summ "- core lasciati fuori: $(grep -oE '^  [a-z0-9_]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"; fi
+	note notice "Immagine" "$(basename "${img}") $(du -h "$(basename "${img}")" | cut -f1), ${tb} $(du -h "${tb}" | cut -f1), $(wc -l < cores.txt) core; fuori: $(grep -oE '^  [a-z0-9_]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"
 }
 
 case "${1:-}" in
