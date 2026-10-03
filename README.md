@@ -8,7 +8,9 @@ sway; RetroArch uses OpenGL ES by default, with Vulkan (PanVK) selectable.
 
 It takes the hardware pieces of devaOS (device tree, kernel patches, the two
 out-of-tree drivers, the boot loader) and builds them with LibreELEC's build
-system.
+system. Ready-made images are in the
+[releases](https://github.com/debianita22/lakka-rf35h/releases), built by
+GitHub Actions.
 
 *Italian documentation and the full development log:
 [`docs/diario.md`](docs/diario.md).*
@@ -38,19 +40,21 @@ system.
 
 ## Build
 
-You need an x86_64 Linux host, the RF35H board folder of devaOS
-(`boards/rf35h`, for the boot loader the device starts with) and a few hours.
-On Arch or CachyOS build in the container: the host compiler is too new for
-LibreELEC.
+You need an x86_64 Linux host and a few hours. On Arch or CachyOS build in
+the container: the host compiler is too new for LibreELEC.
 
 ```sh
 git clone https://github.com/debianita22/lakka-rf35h.git
-./lakka-rf35h/build-lakka-rf35h.sh --deva ../devaOS/boards/rf35h --dry-run
-./lakka-rf35h/build-lakka-rf35h.sh --deva ../devaOS/boards/rf35h
+./lakka-rf35h/build-lakka-rf35h.sh --dry-run
+./lakka-rf35h/build-lakka-rf35h.sh
 
 # Arch, CachyOS: the same options, inside Ubuntu 24.04 (Docker or Podman)
-./lakka-rf35h/build-in-docker.sh --deva ../devaOS/boards/rf35h
+./lakka-rf35h/build-in-docker.sh
 ```
+
+The boot loader is the one the RF35H is known to boot with, in
+[`board/loader`](board/loader) (sha256-checked, the same file as devaOS);
+`--deva <dir>` takes another one.
 
 The script clones Lakka at the pinned commit next to the overlay
 (`lakka-rf35h-build/`), applies the overlay, checks that every change landed
@@ -80,6 +84,29 @@ goes into the Lakka tree changed, the build stops with "overlay disallineato"
 and prints three commands that re-apply it, keeping downloaded sources and
 built packages.
 
+## Releases (CI)
+
+[`.github/workflows`](.github/workflows):
+
+- **Check**, on every push and pull request: shellcheck, the patches, the
+  test scripts (`tools/ci-check.sh`, the same locally), and a dry run on the
+  pinned Lakka commit with the build plan. A few minutes.
+- **Build**: the whole image in the Ubuntu 24.04 container, on GitHub's free
+  runners. A job lasts at most 6 hours and a build from scratch takes
+  longer, so it runs in up to four parts: each one builds until shortly
+  before its limit and hands its state to the next (`tools/ci-build.sh`);
+  ccache is kept between builds. Triggers:
+  - a tag `v*` (`git tag v1.0.0 && git push origin v1.0.0`): build and
+    release;
+  - *Actions > Build > Run workflow*: with a version, build and release
+    (the tag is created at the end); without, a test build whose image
+    stays in the run's artifacts for 14 days;
+  - a push to a `ci-test/...` branch: test build, never a release.
+
+A release has the image (`.img.gz`), the update (`.tar`), `update.txt`
+(version, name, size and SHA-256 of the `.tar`) and `SHA256SUMS`. Tags with a
+dash (`v1.1.0-rc1`) and "pre-release" runs are published as pre-releases.
+
 ## GTA III (re3)
 
 re3 is a reverse-engineered GTA III with no license: Take-Two had it removed
@@ -90,6 +117,8 @@ the folder). An image that contains re3 is for personal use only.
 ## License
 
 The overlay's own files are GPL-2.0, like LibreELEC ([`LICENSE`](LICENSE)).
+The boot loader in `board/loader` is AURKNIX's, unmodified: U-Boot (GPL-2.0+)
+and Rockchip's binaries, see [its README](board/loader/README.md).
 Patches keep the license of what they patch (Linux and LibreELEC GPL-2.0,
 RetroArch GPL-3.0, IKEMEN GO MIT); files with their own SPDX header keep
 theirs (the OpenXeenNG package GPL-3.0-or-later, the Deva package MIT). The

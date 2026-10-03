@@ -66,9 +66,11 @@ VERIFY_ONLY="no"
 
 usage() {
 	cat <<'EOF'
-Uso: ./build-lakka-rf35h.sh --deva <path> [opzioni]
+Uso: ./build-lakka-rf35h.sh [opzioni]
 
-  --deva <path>      boards/rf35h di devaOS (serve loader/known-good.bin)
+  --deva <path>      una cartella con loader/known-good.bin e .sha256, per
+                     esempio boards/rf35h di devaOS (default: board/ di
+                     questo repository, lo stesso loader)
   --overlay <path>   cartella lakka-rf35h/ o il suo tar.gz
                      (default: ./lakka-rf35h oppure ./lakka-rf35h-overlay.tar.gz)
   --workdir <path>   dove clonare Lakka (default: ./lakka-rf35h-build)
@@ -227,6 +229,22 @@ check_image() {
 	fi
 }
 
+# L'ambiente di "make image" e del piano di build del dry run: lo stesso,
+# ricostruito prima di ogni giro (--keep-going cambia SKIP_CORES e i WITH_*).
+build_env() {
+	BENV=(PROJECT=Rockchip DEVICE=RK3326 ARCH=aarch64 UBOOT_SYSTEM=rf35h
+		BUILDER_NAME=lakka-rf35h
+		RF35H_VULKAN="${WITH_VULKAN}" RF35H_IKEMEN="${WITH_IKEMEN}"
+		RF35H_GTASA="${WITH_GTASA}" RF35H_RE3="${WITH_RE3}"
+		RF35H_OPENXEENNG="${WITH_OPENXEENNG}" RF35H_DEVA_ADVENTURES="${WITH_DEVA}")
+	if [ -n "${RF35H_VERSION:-}" ]; then BENV+=(CUSTOM_VERSION="${RF35H_VERSION}"); fi
+	if [ -n "${OVERLAY_REV:-}" ]; then BENV+=(BUILDER_VERSION="${OVERLAY_REV}"); fi
+	if [ -n "${JOBS}" ]; then BENV+=(CONCURRENCY_MAKE_LEVEL="${JOBS}"); fi
+	if [ -n "${PKG_JOBS}" ]; then BENV+=(THREADCOUNT="${PKG_JOBS}"); fi
+	if [ -n "${CORES}" ]; then BENV+=(CUSTOM_LIBRETRO_CORES="${CORES}"); fi
+	if [ -n "${SKIP_CORES}" ]; then BENV+=(EXCLUDE_LIBRETRO_CORES="${SKIP_CORES# }"); fi
+}
+
 # i giochi accesi, coi nomi dei loro core (<nome>_libretro.so)
 games_on() {
 	local g=""
@@ -240,13 +258,9 @@ games_on() {
 # --- preflight ---------------------------------------------------------------
 say "Controlli preliminari"
 
-[ -n "${DEVA_BOARD}" ] || die "manca --deva. Serve la cartella boards/rf35h di devaOS."
-DEVA_BOARD="$(cd "${DEVA_BOARD}" 2>/dev/null && pwd)" || die "--deva: percorso inesistente"
-[ -f "${DEVA_BOARD}/loader/known-good.bin" ] \
-	|| die "manca ${DEVA_BOARD}/loader/known-good.bin - e' il bootloader, senza non si parte"
-( cd "${DEVA_BOARD}/loader" && sha256sum -c --quiet known-good.sha256 ) \
-	|| die "known-good.bin non corrisponde al suo sha256"
-echo "  loader        ok ($(stat -c%s "${DEVA_BOARD}/loader/known-good.bin") byte)"
+if [ -n "${DEVA_BOARD}" ]; then
+	DEVA_BOARD="$(cd "${DEVA_BOARD}" 2>/dev/null && pwd)" || die "--deva: percorso inesistente"
+fi
 
 # re3: fuori dall'overlay (repository privato), solo con --re3. Senza, l'immagine
 # non lo ha e --no-re3 non serve.
@@ -277,6 +291,25 @@ fi
 OVERLAY="$(cd "${OVERLAY}" && pwd)"
 [ -x "${OVERLAY}/apply.sh" ] || die "${OVERLAY}/apply.sh non trovato o non eseguibile"
 echo "  overlay       ${OVERLAY}"
+
+# Il loader: quello del repository (board/, lo stesso di devaOS) se --deva non
+# dice altro. Qui e non prima: con --overlay tar.gz board/ sta nel tarball.
+if [ -z "${DEVA_BOARD}" ]; then
+	DEVA_BOARD="${OVERLAY}/board"
+	[ -d "${DEVA_BOARD}/loader" ] \
+		|| die "manca ${DEVA_BOARD}/loader e non c'e' --deva: serve una cartella con loader/known-good.bin"
+fi
+[ -f "${DEVA_BOARD}/loader/known-good.bin" ] \
+	|| die "manca ${DEVA_BOARD}/loader/known-good.bin - e' il bootloader, senza non si parte"
+( cd "${DEVA_BOARD}/loader" && sha256sum -c --quiet known-good.sha256 ) \
+	|| die "known-good.bin non corrisponde al suo sha256"
+echo "  loader        ok ($(stat -c%s "${DEVA_BOARD}/loader/known-good.bin") byte, $(hp "${DEVA_BOARD}"))"
+
+# finisce nel nome dei file dell'immagine e in os-release: niente spazi,
+# barre o virgolette
+case "${RF35H_VERSION:-}" in
+	*[!A-Za-z0-9._+-]*) die "RF35H_VERSION='${RF35H_VERSION}': solo lettere, cifre e . _ + -" ;;
+esac
 
 [ "$(uname -s)" = "Linux" ] || die "serve un host Linux"
 case "$(uname -m)" in
@@ -386,6 +419,10 @@ overlay_sig() {
 		( cd "${OVERLAY}" && find ${list} -type f -printf '%m %p\n' | LC_ALL=C sort )
 		( cd "${OVERLAY}" && find ${list} -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum )
 		echo "core-lto=${CORE_LTO} lto-cores=${RF35H_LTO_CORES:-} all-cores=${RF35H_ALL_CORES:-0}"
+		# il loader che apply.sh copia nell'albero (board/ o --deva)
+		if [ -n "${DEVA_BOARD:-}" ]; then
+			echo "loader=$(sha256sum < "${DEVA_BOARD}/loader/known-good.bin" | cut -c1-64)"
+		fi
 		# re3 viene da fuori (--re3): conta cio' che apply.sh ne copia
 		if [ -n "${RE3_PKG:-}" ]; then
 			echo "re3:"
@@ -707,7 +744,30 @@ say "Le modifiche dichiarate sono tutte presenti?"
 "${OVERLAY}/tools/verify-claims.sh" "${WORKDIR}" "${OVERLAY}" \
 	|| die "una o piu' modifiche dichiarate non sono nell'albero (vedi sopra)"
 
+# La versione dell'immagine. RF35H_VERSION (la CI ci mette il tag della
+# release) diventa VERSION in /etc/os-release e entra nel nome dell'immagine:
+# e' cio' che rf35h-update confronta con l'ultima release. Senza, resta quella
+# di Lakka (devel-<data>-<commit di Lakka>). BUILDER_VERSION e' il commit
+# dell'overlay, per sapere da cosa viene un'immagine.
+OVERLAY_REV="$(git -C "${OVERLAY}" describe --always --dirty --abbrev=12 2>/dev/null || true)"
+
 if [ "${DRY_RUN}" = "yes" ]; then
+	# Il piano di build con l'ambiente della build vera: una dipendenza che
+	# non esiste, o un pacchetto che manca, qui costa un minuto invece di
+	# fermare la build dopo ore.
+	say "Piano di build"
+	build_env
+	PLAN="${WORKDIR}/build-rf35h-plan.txt"
+	if ( cd "${WORKDIR}" && env "${BENV[@]}" ./scripts/pkgjson | ./scripts/genbuildplan.py --show-wants --build image ) \
+			> "${PLAN}" 2> "${PLAN%.txt}.err"; then
+		echo "  $(wc -l < "${PLAN}") passi: $(grep -c '^build ' "${PLAN}") per l'host, $(grep -c '^install ' "${PLAN}") per la console"
+		echo "  $(hp "${PLAN}")"
+		echo "  giochi: $(games_on)"
+	else
+		sed 's/^/    /' "${PLAN%.txt}.err" >&2
+		die "il piano di build non si calcola (vedi sopra): una dipendenza manca o e' sbagliata"
+	fi
+
 	say "Dry run"
 	echo "  Tutto applicato e verificato."
 	echo
@@ -747,6 +807,7 @@ echo "  Vulkan (PanVK, alternativa a OpenGL ES): ${WITH_VULKAN}   IKEMEN GO: ${W
 echo "  GTA SA: ${WITH_GTASA}   GTA III (re3): ${WITH_RE3}$([ -n "${RE3_PKG}" ] || echo ' (serve --re3)')   OpenXeenNG: ${WITH_OPENXEENNG}   Deva's Awesome Adventures: ${WITH_DEVA}"
 [ "${WITH_RE3}" = "yes" ] \
 	&& warn "re3 incluso: il suo codice non ha licenza, immagine solo per uso personale (--no-re3 per una da condividere)"
+echo "  versione: ${RF35H_VERSION:-quella di Lakka (devel-<data>)}${OVERLAY_REV:+   overlay: ${OVERLAY_REV}}"
 echo "  make -j per pacchetto: ${JOBS}"
 echo "  pacchetti in parallelo: ${PKG_JOBS}${PKG_JOBS_WHY:+ (${PKG_JOBS_WHY})}"
 echo "  compilatori al massimo: $(( JOBS * PKG_JOBS ))"
@@ -812,16 +873,9 @@ DROPPED_EXTRAS=""
 while : ; do
 	BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
 	[ "${BUILD_ATTEMPT}" -gt 1 ] && say "ripresa ${BUILD_ATTEMPT}: la cache conserva tutto il costruito finora"
+	build_env
 	set +e
-	env PROJECT=Rockchip DEVICE=RK3326 ARCH=aarch64 UBOOT_SYSTEM=rf35h \
-	    RF35H_VULKAN="${WITH_VULKAN}" RF35H_IKEMEN="${WITH_IKEMEN}" \
-	    RF35H_GTASA="${WITH_GTASA}" RF35H_RE3="${WITH_RE3}" \
-	    RF35H_OPENXEENNG="${WITH_OPENXEENNG}" RF35H_DEVA_ADVENTURES="${WITH_DEVA}" \
-	    ${JOBS:+CONCURRENCY_MAKE_LEVEL="${JOBS}"} \
-	    ${PKG_JOBS:+THREADCOUNT="${PKG_JOBS}"} \
-	    ${CORES:+CUSTOM_LIBRETRO_CORES="${CORES}"} \
-	    ${SKIP_CORES:+EXCLUDE_LIBRETRO_CORES="${SKIP_CORES# }"} \
-	    make image 2>&1 | tee "${LOG}"
+	env "${BENV[@]}" make image 2>&1 | tee "${LOG}"
 	RC=${PIPESTATUS[0]}
 	set -e
 	[ "${RC}" -eq 0 ] && break

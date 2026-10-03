@@ -1,0 +1,77 @@
+# Controlli veloci a ogni push e pull request: niente build, pochi minuti.
+#   scripts   tools/ci-check.sh: shellcheck, sintassi Python, patch, prove
+#   dry-run   Lakka al commit pinnato + overlay + tutte le verifiche + piano di
+#             build, cioe' build-lakka-rf35h.sh --dry-run come a mano
+name: Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    name: Script, patch e prove
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # busybox: le prove girano gli script con la sh della console;
+      # squashfs-tools: verify-image apre un SYSTEM vero
+      - name: Strumenti
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck busybox squashfs-tools >/dev/null
+          pip install -q --break-system-packages actionlint-py
+          shellcheck --version | sed -n 2p
+          actionlint -version | head -1
+
+      - name: tools/ci-check.sh
+        run: ./tools/ci-check.sh
+
+  dry-run:
+    name: Dry run su Lakka pinnato
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # lo stesso layout di chi costruisce a mano: lakka-rf35h/ accanto
+      # all'albero lakka-rf35h-build/
+      - uses: actions/checkout@v7
+        with:
+          path: lakka-rf35h
+
+      - name: build-lakka-rf35h.sh --dry-run
+        run: ./lakka-rf35h/build-lakka-rf35h.sh --dry-run
+
+      # lo script, se il commit pinnato non si scarica, resta sulla punta di
+      # devel con un avviso: qui deve essere un errore
+      - name: Lakka al commit pinnato
+        run: |
+          want="$(sed -n 's/^LAKKA_COMMIT="\([0-9a-f]*\)".*/\1/p' lakka-rf35h/build-lakka-rf35h.sh)"
+          have="$(git -C lakka-rf35h-build rev-parse HEAD)"
+          echo "pinnato ${want}, albero ${have}"
+          test -n "${want}" && test "${want}" = "${have}"
+
+      - name: Piano di build
+        run: |
+          plan=lakka-rf35h-build/build-rf35h-plan.txt
+          {
+            echo "### Piano di build"
+            echo
+            echo "$(wc -l < "${plan}") passi: $(grep -c '^build ' "${plan}") per l'host, $(grep -c '^install ' "${plan}") per la console."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: piano-di-build
+          path: lakka-rf35h-build/build-rf35h-plan.txt
+          retention-days: 14

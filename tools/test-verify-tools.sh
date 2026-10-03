@@ -132,7 +132,7 @@ fi
 # --- firma dell'overlay ------------------------------------------------------------
 echo "firma dell'overlay"
 eval "$(sed -n '/^OVERLAY_TREE_PATHS=/,/^}/p' "${O}/build-lakka-rf35h.sh")"
-sig() { OVERLAY="$1" CORE_LTO="${2:-yes}" RE3_PKG="${3:-}" overlay_sig; }
+sig() { OVERLAY="$1" CORE_LTO="${2:-yes}" RE3_PKG="${3:-}" DEVA_BOARD="${4:-}" overlay_sig; }
 mkdir -p "${T}/a" "${T}/b/piu/profondo"
 cp -a "${O}" "${T}/a/lakka-rf35h"; cp -a "${O}" "${T}/b/piu/profondo/lakka-rf35h"
 A="${T}/a/lakka-rf35h"; BB="${T}/b/piu/profondo/lakka-rf35h"
@@ -156,6 +156,10 @@ echo x >> "${R3T}/patches/0001.patch"
 ok "una patch di re3 cambia la firma" '[ "${r0}" != "$(sig "${A}" yes "${R3T}")" ]'
 r1="$(sig "${A}" yes "${R3T}")"; echo x > "${R3T}/README.md"; echo x > "${R3T}/pgo/build-pgo.sh"
 ok "README e pgo/ di re3 non contano" '[ "${r1}" = "$(sig "${A}" yes "${R3T}")" ]'
+# il loader (board/ o --deva) lo copia apply.sh: conta il suo contenuto, non dove sta
+mkdir -p "${T}/lb1/loader" "${T}/lb2/loader" "${T}/lb3/loader"
+printf uno > "${T}/lb1/loader/known-good.bin"; printf due > "${T}/lb2/loader/known-good.bin"; printf uno > "${T}/lb3/loader/known-good.bin"
+ok "il loader conta, la cartella no" '[ "$(sig "${A}" yes "" "${T}/lb1")" != "$(sig "${A}" yes "" "${T}/lb2")" ] && [ "$(sig "${A}" yes "" "${T}/lb1")" = "$(sig "${A}" yes "" "${T}/lb3")" ]'
 
 # --- giochi attesi a fine build ------------------------------------------------------
 echo "giochi attesi a fine build"

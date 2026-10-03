@@ -4805,3 +4805,61 @@ fissati qui sono quelli nuovi).
   ordine, percorsi con spazi, `--sh`, `RE3_PGO`, argomento mancante o
   inesistente.
 - `test-verify-tools`: 31 prove (3 nuove sulla firma di re3).
+
+## CI su GitHub e loader nel repository (4/10/2026)
+
+**Il loader sta in `board/loader`**: `known-good.bin` (16 744 448 byte, sha256
+`52850532...`) e il suo `.sha256`, gli stessi file di devaOS, con un README
+su provenienza (AURKNIX-RK3326 20260809, byte 32K..16M) e licenze. `--deva`
+diventa facoltativo: senza, `build-lakka-rf35h.sh` usa `board/` dell'overlay
+(anche da un `--overlay` tar.gz). La firma dell'overlay ora contiene lo sha256
+del loader usato (board/ o `--deva`): cambiarlo vuol dire riapplicare, prima
+non se ne accorgeva nessuno.
+
+**`--dry-run` calcola anche il piano di build** con lo stesso ambiente di
+`make image` (`build_env`, una funzione sola per il piano e per la build):
+una dipendenza mancante si vede in un minuto. Oggi: 340 passi, 97 per l'host
+e 243 per la console.
+
+**Versione dell'immagine**: `RF35H_VERSION` (la CI ci mette il tag) arriva a
+`scripts/image` come `CUSTOM_VERSION`: diventa `VERSION` in `/etc/os-release`
+ed entra nel nome dei file (`Lakka-RK3326.aarch64-Next-v1.0.0-rf35h.img.gz`).
+`BUILDER_NAME=lakka-rf35h` e `BUILDER_VERSION` (il commit dell'overlay, `git
+describe --dirty`) finiscono anch'essi in os-release. Nessun pacchetto li
+legge (solo `scripts/image` e xorg-server, che qui non c'e'): cambiarli non
+ricostruisce niente.
+
+**`build-in-docker.sh` in CI**: il terminale (`-t`) solo se c'e'; un nome al
+container (`RF35H_CONTAINER`) per fermarlo da fuori; passa `RF35H_VERSION` e
+`RF35H_UPDATE_REPO`.
+
+**Workflow** (`.github/workflows`):
+
+- `check.yml`, a ogni push e pull request: `tools/ci-check.sh` (shellcheck a
+  livello warning su tutti gli script, riconosciuti dalla prima riga; sintassi
+  dei .py senza scrivere `__pycache__`; i conteggi @@ delle patch; le prove
+  `tools/test-*.sh`, con busybox come sulla console) e il dry run su Lakka
+  pinnato. Il dry run in CI e' piu' severo di quello a mano: se il commit
+  pinnato non si scarica, lo script resta sulla punta di devel con un avviso,
+  qui e' un errore.
+- `build.yml`: tag `v*`, *Run workflow* (con o senza versione) o push su
+  `ci-test/**`. La build gira nel container di `build-in-docker.sh`, la
+  stessa di chi costruisce a mano. Un job dei runner gratuiti dura al massimo
+  6 ore e la build da zero ne chiede di piu' (llvm per l'host serve a Mesa:
+  Panfrost compila i suoi kernel OpenCL con libclc), quindi gira in fino a
+  quattro parti (`build-stage.yml`): ognuna costruisce fino a 320 minuti
+  dall'inizio del job (`timeout`, poi `docker kill`: la build e' il PID 1 del
+  container e il SIGTERM inoltrato lo ignora), e se non ha finito impacchetta
+  l'albero per la successiva, senza sorgenti, log e file temporanei.
+  LibreELEC salta i pacchetti con lo stamp e rifa' solo quelli interrotti.
+  `AUTOREMOVE=yes` per lo spazio (il kernel resta finche' servono i moduli
+  esterni: `PKG_IS_KERNEL_PKG` lo mette in `PKG_DEPENDS_UNPACK`); ccache fra
+  una build e l'altra nella cache delle actions, 6 GB con
+  `CCACHE_COMPILERCHECK=content` (la toolchain ricostruita ha un'altra data).
+- La release la crea un job a parte, l'unico con `contents: write`: bozza,
+  file, poi pubblicata. File: `.img.gz`, `.tar`, `update.txt` (versione,
+  nome, url, sha256 e dimensione del `.tar`), `SHA256SUMS`. Prima di
+  pubblicare: re3 cercato nel SYSTEM dell'immagine (non nelle opzioni), la
+  versione nel nome dei file, gli sha256. Con "Run workflow" e una versione,
+  il tag viene creato alla pubblicazione; una release latest solo dal ramo
+  principale, e un tag gia' esistente si rifiuta prima delle ore di build.

@@ -2,14 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0
 # Lakka RF35H - costruisce dentro un container Ubuntu 24.04.
 #
-#   ./build-in-docker.sh --deva <path>       la build completa
-#   ./build-in-docker.sh --deva <path> --dry-run
-#   ./build-in-docker.sh --deva <path> --verify-only
-#                                            controlla l'ultima immagine fatta
-#   ./build-in-docker.sh [--deva <path>] --sh 'comando'
-#                                            un comando nel container, in /work
-#   ./build-in-docker.sh --deva <path> --re3 <path>
-#                                            con GTA III (re3), dal suo pacchetto
+#   ./build-in-docker.sh                     la build completa
+#   ./build-in-docker.sh --dry-run
+#   ./build-in-docker.sh --verify-only       controlla l'ultima immagine fatta
+#   ./build-in-docker.sh --sh 'comando'      un comando nel container, in /work
+#   ./build-in-docker.sh --re3 <path>        con GTA III (re3), dal suo pacchetto
+#   ./build-in-docker.sh --deva <path> ...   con un altro loader (default:
+#                                            board/ del repository)
 #
 # --deva e --re3 possono stare ovunque sull'host: vengono montati in sola
 # lettura su /deva e /re3 e gli argomenti riscritti. --workdir invece deve
@@ -179,6 +178,16 @@ else
 fi
 set -- -w /work "${IMAGE}" "$@"
 if [ -n "${RE3_PGO:-}" ]; then set -- -e RE3_PGO "$@"; fi
+# La versione dell'immagine e il repository degli aggiornamenti
+# (/etc/rf35h-release, rf35h-update): li passa la CI, a mano non servono.
+if [ -n "${RF35H_VERSION:-}" ]; then set -- -e RF35H_VERSION "$@"; fi
+if [ -n "${RF35H_UPDATE_REPO:-}" ]; then set -- -e RF35H_UPDATE_REPO "$@"; fi
 if [ -n "${RE3}" ]; then set -- -v "${RE3}:/re3:ro,z" "$@"; fi
 if [ -n "${DEVA}" ]; then set -- -v "${DEVA}:/deva:ro,z" "$@"; fi
-exec "${ENGINE}" run --rm -it -e RF35H_HOST_WORK="${WORK}" -v "${WORK}:/work:z" "$@"
+# Un nome al container, per fermarlo da fuori: la CI lo fa allo scadere del
+# tempo. Fermare il client docker non basta, la build e' il PID 1 del
+# container e il SIGTERM inoltrato lo ignora.
+if [ -n "${RF35H_CONTAINER:-}" ]; then set -- --name "${RF35H_CONTAINER}" "$@"; fi
+# Il terminale solo se c'e' (in CI no: "the input device is not a TTY").
+if [ -t 0 ] && [ -t 1 ]; then set -- -t "$@"; fi
+exec "${ENGINE}" run --rm -i -e RF35H_HOST_WORK="${WORK}" -v "${WORK}:/work:z" "$@"

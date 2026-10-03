@@ -1,0 +1,194 @@
+# La build dell'immagine e la release.
+#
+#   tag v*                   build e release con quel nome (git tag v1.0.0;
+#                            git push origin v1.0.0)
+#   Run workflow (a mano)    con "version" vuota: build di prova, niente
+#                            release, l'immagine resta negli artifact del run;
+#                            con "version": build e release, tag creato qui
+#   push su ci-test/**       build di prova, mai una release
+#
+# La build sta in fino a quattro parti di 6 ore (build-stage.yml). La release
+# ha l'immagine (.img.gz, prima installazione), l'aggiornamento (.tar, quello
+# che scaricano le console da Device Settings > Aggiornamento di sistema),
+# update.txt (cosa scaricare: le console leggono quello dell'ultima release) e
+# SHA256SUMS. Una pre-release non e' "latest": le console non la vedono.
+# Mai re3 (GTA III): non ha licenza, e la build qui non lo ha.
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+    branches: ['ci-test/**']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione da pubblicare (es. v1.0.0). Vuota: build di prova, niente release"
+        type: string
+        default: ""
+      prerelease:
+        description: "Pre-release: gli aggiornamenti delle console non la vedono"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: Versione e controlli
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      publish: ${{ steps.v.outputs.publish }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Versione
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -eu
+          short="$(git rev-parse --short=7 HEAD)"
+          prerelease=false
+          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE}" = tag ]; then
+            version="${GITHUB_REF_NAME}"; publish=true
+            case "${version}" in *-*) prerelease=true ;; esac   # v1.1.0-rc1
+          elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${IN_VERSION}" ]; then
+            version="${IN_VERSION}"; publish=true
+            prerelease="${IN_PRERELEASE:-false}"
+            # una release "latest" la scaricano tutte le console: solo dal ramo principale
+            if [ "${GITHUB_REF_NAME}" != "${{ github.event.repository.default_branch }}" ] && [ "${prerelease}" != true ]; then
+              echo "::error::da ${GITHUB_REF_NAME} solo pre-release: le console aggiornano all'ultima release"
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+              echo "::error::il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
+              exit 1
+            fi
+          else
+            version="ci-${GITHUB_RUN_NUMBER}-${short}"; publish=false
+          fi
+          case "${version}" in
+            ''|*[!A-Za-z0-9._+-]*) echo "::error::versione '${version}': solo lettere, cifre e . _ + -"; exit 1 ;;
+          esac
+          if [ "${publish}" = true ] && gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::la release ${version} esiste gia'"
+            exit 1
+          fi
+          {
+            echo "version=${version}"
+            echo "publish=${publish}"
+            echo "prerelease=${prerelease}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "### ${version}"
+            if [ "${publish}" = true ]; then
+              echo "Release $( [ "${prerelease}" = true ] && echo 'pre-release' || echo 'latest') a fine build."
+            else
+              echo "Build di prova: nessuna release, l'immagine negli artifact."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      # gli stessi controlli di check.yml: un errore qui costa un minuto,
+      # dopo ore di build costerebbe la build
+      - name: Strumenti
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck busybox squashfs-tools >/dev/null
+          pip install -q --break-system-packages actionlint-py
+      - name: tools/ci-check.sh
+        run: ./tools/ci-check.sh
+
+  stage1:
+    needs: setup
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 1
+      version: ${{ needs.setup.outputs.version }}
+
+  stage2:
+    needs: [setup, stage1]
+    if: needs.stage1.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 2
+      version: ${{ needs.setup.outputs.version }}
+
+  stage3:
+    needs: [setup, stage2]
+    if: needs.stage2.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 3
+      version: ${{ needs.setup.outputs.version }}
+
+  stage4:
+    needs: [setup, stage3]
+    if: needs.stage3.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 4
+      last: true
+      version: ${{ needs.setup.outputs.version }}
+
+  release:
+    name: Release
+    needs: [setup, stage1, stage2, stage3, stage4]
+    if: >-
+      !cancelled() && needs.setup.outputs.publish == 'true' &&
+      (needs.stage1.outputs.result == 'done' || needs.stage2.outputs.result == 'done' ||
+       needs.stage3.outputs.result == 'done' || needs.stage4.outputs.result == 'done')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.setup.outputs.version }}
+      PRERELEASE: ${{ needs.setup.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: lakka-rf35h-${{ needs.setup.outputs.version }}
+          path: dist
+
+      - name: Controlli
+        run: |
+          set -eu
+          cd dist
+          sha256sum -c SHA256SUMS
+          grep -qx "version=${VERSION}" update.txt
+          tar="$(sed -n 's/^tar=//p' update.txt)"
+          [ -f "${tar}" ] && [ "$(sha256sum "${tar}" | cut -d' ' -f1)" = "$(sed -n 's/^sha256=//p' update.txt)" ]
+          [ "$(stat -c%s "${tar}")" = "$(sed -n 's/^size=//p' update.txt)" ]
+          ls -la
+
+      - name: Note della release
+        run: ./tools/ci-release-notes.sh dist > dist/RELEASE-NOTES.md
+
+      # bozza, file, poi pubblicata: una console che guarda proprio in quel
+      # momento non trova mai una release senza update.txt
+      - name: Pubblica
+        run: |
+          set -eu
+          cd dist
+          flags=()
+          if [ "${PRERELEASE}" = true ]; then flags+=(--prerelease); fi
+          gh release create "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft \
+            --target "${GITHUB_SHA}" --title "Lakka RF35H ${VERSION}" \
+            --notes-file RELEASE-NOTES.md "${flags[@]}"
+          gh release upload "${VERSION}" --repo "${GITHUB_REPOSITORY}" \
+            ./*.img.gz ./*.tar update.txt SHA256SUMS
+          gh release edit "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
+          echo "### Pubblicata: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}" >> "${GITHUB_STEP_SUMMARY}"

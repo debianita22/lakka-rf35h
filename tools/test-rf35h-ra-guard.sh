@@ -4,6 +4,9 @@
 # SERVICE_RESULT come lo passa systemd agli ExecStopPost.
 #
 #   ./tools/test-rf35h-ra-guard.sh [percorso/rf35h-ra-guard]
+# Le verifiche sono stringhe che ok() esegue con eval: le variabili lette solo
+# li' dentro (rc, n0, cp...) shellcheck non le vede usate.
+# shellcheck disable=SC2034
 set -u
 G="${1:-$(cd "$(dirname "$0")/.." && pwd)/packages/rf35h-utils/scripts/rf35h-ra-guard}"
 [ -f "${G}" ] || { echo "non trovo ${G}" >&2; exit 1; }

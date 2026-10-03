@@ -7,6 +7,9 @@
 # comporta come gli dice il file "mode" (riuscito, OpenGL che non parte, cambio
 # di renderer dal menu, crash, blocco); systemctl e' finto anche lui. Gira lo
 # script con la busybox se c'e' (come sul device), altrimenti con sh.
+# Le verifiche sono stringhe che ok() esegue con eval: le variabili lette solo
+# li' dentro (rc, n0, cp...) shellcheck non le vede usate.
+# shellcheck disable=SC2034
 set -u
 L="${1:-$(cd "$(dirname "$0")/.." && pwd)/packages/ikemen-go/scripts/rf35h-ikemen}"
 [ -f "${L}" ] || { echo "non trovo ${L}" >&2; exit 1; }
