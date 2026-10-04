@@ -38,7 +38,15 @@ ExecStart=-/usr/bin/rf35h-vibra --restore
 # Lo spegnimento dei LED e' l'unico motivo per cui questo servizio non e' un
 # semplice oneshot "fire and forget": il microcontrollore mantiene lo stato
 # anche a device spento.
-ExecStop=/usr/bin/rf35h-led off
+#
+# --sleep e non "off": "rf35h-led off" e' la scelta dell'utente e la salva,
+# quindi ogni spegnimento pulito lasciava "off" come modo salvato e al boot
+# dopo gli stick restavano spenti (e il menu diceva "off"). --sleep manda il
+# comando di spegnimento e toglie corrente all'MCU (lo stesso della
+# sospensione) senza toccare il file; al boot il kernel la ridà (joyled-power
+# default-state "on") e --restore rimette il modo salvato. rf35h-ledd e' gia'
+# fermo a questo punto: e' After=rf35h-state, quindi si ferma prima.
+ExecStop=-/usr/bin/rf35h-led --sleep
 
 [Install]
 WantedBy=multi-user.target

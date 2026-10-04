@@ -25,8 +25,9 @@ rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "
 #   rf35h-led raw 0x15       manda un byte qualsiasi al microcontrollore
 #   rf35h-led --restore      rimette l'ultimo modo salvato (default: blue)
 #                            e riattiva l'indicatore di carica sul LED rosso
-#   rf35h-led --sleep        spegne gli stick e toglie corrente all'MCU
-#                            (chiamato da rf35h-suspend.service prima dello sleep)
+#   rf35h-led --sleep        spegne gli stick e toglie corrente all'MCU, senza
+#                            salvare (rf35h-suspend.service prima dello sleep,
+#                            rf35h-state.service allo spegnimento)
 #   rf35h-led --wake         ridà corrente e rimette il modo salvato
 #
 # Il modo scelto viene salvato e rimesso al boot da rf35h-state.service.
