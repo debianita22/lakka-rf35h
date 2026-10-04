@@ -1,6 +1,7 @@
 #!/bin/bash
-# ci-build.sh - i passi della build in CI (.github/workflows/build-stage.yml).
-# Fuori dalla CI non serve: a mano si usa build-in-docker.sh.
+# ci-build.sh - i passi della build e della release in CI
+# (.github/workflows/build-stage.yml e build.yml). Fuori dalla CI non serve: a
+# mano si usa build-in-docker.sh.
 #
 #   ci-build.sh disk            libera spazio e sceglie il disco piu' grande (W)
 #   ci-build.sh prepare         overlay in W, albero Lakka, verifiche (--dry-run)
@@ -12,6 +13,8 @@
 #   ci-build.sh collect         immagine, .tar, update.txt, SHA256SUMS in W/dist
 #   ci-build.sh logs N          i log della parte N (W/log-N.tar.zst)
 #   ci-build.sh ccache-stats
+#   ci-build.sh check-dist D    job release: i file scaricati in D (re3, core
+#                               rotti, core e giochi che mancano)
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 30 core) ne chiede di
@@ -27,6 +30,12 @@ set -euo pipefail
 
 O="$(cd "$(dirname "$0")/.." && pwd)"
 TREE_NAME="lakka-rf35h-build"
+# Le opzioni della build in CI. --keep-going lascia fuori un core o un gioco che
+# non compila (anche per un errore di rete) e fa l'immagine senza: il job
+# release poi la ferma (check-dist), se non si e' chiesto allow_incomplete.
+# Quello che check-dist pretende: i core di CORES_DEFAULT (build-lakka-rf35h.sh)
+# e i giochi accesi qui (extras_on: tutti, tranne i --no-<gioco> di questa riga).
+CI_BUILD_OPTS=(--keep-going --jobs 4 --pkg-jobs 2)
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m[x] %s\033[0m\n' "$*" >&2; exit 1; }
@@ -141,7 +150,7 @@ cmd_build() {
 		# artifact).
 		set +e
 		timeout --signal=TERM --kill-after=30 "${budget}" \
-			./lakka-rf35h/build-in-docker.sh --keep-going --jobs 4 --pkg-jobs 2 2>&1 \
+			./lakka-rf35h/build-in-docker.sh "${CI_BUILD_OPTS[@]}" 2>&1 \
 			| grep --line-buffered -aE '^\[[0-9]+/[0-9]+\] \[(INIT|DONE|FAIL|ACTV|IDLE)|==>|\[!\]|\[x\]|FAILURE|ERROR|NON conforme|Conforme'
 		rc=${PIPESTATUS[0]}
 		set -e
@@ -401,6 +410,117 @@ check_system() {
 	[ -z "${bad}" ] || die "core rotti nel SYSTEM, l'immagine non si pubblica:${bad}"
 }
 
+# --- l'immagine e' completa? (collect avvisa, check-dist decide) --------------
+
+# I giochi che la build in CI costruisce, coi nomi dei loro core
+# (<nome>_libretro.so): tutti, tranne quelli spenti in CI_BUILD_OPTS
+extras_on() {
+	local g o on=""
+	for g in ikemen gtasa openxeenng deva_adventures; do
+		for o in "${CI_BUILD_OPTS[@]}"; do
+			[ "${o}" = "--no-${g//_/-}" ] && continue 2
+		done
+		on="${on} ${g}"
+	done
+	echo "${on# }"
+}
+
+# I core che la build in CI deve mettere nell'immagine: CORES_DEFAULT di
+# build-lakka-rf35h.sh, con i nomi dei pacchetti di Lakka (beetle_pce_fast)
+default_cores() {
+	sed -n 's/^CORES_DEFAULT="\(.*\)"$/\1/p' "${O}/build-lakka-rf35h.sh"
+}
+
+# Quale pacchetto ha installato quale core, registrato alla build: i .so in
+# build.*/install_pkg/<pacchetto>-<versione>/usr/lib/libretro, col nome del
+# pacchetto da .libreelec-package (lo scrive scripts/build a fine build).
+# Righe "<pacchetto> <core>", per esempio "beetle_pce_fast mednafen_pce_fast":
+# CORES_DEFAULT ha i nomi dei pacchetti, cores.txt quelli dei .so.
+core_packages() {
+	local i pkg so
+	for i in "$1"/build.*/install_pkg/*/; do
+		[ -f "${i}.libreelec-package" ] || continue
+		pkg="$(sed -n 's/^INFO_PKG_NAME="\(.*\)"$/\1/p' "${i}.libreelec-package")"
+		[ -n "${pkg}" ] || continue
+		for so in "${i}usr/lib/libretro/"*_libretro.so; do
+			[ -e "${so}" ] || [ -L "${so}" ] || continue
+			so="${so##*/}"
+			echo "${pkg} ${so%_libretro.so}"
+		done
+	done | sort -u
+}
+
+# Cosa manca all'immagine in <d> rispetto alla build completa: per ogni core di
+# CORES_DEFAULT i .so che il suo pacchetto ha installato (core-packages.txt), o
+# il pacchetto stesso se non ha installato niente; poi i giochi accesi. Scrive
+# <d>/missing.txt, una riga per pezzo ("beetle_pce_fast", "mgba (mgba_libretro.so)",
+# "ikemen"). Torna 1 se manca qualcosa o se la build ha lasciato fuori qualcosa
+# (dropped.txt).
+completeness() {
+	local d="$1" cores pkg p c found g
+	[ -f "${d}/core-packages.txt" ] || die "manca ${d}/core-packages.txt: artifact di una build di prima di questo controllo?"
+	cores="$(default_cores)"
+	[ -n "${cores}" ] || die "CORES_DEFAULT non trovato in ${O}/build-lakka-rf35h.sh"
+	: > "${d}/missing.txt"
+	for pkg in ${cores}; do
+		found=no
+		while read -r p c; do
+			[ "${p}" = "${pkg}" ] || continue
+			found=yes
+			grep -qxF "${c}" "${d}/cores.txt" || echo "${pkg} (${c}_libretro.so)" >> "${d}/missing.txt"
+		done < "${d}/core-packages.txt"
+		[ "${found}" = yes ] || echo "${pkg}" >> "${d}/missing.txt"
+	done
+	for g in $(extras_on); do
+		grep -qxF "${g}" "${d}/cores.txt" || echo "${g}" >> "${d}/missing.txt"
+	done
+	[ ! -s "${d}/missing.txt" ] && [ ! -s "${d}/dropped.txt" ]
+}
+
+# una riga: cosa manca e cosa la build ha lasciato fuori
+incomplete() {
+	local d="$1" m f
+	m="$(tr '\n' ';' < "${d}/missing.txt" | sed 's/;$//; s/;/, /g')"
+	f="$( { grep -oE '^  [A-Za-z0-9_.+-]+' "${d}/dropped.txt" 2>/dev/null || true; } | tr -d ' ' | tr '\n' ' ' | sed 's/ $//; s/ /, /g')"
+	echo "mancano: ${m:-niente}; lasciati fuori dalla build: ${f:-niente}"
+}
+
+# Il job release (build.yml), sui file scaricati in <d> prima di pubblicarli:
+# re3 e core rotti come in collect (un artifact si puo' anche sostituire), poi
+# la completezza. Un'immagine a cui mancano core o giochi aggiornerebbe ogni
+# console togliendoglieli: si ferma, a meno di RF35H_ALLOW_INCOMPLETE=true
+# (Run workflow, allow_incomplete).
+cmd_check_dist() {
+	local d="${1:?cartella con i file della release}" chk tarf
+	[ -f "${d}/update.txt" ] || die "manca ${d}/update.txt"
+	tarf="${d}/$(sed -n 's/^tar=//p' "${d}/update.txt")"
+	[ -f "${tarf}" ] || die "manca ${tarf}"
+	say "SYSTEM di $(basename "${tarf}"): re3 assente, core interi"
+	chk="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/rf35h-check.XXXXXX")"
+	system_of "${tarf}" "${chk}"
+	check_system "${chk}/SYSTEM" "${chk}"
+	if ! cmp -s "${chk}/cores.txt" "${d}/cores.txt"; then
+		note warning "cores.txt" "diverso dai core del SYSTEM: vale il SYSTEM"
+		cp "${chk}/cores.txt" "${d}/cores.txt"
+	fi
+	rm -rf "${chk}"
+	echo "  ok, $(wc -l < "${d}/cores.txt") core libretro, nessuno vuoto o troncato"
+
+	say "Core e giochi della build completa"
+	if completeness "${d}"; then
+		echo "  ok: i $(default_cores | wc -w) core di CORES_DEFAULT, giochi: $(extras_on)"
+		return 0
+	fi
+	cat "${d}/missing.txt" "${d}/dropped.txt" 2>/dev/null || true
+	if [ "${RF35H_ALLOW_INCOMPLETE:-false}" = true ]; then
+		note warning "Release incompleta" "$(incomplete "${d}"). Pubblicata lo stesso: allow_incomplete"
+		summ "- release incompleta, pubblicata con allow_incomplete: $(incomplete "${d}")"
+		return 0
+	fi
+	note error "Release incompleta" "$(incomplete "${d}"). Le console che aggiornano li perderebbero: ricostruire, o Run workflow con allow_incomplete"
+	die "release incompleta: $(incomplete "${d}")"
+}
+
 cmd_collect() {
 	: "${W:?}" "${RF35H_VERSION:?}"
 	local t="${W}/${TREE_NAME}/target" dist="${W}/dist" chk="${W}/check" img tarf
@@ -440,13 +560,30 @@ cmd_collect() {
 		echo "sha256=${ts}"
 		echo "size=${size}"
 	} > update.txt
-	# quello che la build ha lasciato fuori (--keep-going)
-	cat "${W}/${TREE_NAME}"/build-rf35h-*-core-saltati.txt > dropped.txt 2>/dev/null || : > dropped.txt
+	# quello che la build ha lasciato fuori (--keep-going): il resoconto della
+	# build che ha fatto l'immagine, l'ultima. Un tentativo fallito prima (la
+	# seconda prova di cmd_build) puo' averne lasciato un altro, di pacchetti
+	# che poi si sono costruiti.
+	local log
+	log="$(mainlog)"
+	if [ -n "${log}" ] && [ -f "${log%.log}-core-saltati.txt" ]; then
+		cp "${log%.log}-core-saltati.txt" dropped.txt
+	else
+		: > dropped.txt
+	fi
+	# quale pacchetto ha installato quale core: check-dist confronta i nomi dei
+	# pacchetti di CORES_DEFAULT con i .so dell'immagine
+	core_packages "${W}/${TREE_NAME}" > core-packages.txt
 	ls -la
 	cat update.txt
 	summ "- immagine: $(basename "${img}") ($(du -h "$(basename "${img}")" | cut -f1)), aggiornamento: ${tb} ($(du -h "${tb}" | cut -f1))"
-	if [ -s dropped.txt ]; then summ "- core lasciati fuori: $(grep -oE '^  [a-z0-9_]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"; fi
-	note notice "Immagine" "$(basename "${img}") $(du -h "$(basename "${img}")" | cut -f1), ${tb} $(du -h "${tb}" | cut -f1), $(wc -l < cores.txt) core; fuori: $(grep -oE '^  [a-z0-9_]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"
+	if [ -s dropped.txt ]; then summ "- lasciati fuori dalla build: $(grep -oE '^  [A-Za-z0-9_.+-]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"; fi
+	note notice "Immagine" "$(basename "${img}") $(du -h "$(basename "${img}")" | cut -f1), ${tb} $(du -h "${tb}" | cut -f1), $(wc -l < cores.txt) core; fuori: $(grep -oE '^  [A-Za-z0-9_.+-]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"
+	# la decisione e' del job release (check-dist); qui l'avviso, gia' sul run
+	if ! completeness "${dist}"; then
+		note warning "Immagine incompleta" "$(incomplete "${dist}"): il job release non la pubblica senza allow_incomplete"
+		summ "- immagine incompleta: $(incomplete "${dist}")"
+	fi
 }
 
 case "${1:-}" in
@@ -457,7 +594,8 @@ case "${1:-}" in
 	unpack)       cmd_unpack "${2:-}" ;;
 	reset)        cmd_reset ;;
 	collect)      cmd_collect ;;
+	check-dist)   cmd_check_dist "${2:-}" ;;
 	logs)         cmd_logs "${2:-}" ;;
 	ccache-stats) cmd_ccache_stats ;;
-	*) sed -n '2,15p' "$0" >&2; exit 2 ;;
+	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac

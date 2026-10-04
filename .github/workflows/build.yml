@@ -17,6 +17,10 @@
 # update.txt (cosa scaricare: le console leggono quello dell'ultima release) e
 # SHA256SUMS. Una pre-release non e' "latest": le console non la vedono.
 # Mai re3 (GTA III): non ha licenza, e la build qui non lo ha.
+# Niente release se all'immagine manca un core di CORES_DEFAULT o un gioco:
+# --keep-going lascia fuori cio' che non compila (basta un errore di rete) e
+# le console che aggiornano lo perderebbero. Run workflow con
+# allow_incomplete la pubblica lo stesso.
 name: Build
 # Il titolo del run dice cosa costruisce: gli input di "Run workflow" non si
 # vedono dall'API ne' dall'elenco dei run, e la versione e' quello che conta.
@@ -44,6 +48,10 @@ on:
         description: "Solo build di prova: ID di un run fallito da cui riprendere (ricostruisce solo cio' che e' cambiato)"
         type: string
         default: ""
+      allow_incomplete:
+        description: "Pubblica anche se mancano core o giochi (non compilati): le console che aggiornano li perdono"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -182,6 +190,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.setup.outputs.version }}
       PRERELEASE: ${{ needs.setup.outputs.prerelease }}
+      RF35H_ALLOW_INCOMPLETE: ${{ inputs.allow_incomplete }}
     steps:
       # la storia intera e i tag: le note elencano i commit dall'ultima release
       - uses: actions/checkout@v7
@@ -203,6 +212,17 @@ jobs:
           [ -f "${tar}" ] && [ "$(sha256sum "${tar}" | cut -d' ' -f1)" = "$(sed -n 's/^sha256=//p' update.txt)" ]
           [ "$(stat -c%s "${tar}")" = "$(sed -n 's/^size=//p' update.txt)" ]
           ls -la
+
+      # Di nuovo sui file scaricati, quelli che si pubblicano: re3 e core rotti
+      # nel SYSTEM, poi i core di CORES_DEFAULT e i giochi. Un'immagine a cui
+      # manca qualcosa (--keep-going) toglierebbe quel core a ogni console che
+      # aggiorna: si ferma qui, a meno di allow_incomplete.
+      - name: Strumenti
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq squashfs-tools >/dev/null
+      - name: re3, core rotti, core e giochi mancanti
+        run: ./tools/ci-build.sh check-dist dist
 
       - name: Note della release
         run: ./tools/ci-release-notes.sh dist > dist/RELEASE-NOTES.md
