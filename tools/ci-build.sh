@@ -5,8 +5,10 @@
 #   ci-build.sh disk            libera spazio e sceglie il disco piu' grande (W)
 #   ci-build.sh prepare         overlay in W, albero Lakka, verifiche (--dry-run)
 #   ci-build.sh build           la build, fino alla scadenza del job
-#   ci-build.sh pack N          lo stato per la parte N+1 (W/state-N.tar.zst)
+#   ci-build.sh pack N [failed] lo stato per la parte N+1 (W/state-N.tar.zst);
+#                               "failed": quello di una build fallita
 #   ci-build.sh unpack N        lo stato della parte N
+#   ci-build.sh reset           dopo unpack da un altro run: albero pulito + build
 #   ci-build.sh collect         immagine, .tar, update.txt, SHA256SUMS in W/dist
 #   ci-build.sh logs N          i log della parte N (W/log-N.tar.zst)
 #   ci-build.sh ccache-stats
@@ -170,7 +172,7 @@ failure_report() {
 }
 
 cmd_pack() {
-	local n="${1:?parte}"
+	local n="${1:?parte}" why="${2:-}" size
 	: "${W:?}"
 	cd "${W}"
 	say "Stato della parte ${n}"
@@ -186,8 +188,15 @@ cmd_pack() {
 		--exclude="${TREE_NAME}/build.*/image" \
 		-I 'zstd -T0 -3' -cf "${W}/state-${n}.tar.zst" "${TREE_NAME}"
 	ls -la "${W}/state-${n}.tar.zst"
-	summ "- stato per la parte $(( n + 1 )): $(du -h "${W}/state-${n}.tar.zst" | cut -f1)"
-	note notice "Stato" "state-${n}.tar.zst $(du -h "${W}/state-${n}.tar.zst" | cut -f1), albero $(du -sh "${W}/${TREE_NAME}" | cut -f1)"
+	size="$(du -h "${W}/state-${n}.tar.zst" | cut -f1)"
+	if [ "${why}" = failed ]; then
+		# l'ID da dare a "Run workflow" per ripartire da qui dopo la correzione
+		summ "- stato della build fallita: ${size}; per riprenderla, Run workflow con resume_run ${GITHUB_RUN_ID:-}"
+		note notice "Stato" "state-${n}.tar.zst ${size}: ripresa con resume_run=${GITHUB_RUN_ID:-} (3 giorni)"
+	else
+		summ "- stato per la parte $(( n + 1 )): ${size}"
+		note notice "Stato" "state-${n}.tar.zst ${size}, albero $(du -sh "${W}/${TREE_NAME}" | cut -f1)"
+	fi
 }
 
 cmd_unpack() {
@@ -196,7 +205,7 @@ cmd_unpack() {
 	say "Riprendo lo stato della parte ${n}"
 	# download-artifact salva un artifact non zip col nome che gli da' il
 	# server (Content-Disposition), "artifact" se non ne da': si prende il
-	# file che c'e' nella cartella del download
+	# file che c'e' nella cartella del download.
 	f="${W}/dl/state-${n}.tar.zst"
 	[ -f "${f}" ] || f="$(find "${W}/dl" -maxdepth 1 -type f | head -1)"
 	[ -n "${f}" ] && [ -f "${f}" ] || die "stato della parte ${n} non scaricato in ${W}/dl"
@@ -216,6 +225,21 @@ cmd_logs() {
 	[ "${#f[@]}" -gt 0 ] || { echo "nessun log"; return 0; }
 	tar -I 'zstd -T0 -10' -cf "${W}/log-${n}.tar.zst" "${f[@]}"
 	ls -la "${W}/log-${n}.tar.zst"
+}
+
+# Dopo un "unpack" da un altro run: l'albero torna a Lakka pulito, con i
+# pacchetti costruiti (build.*), i sorgenti e i log; senza lo stamp
+# dell'overlay "prepare" riapplica quello di questo commit, e la build rifa'
+# solo i pacchetti i cui file sono cambiati. I comandi che il build script
+# suggerisce dopo "overlay disallineato".
+cmd_reset() {
+	: "${W:?}"
+	local t="${W}/${TREE_NAME}"
+	[ -d "${t}/.git" ] || die "nessun albero da riportare in ${t}"
+	say "Albero riportato a Lakka pulito, pacchetti costruiti tenuti"
+	rm -f "${t}/.rf35h-applied"
+	git -C "${t}" checkout -q -- .
+	git -C "${t}" clean -qfd -e sources -e 'build.*' -e target -e '*.log' -e 'build-rf35h-*'
 }
 
 cmd_ccache_stats() {
@@ -289,10 +313,11 @@ case "${1:-}" in
 	disk)         cmd_disk ;;
 	prepare)      cmd_prepare ;;
 	build)        cmd_build ;;
-	pack)         cmd_pack "${2:-}" ;;
+	pack)         cmd_pack "${2:-}" "${3:-}" ;;
 	unpack)       cmd_unpack "${2:-}" ;;
+	reset)        cmd_reset ;;
 	collect)      cmd_collect ;;
 	logs)         cmd_logs "${2:-}" ;;
 	ccache-stats) cmd_ccache_stats ;;
-	*) sed -n '2,13p' "$0" >&2; exit 2 ;;
+	*) sed -n '2,15p' "$0" >&2; exit 2 ;;
 esac

@@ -6,6 +6,10 @@
 #                            release, l'immagine resta negli artifact del run;
 #                            con "version": build e release, tag creato qui
 #   push su ci-test/**       build di prova, mai una release
+#   Run workflow, resume_run l'ID di un run fallito: build di prova che
+#                            riparte dal suo stato (salvato per 3 giorni) e
+#                            rifa' solo i pacchetti cambiati. Pacchetti di
+#                            due commit insieme: mai per una release.
 #
 # La build sta in fino a quattro parti di 6 ore (build-stage.yml). La release
 # ha l'immagine (.img.gz, prima installazione), l'aggiornamento (.tar, quello
@@ -29,9 +33,14 @@ on:
         description: "Pre-release: gli aggiornamenti delle console non la vedono"
         type: boolean
         default: false
+      resume_run:
+        description: "Solo build di prova: ID di un run fallito da cui riprendere (ricostruisce solo cio' che e' cambiato)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: build-${{ github.ref }}
@@ -46,6 +55,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       publish: ${{ steps.v.outputs.publish }}
       prerelease: ${{ steps.v.outputs.prerelease }}
+      resume: ${{ steps.v.outputs.resume }}
     steps:
       - uses: actions/checkout@v7
 
@@ -55,8 +65,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IN_VERSION: ${{ inputs.version }}
           IN_PRERELEASE: ${{ inputs.prerelease }}
+          IN_RESUME: ${{ inputs.resume_run }}
         run: |
           set -eu
+          # una release si costruisce sempre da zero: la ripresa riusa pacchetti
+          # fatti da un altro commit
+          case "${IN_RESUME:-}" in
+            '') ;;
+            *[!0-9]*) echo "::error::resume_run: un ID di run (numero)"; exit 1 ;;
+            *) if [ -n "${IN_VERSION:-}" ]; then echo "::error::resume_run solo per le build di prova, senza version"; exit 1; fi ;;
+          esac
           short="$(git rev-parse --short=7 HEAD)"
           prerelease=false
           if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE}" = tag ]; then
@@ -88,6 +106,7 @@ jobs:
             echo "version=${version}"
             echo "publish=${publish}"
             echo "prerelease=${prerelease}"
+            echo "resume=${IN_RESUME:-}"
           } >> "${GITHUB_OUTPUT}"
           {
             echo "### ${version}"
@@ -114,6 +133,7 @@ jobs:
     with:
       stage: 1
       version: ${{ needs.setup.outputs.version }}
+      resume_run: ${{ needs.setup.outputs.resume }}
 
   stage2:
     needs: [setup, stage1]

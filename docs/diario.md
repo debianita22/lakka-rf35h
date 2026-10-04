@@ -5002,3 +5002,32 @@ suoi file e `PKG_STAMP`, non le dipendenze ne' il kernel. In locale strace
 era quello costruito prima del passaggio alla 7.2.7, e non e' mai stato
 ricostruito. Solo una build da zero dice se l'albero si costruisce davvero,
 ed e' per questo che la CI parte sempre da zero (con la sola ccache).
+
+## Ripresa di una build fallita in CI (4/10/2026)
+
+Le due build pulite sono fallite dopo 34 e 247 minuti, e ogni correzione
+voleva dire ripartire da zero: con la ccache la toolchain va piu' veloce, ma
+fino a strace sono comunque ore. Ora una parte che fallisce salva il suo
+stato (`state-N.tar.zst`, lo stesso che passa da una parte all'altra, 3
+giorni) e il riassunto del run dice con che ID riprenderla. *Run workflow*
+con `resume_run` = quell'ID: la parte 1 chiede all'API gli artifact di quel
+run, scarica solo lo stato piu' avanzato (ognuno pesa GB), lo estrae, e
+`ci-build.sh reset` riporta l'albero a Lakka pulito tenendo `build.*`, i log
+e i resoconti: gli stessi comandi che il build script suggerisce dopo
+"overlay disallineato". `prepare` riapplica l'overlay del commit nuovo, e la
+build rifa' solo i pacchetti i cui file sono cambiati (l'hash di
+`calculate_stamp`); la ccache e' nello stato, quella di actions/cache non si
+ripristina.
+
+Solo per le build di prova: `setup` rifiuta `resume_run` con una versione.
+Per la stessa ragione per cui la CI parte da zero, una ripresa non dice se
+l'albero si costruisce davvero: i pacchetti che dipendono da uno cambiato
+non si rifanno, e l'immagine mette insieme pacchetti di due commit. Serve a
+vedere in un'ora se una correzione passa; la conferma resta la build pulita.
+
+download-artifact v8 (letto nel sorgente del tag): un artifact non zip si
+salva col nome del Content-Disposition, `artifact` se manca; scaricandone
+piu' d'uno con `merge-multiple` due file senza nome si sovrascriverebbero.
+Per questo uno solo, per nome, scelto prima con `gh api` (il filtro jq
+provato: il numero piu' alto fra gli `state-N` non scaduti).
+

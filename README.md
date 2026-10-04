@@ -114,7 +114,12 @@ built packages.
   - *Actions > Build > Run workflow*: with a version, build and release
     (the tag is created at the end); without, a test build whose image
     stays in the run's artifacts for 14 days;
-  - a push to a `ci-test/...` branch: test build, never a release.
+  - a push to a `ci-test/...` branch: test build, never a release;
+  - *Run workflow* with `resume_run`, the ID of a failed build: a test build
+    that starts from the state the failed part saved (kept 3 days, the ID is
+    in its summary) and rebuilds only the packages whose files changed. To
+    check a fix in an hour instead of a day; never for a release, since the
+    image mixes packages built from two commits.
 
 A release has the image (`.img.gz`), the update (`.tar`), `update.txt`
 (version, name, size and SHA-256 of the `.tar`: what System Update reads,

@@ -17,6 +17,10 @@ on:
       version:
         type: string
         required: true
+      resume_run:
+        description: "solo parte 1: riprende dallo stato salvato da un run fallito"
+        type: string
+        default: ""
     outputs:
       result:
         description: "done: immagine fatta; continue: serve un'altra parte"
@@ -24,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  actions: read     # artifact di un altro run (resume_run)
 
 jobs:
   build:
@@ -73,12 +78,53 @@ jobs:
         if: inputs.stage > 1
         run: ./tools/ci-build.sh unpack "${PREV}"
 
+      # Ripresa di un run fallito (solo build di prova: lo controlla build.yml).
+      # Lo stato piu' avanzato che quel run ha salvato, uno solo (ognuno pesa
+      # GB), poi l'albero riportato a Lakka pulito tenendo i pacchetti fatti:
+      # "prepare" riapplica l'overlay di questo commit e la build rifa' solo i
+      # pacchetti i cui file sono cambiati. Quello che si fa a mano dopo
+      # "overlay disallineato". La ccache e' nello stato.
+      - name: Run da riprendere
+        id: resume
+        if: inputs.stage == 1 && inputs.resume_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ inputs.resume_run }}
+        run: |
+          name="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN}/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not) | .name | select(test("^state-[0-9]+[.]tar[.]zst$"))]
+                  | sort_by(ltrimstr("state-") | rtrimstr(".tar.zst") | tonumber) | last // empty')"
+          if [ -z "${name}" ]; then
+            echo "::error::il run ${RUN} non ha uno stato da riprendere: scaduto, o fallito prima della build"
+            exit 1
+          fi
+          n="${name#state-}"
+          { echo "name=${name}"; echo "n=${n%.tar.zst}"; } >> "${GITHUB_OUTPUT}"
+          echo "- ripresa dal run ${RUN} (${name}): pacchetti di due commit, solo per prova" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Stato del run da riprendere
+        if: steps.resume.outcome == 'success'
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ steps.resume.outputs.name }}
+          run-id: ${{ inputs.resume_run }}
+          github-token: ${{ github.token }}
+          path: ${{ env.W }}/dl
+
+      - name: Albero del run da riprendere
+        if: steps.resume.outcome == 'success'
+        env:
+          N: ${{ steps.resume.outputs.n }}
+        run: |
+          ./tools/ci-build.sh unpack "${N}"
+          ./tools/ci-build.sh reset
+
       - name: Albero Lakka, overlay e verifiche
         run: ./tools/ci-build.sh prepare
 
       # ccache della build precedente (la parte 1; le altre lo ricevono nello stato)
       - name: ccache
-        if: inputs.stage == 1
+        if: inputs.stage == 1 && inputs.resume_run == ''
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -106,6 +152,19 @@ jobs:
           archive: false
           retention-days: 14
           if-no-files-found: ignore
+
+      # --- fallita: lo stato, per riprenderla (Run workflow, resume_run) --------
+      - name: Stato della build fallita
+        if: failure() && steps.build.outcome == 'failure'
+        run: ./tools/ci-build.sh pack "${{ inputs.stage }}" failed
+
+      - uses: actions/upload-artifact@v7
+        if: failure() && steps.build.outcome == 'failure'
+        with:
+          path: ${{ env.W }}/state-${{ inputs.stage }}.tar.zst
+          archive: false
+          retention-days: 3
+          compression-level: 0
 
       # --- non finita: lo stato per la parte successiva -------------------------
       - name: Non finita nell'ultima parte
