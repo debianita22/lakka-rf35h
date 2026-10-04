@@ -73,7 +73,10 @@ case "${1:-}" in
 		# modo non e' battery, smette di toccare i LED), poi lo si applica.
 		case " ${MODES} " in *" $1 "*) ;; *) echo "rf35h-statusled: modo sconosciuto '$1' (modi: ${MODES})" >&2; exit 1 ;; esac
 		save "$1"
-		# Come per rf35h-led: se il demone gira, i LED li tocca lui.
-		[ -e "${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}" ] || apply "$1"
+		# Come per rf35h-led: se il demone gira, i LED li tocca lui. Il link
+		# invocation: e' un symlink senza bersaglio, quindi -L (con -e non
+		# risultava mai attivo).
+		f="${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}"
+		[ -L "${f}" ] || [ -e "${f}" ] || apply "$1"
 		;;
 esac
