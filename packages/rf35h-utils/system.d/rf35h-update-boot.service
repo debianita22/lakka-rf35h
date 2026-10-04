@@ -1,7 +1,9 @@
 [Unit]
 Description=XiFan RF35H system update: state after boot
 # Dopo un aggiornamento installato dall'init (o tolto), lo stato "pronto"
-# di prima non vale piu'; e la copia di GTA III (re3) fatta prima di un
+# di prima non vale piu'; se l'installazione chiesta con "rf35h-update
+# install" e' fallita (gira ancora la versione di prima) lo scrive nella
+# riga del menu. E la copia di GTA III (re3) fatta prima di un
 # aggiornamento si toglie quando l'immagine lo riporta da se' (in
 # /tmp/cores vincerebbe la copia vecchia). Prima di RetroArch, che legge
 # entrambe le cose.
