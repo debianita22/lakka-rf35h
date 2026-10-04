@@ -5032,7 +5032,7 @@ Per questo uno solo, per nome, scelto prima con `gh api` (il filtro jq
 provato: il numero piu' alto fra gli `state-N` non scaduti).
 
 
-## Terza build pulita: un git fetch al primo minuto (4/10/2026)
+## Terza build pulita: ferma al passo 8, prima diagnosi sbagliata (4/10/2026)
 
 La run #5 (strace corretto) si e' fermata dopo 40 secondi, al passo 8 di
 340: `install glsl_shaders:target`. Il resoconto non diceva perche':
@@ -5043,9 +5043,10 @@ pacchetti finiti prima (un `curl: (22) ... 400` di un download riuscito al
 tentativo dopo, il configure di make). Nel log del pacchetto c'erano solo i
 due "FAILED COMMAND": nessuna riga con "error", come un `fatal:` di git.
 Ricontrollato a mano: il commit di glsl-shaders si scarica (`git fetch
---depth 1` dello SHA del package.mk) e `make install` funziona. Un errore di
-rete, quindi, e `get_git` di LibreELEC non riprova (`get_archive` invece
-prova 10 volte, URL e mirror).
+--depth 1` dello SHA del package.mk) e `make install` funziona. L'ipotesi era
+un errore di rete (`get_git` di LibreELEC non riprova, `get_archive` prova 10
+volte, URL e mirror): sbagliata, la causa vera e' nella sezione dopo. Le
+modifiche restano utili:
 
 - Il build script copia il log del thread in `*-<pacchetto>-fallito.log` per
   ogni pacchetto fallito, anche di sistema, e lo nomina quando si ferma.
@@ -5053,9 +5054,52 @@ prova 10 volte, URL e mirror).
   stesso tempo a disposizione): un errore di rete passa, uno vero si ripete
   in pochi minuti, perche' il costruito resta e si rifa' solo il pacchetto
   fallito. Il primo tentativo resta in un'annotazione ("Tentativo 1
-  fallito, riprovo"), con il resoconto.
+  fallito: riprovo"), con il resoconto.
 - Il resoconto cerca anche gli errori di rete (`fatal:`, `Cannot get`,
-  `curl: (`, `Failed to`, `unable to`, `timed out`, `reset by peer`).
+  `curl: (`, `Failed to`, `unable to`, `timed out`, `reset by peer`) e i
+  processi morti (`Illegal instruction`, `Segmentation fault`, `core
+  dumped`, `Killed`).
 
 Provato con una build finta (fallisce una volta, poi due): un tentativo in
 piu', annotazioni giuste, esito `done` e poi `failed`.
+
+## Il vero motivo: -march=native e la ccache fra runner diversi (4/10/2026)
+
+La run #6 (con il nuovo resoconto e il secondo tentativo) e' fallita allo
+stesso punto, due volte, e stavolta il log del pacchetto diceva tutto:
+
+    package.mk: line 9: 6062 Illegal instruction (core dumped)
+      make -C ${PKG_BUILD} install INSTALLDIR=...
+
+Non la rete: e' `make` (il make:host di LibreELEC, primo pacchetto del
+piano) che muore con SIGILL. LibreELEC compila gli strumenti per l'host con
+`-march=native` se `BUILD_REUSABLE` e' vuota (config/functions,
+`HOST_CFLAGS_OPTIM_NATIVE`). I pacchetti con il flag `local-cc` (make,
+cmake, zstd, ... quelli che vengono prima del ccache:host) usano il
+compilatore e il ccache di sistema, con la cache in `.ccache-local`, che la
+CI salva e ripristina. Il ccache di Ubuntu 24.04 e' il 4.9.1: di
+`-march=native` hasha il testo, non la CPU (il 4.13.6 che LibreELEC
+costruisce per il resto, invece, chiede al compilatore cosa vuol dire,
+`hash_native_args`: verificato nei sorgenti dei due tag). Una run
+precedente ha compilato make su un runner; la #5 e la #6, su runner con
+un'altra CPU, hanno ripreso dalla cache un make con istruzioni che la loro
+CPU non ha. In
+locale non succede: la cache resta sulla stessa macchina.
+
+E anche con il ccache giusto la build a parti avrebbe avuto lo stesso
+problema: la parte 2 riprende gli strumenti per l'host compilati dalla parte
+1, e puo' finire su una CPU diversa.
+
+Correzione: in CI `.libreelec/options` mette `BUILD_REUSABLE="yes"`.
+Verificato con `config/options` + `setup_toolchain host` sull'albero pinnato:
+vuota, `HOST_CFLAGS` finisce con `-march=native`; "yes", senza. Il valore non
+e' "all", "mesa:host" ne' "save-local", gli unici che mesa guarda (quelli
+farebbero i suoi strumenti "riusabili", con upx). Gli oggetti vecchi della
+cache non si riusano piu' (le opzioni sono cambiate) e invecchiano fuori.
+
+Non riprendere (resume_run) dalle run #5 e #6: lo stamp di make:host non
+dipende dai flag, quindi la ripresa terrebbe il make compilato male.
+
+Nel resoconto anche il titolo delle annotazioni codificato: una virgola
+("fallito, riprovo") lo tagliava, perche' nei comandi del workflow separa le
+proprieta'.

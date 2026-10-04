@@ -33,11 +33,14 @@ gb()   { df -Pk "$1" 2>/dev/null | awk 'NR==2 {print int($4/1024/1024)}'; }
 out()  { echo "$1" >> "${GITHUB_OUTPUT:-/dev/null}"; }
 summ() { echo "$*" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 # Un'annotazione del job: si legge anche dall'API (check-runs/annotations),
-# senza scaricare il log. Le righe vanno codificate (%0A).
+# senza scaricare il log. Le righe vanno codificate (%0A); nel titolo, che e'
+# una proprieta' del comando, anche "," e ":" (una virgola lo tagliava).
 note() {
 	local level="$1" title="$2" msg="$3"
 	[ -n "${GITHUB_ACTIONS:-}" ] || return 0
 	msg="${msg//'%'/'%25'}"; msg="${msg//$'\r'/}"; msg="${msg//$'\n'/'%0A'}"
+	title="${title//'%'/'%25'}"; title="${title//$'\n'/ }"
+	title="${title//:/'%3A'}"; title="${title//,/'%2C'}"
 	echo "::${level} title=${title}::${msg}"
 }
 
@@ -97,11 +100,24 @@ cmd_prepare() {
 		die "Lakka a ${have}, non al commit pinnato ${want}"
 	fi
 
-	# ccache: 6 GB invece dei 10 di LibreELEC, per stare nella cache delle
-	# actions (10 GB per repository). config/options legge questo file dopo
-	# i suoi default.
+	# config/options legge questo file dopo i suoi default.
+	# - ccache: 6 GB invece dei 10 di LibreELEC, per stare nella cache delle
+	#   actions (10 GB per repository).
+	# - BUILD_REUSABLE non vuota: gli strumenti per l'host senza -march=native
+	#   (config/functions, setup_toolchain). La ccache e lo stato passano da un
+	#   runner all'altro, e i runner non hanno tutti la stessa CPU. I primi
+	#   pacchetti per l'host (flag local-cc: make, cmake, ...) passano dal
+	#   ccache di Ubuntu 24.04 (4.9.1, in .ccache-local), che di -march=native
+	#   hasha il testo e non la CPU (il 4.13 che LibreELEC costruisce chiede
+	#   al compilatore cosa vuol dire): il make dell'host compilato su un
+	#   runner, ripreso dalla ccache su un altro, moriva con "Illegal
+	#   instruction" (run #5 e #6, al primo make install). E anche col
+	#   ccache giusto, la parte 2 puo' girare su una CPU diversa da quella che
+	#   ha compilato gli strumenti nello stato. Il valore non nomina "all",
+	#   "mesa:host" o "save-local", che chiederebbero a mesa i suoi strumenti
+	#   "riusabili" (con upx).
 	mkdir -p "${TREE_NAME}/.libreelec"
-	echo 'CCACHE_CACHE_SIZE="6G"' > "${TREE_NAME}/.libreelec/options"
+	printf '%s\n' 'CCACHE_CACHE_SIZE="6G"' 'BUILD_REUSABLE="yes"' > "${TREE_NAME}/.libreelec/options"
 }
 
 cmd_build() {
@@ -140,12 +156,11 @@ cmd_build() {
 			*)       result="failed" ;;
 		esac
 		# Un fallimento si riprova una volta. git fetch (get_git) non riprova
-		# da solo, e un errore di rete al primo minuto (run #5: glsl_shaders,
-		# passo 8 di 340) buttava la build; uno vero si ripete in pochi
-		# minuti, perche' il costruito resta (stamp) e si rifa' solo il
-		# pacchetto fallito.
+		# da solo, e un errore di rete butterebbe ore di build; uno vero si
+		# ripete in pochi minuti, perche' il costruito resta (stamp) e si
+		# rifa' solo il pacchetto fallito.
 		if [ "${result}" = failed ] && [ "${try}" -eq 1 ]; then
-			note warning "Tentativo 1 fallito, riprovo" "$(failure_report)"
+			note warning "Tentativo 1 fallito: riprovo" "$(failure_report)"
 			try=2
 			continue
 		fi
@@ -178,7 +193,8 @@ progress() {
 # Il pacchetto fallito e le ultime righe del suo log (quello del thread, che
 # --keep-going copia in *-fallito.log; se no la coda del log completo, dove
 # si mescolano i log di tutti i pacchetti finiti prima). Oltre agli errori di
-# compilazione quelli di rete: un "fatal:" di git non contiene "error".
+# compilazione quelli di rete (un "fatal:" di git non contiene "error") e i
+# processi morti ("Illegal instruction" di un make compilato per un'altra CPU).
 failure_report() {
 	local log pkg flog
 	log="$(mainlog)"
@@ -186,7 +202,7 @@ failure_report() {
 	pkg="$(sed -n 's|.*FAILURE: scripts/[a-z]* \([A-Za-z0-9_.+-]*\):[a-z]* has failed!.*|\1|p' "${log}" | tail -1)"
 	flog="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${pkg:-nessuno}"-fallito.log 2>/dev/null | head -1)"
 	echo "pacchetto: ${pkg:-?} (log: $(basename "${flog:-${log}}"))"
-	grep -aE 'error|Error|FAILED|No such file|fatal:|Cannot get|curl: \(|unable to|Could not|Failed to|timed out|reset by peer' "${flog:-${log}}" \
+	grep -aE 'error|Error|FAILED|No such file|fatal:|Cannot get|curl: \(|unable to|Could not|Failed to|timed out|reset by peer|Illegal instruction|Segmentation fault|core dumped|Killed' "${flog:-${log}}" \
 		| grep -av 'Werror\|error\.o\|_error\.' | tail -10 | cut -c1-180
 	echo "--- coda:"
 	tail -20 "${flog:-${log}}" | cut -c1-180
