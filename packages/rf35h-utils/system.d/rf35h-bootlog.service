@@ -5,6 +5,24 @@ Description=XiFan RF35H hardware diagnostics to persistent storage
 After=rf35h-state.service
 Wants=rf35h-state.service
 
+# Niente dipendenze di default. Con quelle, multi-user.target - che ci vuole
+# (WantedBy) - si ordina da solo DOPO di noi (After= implicito dei target), e
+# multi-user.target -> graphical.target -> retroarch-autostart.service ->
+# retroarch.service: RetroArch aspettava la fine di "rf35h-diag --full", cioe'
+# una scansione Wi-Fi attiva con iw e i connmanctl. Cosi' la diagnosi parte
+# come prima, appena finito rf35h-state, ma in parallelo alla GUI.
+# "After=retroarch.service" sarebbe stato un ciclo (retroarch.service viene
+# dopo multi-user.target, che verrebbe dopo di noi).
+# Le dipendenze di default di un servizio, rimesse a mano: dopo sysinit e
+# basic (anche tramite rf35h-state), fermato prima dello spegnimento -
+# ExecStop scrive in /storage, che si smonta solo alla fine (storage.mount ha
+# DefaultDependencies=no).
+DefaultDependencies=no
+Requires=sysinit.target
+After=sysinit.target basic.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
 # Questo servizio scrive in /storage, e fs-resize si rifiuta di espandere la
 # partizione se trova gia' /storage/.config, .cache o .kodi.
 # In realta' non potrebbe succedere: libreelec-target-generator, trovando
@@ -16,6 +34,13 @@ ConditionPathExists=!/storage/.please_resize_me
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Un tetto alla diagnosi: un connmanctl che non risponde o un iw che non torna
+# non devono restare appesi per sempre. Per un oneshot TimeoutStartSec vale
+# per tutto ExecStart; allo scadere systemd ferma l'intero cgroup (figli
+# compresi) e la unit risulta fallita - visibile in "systemctl --failed", nel
+# boot log successivo e nei crash log. Il log di spegnimento di quella sessione
+# salta. Di solito la diagnosi dura qualche secondo.
+TimeoutStartSec=90
 # "-" su entrambi: un log che non si scrive non deve impedire il boot ne'
 # rallentare lo spegnimento.
 ExecStart=-/usr/bin/rf35h-bootlog boot
