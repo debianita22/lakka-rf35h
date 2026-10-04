@@ -25,29 +25,27 @@ Lakka for the XiFan RF35H, ${v}.
 
 **Update from the console**: *Settings > Device Settings > System Update*
 downloads this release, checks its SHA-256 and asks to restart; the update
-is applied while the console starts. Or copy the \`.tar\` to
-\`/storage/.update/\` (ssh, or the card's second partition on a PC) and
-restart.
+is applied while the console starts. Or copy the \`.tar\` to the \`Update\`
+network share (\`/storage/.update/\`, also over SSH) and restart.
 
 **First install** (replace \`sdX\`): \`zcat ${img} | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress\`,
 or \`flash-sd.sh\` from the repository.
 EOF
 
-# i giochi che ci sono davvero (cores.txt: i core nel SYSTEM)
-games=""
+# gli extra che ci sono davvero (cores.txt: i core nel SYSTEM). Non tutti
+# stanno in Contentless Cores (OpenXeenNG no, col filtro di default): come si
+# avviano lo dice la guida.
+extras=""
 has() { grep -qx "$1" "${D}/cores.txt" 2>/dev/null; }
-if has gtasa; then games="${games}, GTA: San Andreas (your own APK and OBB)"; fi
-if has openxeenng; then games="${games}, OpenXeenNG (your GOG archives)"; fi
-if has deva_adventures; then games="${games}, Deva's Awesome Adventures"; fi
-echo
-if [ -n "${games}" ]; then
-	echo "Games, in *Contentless Cores*, none with game data: ${games#, }."
+if has ikemen; then extras="${extras}, IKEMEN GO"; fi
+if has gtasa; then extras="${extras}, GTA: San Andreas (from your own APK and OBB)"; fi
+if has openxeenng; then extras="${extras}, OpenXeenNG (Might and Magic IV/V, with the data files of your copy)"; fi
+if has deva_adventures; then extras="${extras}, Deva's Awesome Adventures"; fi
+if [ -n "${extras}" ]; then
+	echo
+	echo "Bundled extras, none with commercial game data: ${extras#, }."
+	echo "How to start them: [guide](https://github.com/${repo}/blob/main/docs/guide.md#bundled-extras)."
 fi
-cat <<'EOF'
-GTA III (re3) is never in a release: its source has no license. On a console
-that has it from a personal build, System Update first copies it to
-`/storage`, so it survives the update.
-EOF
 if [ -s "${D}/cores.txt" ]; then
 	echo
 	echo "RetroArch cores ($(wc -l < "${D}/cores.txt")): $(tr '\n' ' ' < "${D}/cores.txt" | sed 's/ $//; s/ /, /g')."
