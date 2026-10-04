@@ -17,8 +17,14 @@ Before=retroarch.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Aspetta la scheda rk817ext, non card0: con una cuffia USB collegata
+# all'avvio la 0 e' lei (vedi rf35h-dac-volume).
 ExecStartPre=/usr/bin/rf35h-audio-wait
-ExecStart=-/usr/bin/rf35h-dac-volume --restore
+# Senza "-": se il volume non si applica (scheda assente dopo l'attesa), la
+# unit risulta fallita - in "systemctl --failed", nel bootlog e nei crash log -
+# invece di lasciare il DAC a fondo scala in silenzio. Non blocca nulla: e'
+# solo voluta (Wants) da multi-user.target.
+ExecStart=/usr/bin/rf35h-dac-volume --restore
 
 [Install]
 WantedBy=multi-user.target

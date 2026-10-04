@@ -19,6 +19,8 @@ OUT="${RF35H_AUDIOTEST_DIR:-/storage/audiotest}"
 I2C="${RF35H_I2C:-/usr/bin/rf35h-i2c}"
 BUS="${RF35H_I2C_BUS:-0}"
 ADDR="${RF35H_I2C_ADDR:-0x20}"
+# la scheda dell'rk817 per id: la 0 puo' essere una cuffia USB (vedi rf35h-dac-volume)
+CARD="${RF35H_CARD_ID:-rk817ext}"
 
 [ -x "${I2C}" ] || { echo "manca ${I2C}" >&2; exit 1; }
 command -v speaker-test >/dev/null 2>&1 || { echo "manca speaker-test" >&2; exit 1; }
@@ -41,8 +43,8 @@ sleep 1
 i=1
 while [ "$i" -le "$N" ]; do
 	printf '\n--- giro %d di %d: ascolta ---\n' "$i" "$N"
-	# hw:0 diretto: niente conversione di plughw di mezzo
-	speaker-test -D hw:0 -c2 -t sine -f 440 -l 1 >/dev/null 2>&1 &
+	# hw diretto: niente conversione di plughw di mezzo
+	speaker-test -D "hw:CARD=${CARD},DEV=0" -c2 -t sine -f 440 -l 1 >/dev/null 2>&1 &
 	SPK=$!
 	sleep 1                      # registri letti MENTRE suona
 	dump > "${OUT}/giro-${i}.txt"

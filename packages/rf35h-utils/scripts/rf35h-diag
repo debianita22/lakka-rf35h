@@ -30,12 +30,14 @@ cat /proc/bus/input/devices 2>/dev/null | grep -E '^N:|^H:|^B: (KEY|ABS|FF)='
 echo "--- rumble (B: FF= sul retrogame_joypad = motore registrato; prova: rf35h-rumble)"
 awk '/Name="retrogame_joypad"/{f=1} f&&/^B: FF=/{print "  FF dichiarato: " $0; f=0} f&&/^$/{if(f){print "  FF dichiarato: NO (il driver non ha registrato il motore)"}; f=0}' /proc/bus/input/devices 2>/dev/null
 
+# La scheda dell'rk817 per id (rk817ext), non per numero: con una cuffia USB
+# collegata all'avvio la scheda 0 e' quella (vedi rf35h-dac-volume).
 sec "audio"
 cat /proc/asound/cards 2>/dev/null
-amixer -c 0 controls 2>/dev/null | grep -iE "speaker|playback mux|master"
-for c in "Internal Speakers Switch" "Playback Mux"; do
+amixer -c rk817ext controls 2>/dev/null | grep -iE "speaker|playback mux|master"
+for c in "Internal Speakers Switch" "Playback Mux" "Master Playback Volume"; do
 	printf '%-26s ' "${c}"
-	amixer -c 0 cget name="${c}" 2>/dev/null | grep -E '^  : values' || echo "(assente)"
+	amixer -c rk817ext cget name="${c}" 2>/dev/null | grep -E '^  : values' || echo "(assente)"
 done
 
 sec "tasto power"
@@ -125,8 +127,8 @@ if full; then
 	# possono solo calcolare dal device tree.
 	cat /proc/bus/input/devices 2>/dev/null
 
-	sec "controlli ALSA, tutti"
-	amixer -c 0 contents 2>/dev/null
+	sec "controlli ALSA della scheda rk817ext, tutti"
+	amixer -c rk817ext contents 2>/dev/null
 
 	sec "cpufreq"
 	for f in scaling_available_frequencies scaling_governor scaling_cur_freq \
