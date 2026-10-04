@@ -17,7 +17,8 @@
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 30 core) ne chiede di
 # piu'. Ogni parte costruisce fino a BUILD_MINUTES dall'inizio del job; se non
 # ha finito si ferma, e la successiva riparte dallo stato: LibreELEC salta i
-# pacchetti gia' fatti (stamp), rifa' solo quelli interrotti.
+# pacchetti gia' fatti (stamp); quelli interrotti si rifanno da capo
+# (drop_interrupted).
 #
 # Variabili (le mette il workflow): GITHUB_WORKSPACE, GITHUB_ENV,
 # GITHUB_OUTPUT, GITHUB_STEP_SUMMARY, JOB_START, BUILD_MINUTES, W,
@@ -161,6 +162,7 @@ cmd_build() {
 		# rifa' solo il pacchetto fallito.
 		if [ "${result}" = failed ] && [ "${try}" -eq 1 ]; then
 			note warning "Tentativo 1 fallito: riprovo" "$(failure_report)"
+			drop_interrupted
 			try=2
 			continue
 		fi
@@ -211,11 +213,51 @@ failure_report() {
 	tail -20 "${flog:-${log}}" | cut -c1-180
 }
 
+# I pacchetti che la build stava facendo quando si e' fermata (scadenza della
+# parte, o un errore): via la loro cartella di build e i loro stamp di build, e
+# la volta dopo LibreELEC li rifa' da un sorgente scompattato di nuovo (il
+# sorgente si riscarica comunque: scripts/unpack chiama get, e sources/ non e'
+# nello stato; la ccache aiuta). Altrimenti li riprende nella stessa cartella:
+# un link ucciso con SIGKILL (docker kill alla scadenza) lascia un .so di 0 byte
+# piu' nuovo dei suoi oggetti, make lo prende per buono e l'immagine lo
+# installa. Si riconoscono dal lock del job,
+# build.*/.threads/locks/<pacchetto>:<target>.build.owner (config/functions,
+# pkg_lock_status), che solo la fine del job toglie; .threads si azzera a ogni
+# make image. Gli stamp tutti, non solo quello del target interrotto: gcc:target,
+# per dire, copia i suoi file dalla cartella di build di gcc:host.
+drop_interrupted() {
+	: "${W:?}"
+	local b o job jobs d name n
+	for b in "${W}/${TREE_NAME}"/build.*/; do
+		jobs=""; n=0
+		for o in "${b}.threads/locks/"*.build.owner; do
+			[ -f "${o}" ] || continue
+			job="${o##*/}"; job="${job%.build.owner}"
+			# finito proprio mentre lo si fermava: lo stamp c'e'
+			[ -f "${b}.stamps/${job%:*}/build_${job##*:}" ] && continue
+			jobs="${jobs} ${job}"
+		done
+		[ -n "${jobs}" ] || continue
+		# la cartella di un pacchetto la riconosce il nome che unpack ci scrive
+		for d in "${b}build/"*/; do
+			[ -f "${d}.libreelec-package" ] || continue
+			name="$(sed -n 's/^INFO_PKG_NAME="\(.*\)"$/\1/p' "${d}.libreelec-package")"
+			case " ${jobs} " in
+				*" ${name}:"*) rm -rf "${d}"; n=$((n + 1)) ;;
+			esac
+		done
+		for job in ${jobs}; do rm -f "${b}.stamps/${job%:*}/build_"*; done
+		echo "  interrotti:${jobs}: si rifanno da capo (${n} cartelle di build tolte)"
+		note notice "Pacchetti interrotti" "${jobs# }: si rifanno da capo (${n} cartelle di build tolte)"
+	done
+}
+
 cmd_pack() {
 	local n="${1:?parte}" why="${2:-}" size
 	: "${W:?}"
 	cd "${W}"
 	say "Stato della parte ${n}"
+	drop_interrupted
 	du -sh "${TREE_NAME}" "${TREE_NAME}"/build.*/* "${TREE_NAME}"/build.*/.ccache* 2>/dev/null | sort -h | tail -12 || true
 	# Fuori: i sorgenti (si riscaricano, e solo per i pacchetti ancora da
 	# fare), i log e i resoconti (vanno negli artifact a parte), i file

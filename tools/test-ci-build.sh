@@ -117,5 +117,43 @@ else
 	skip=$((skip + 1)); echo "  (salto collect: serve squashfs-tools)"
 fi
 
+# --- pack: i pacchetti interrotti fuori dallo stato -------------------------------
+echo "pack: pacchetti interrotti"
+# zstd finto (lo stato resta un tar qualunque): la prova non dipende da zstd
+mkdir -p "${T}/bin"; printf '#!/bin/sh\nexec cat\n' > "${T}/bin/zstd"; chmod +x "${T}/bin/zstd"
+PW="${T}/pw"; B="${PW}/lakka-rf35h-build/build.Lakka-RK3326.aarch64"
+pkgdir() { mkdir -p "${B}/build/$2"; printf 'INFO_PKG_NAME="%s"\n' "$1" > "${B}/build/$2/.libreelec-package"; echo x > "${B}/build/$2/file"; }
+stamp() { mkdir -p "${B}/.stamps/$1"; echo "STAMP_PKG_NAME=\"$1\"" > "${B}/.stamps/$1/build_$2"; }
+owner() { mkdir -p "${B}/.threads/locks"; echo "1 1 build $1" > "${B}/.threads/locks/$1.build.owner"; }
+mkpw() {
+	rm -rf "${PW}"; mkdir -p "${B}/install_pkg/mgba-1.0/usr/lib/libretro"
+	# mgba: il link ucciso alla scadenza, un .so di 0 byte piu' nuovo degli oggetti
+	pkgdir mgba mgba-1.0; : > "${B}/build/mgba-1.0/mgba_libretro.so"; owner mgba:target
+	# gcc: host finito, target interrotto
+	pkgdir gcc gcc-15.1.0; stamp gcc host; owner gcc:target
+	# mesa: finito proprio mentre lo si fermava (stamp scritto, lock ancora li')
+	pkgdir mesa mesa-26.0; stamp mesa target; owner mesa:target
+	# retroarch: solo scompattato (lo legge ikemen-go), nessun job
+	pkgdir retroarch retroarch-1.21
+	# linux: fatto, la cartella resta (verify-kernel)
+	pkgdir linux linux-7.2.9; stamp linux target
+	# un nome che comincia come quello di un interrotto, ma e' un altro pacchetto
+	pkgdir mgba-tools mgba-tools-2.0; stamp mgba-tools target
+}
+pack() { ( export PATH="${T}/bin:${PATH}"; W="${PW}" bash "${CB}" pack 1 "${1:-}" > "${T}/pack.out" 2>&1 ); }
+mkpw; pack; rc=$?
+tar -tf "${PW}/state-1.tar.zst" > "${T}/state.list" 2>/dev/null
+inst() { grep -q "^lakka-rf35h-build/build.Lakka-RK3326.aarch64/$1" "${T}/state.list"; }
+ok "pack esce 0 e lo stato si legge" '[ "${rc}" = 0 ] && [ -s "${T}/state.list" ]'
+ok "mgba interrotto: cartella di build fuori dallo stato, niente .so di 0 byte" '! inst build/mgba-1.0/ && [ ! -e "${B}/build/mgba-1.0" ]'
+ok "gcc:target interrotto: cartella e tutti gli stamp di gcc via" '! inst build/gcc-15.1.0/ && [ -z "$(ls "${B}/.stamps/gcc")" ]'
+ok "mesa finito (stamp): cartella e stamp restano" 'inst build/mesa-26.0/file && inst .stamps/mesa/build_target'
+ok "retroarch solo scompattato, linux fatto: restano" 'inst build/retroarch-1.21/file && inst build/linux-7.2.9/file && inst .stamps/linux/build_target'
+ok "mgba-tools (altro pacchetto, nome simile): resta" 'inst build/mgba-tools-2.0/file && inst .stamps/mgba-tools/build_target'
+ok "install_pkg resta (lo rifa' la build del pacchetto)" 'inst install_pkg/mgba-1.0/'
+ok "lo dice nel log" 'grep -q "interrotti: gcc:target mgba:target: si rifanno da capo (2 cartelle" "${T}/pack.out"'
+mkpw; rm -rf "${B}/.threads"; pack failed; rc=$?
+ok "senza .threads (nessuna build in questa parte): non toglie niente" '[ "${rc}" = 0 ] && [ -e "${B}/build/mgba-1.0" ] && [ -e "${B}/build/gcc-15.1.0" ]'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]
