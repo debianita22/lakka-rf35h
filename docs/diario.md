@@ -5103,3 +5103,19 @@ dipende dai flag, quindi la ripresa terrebbe il make compilato male.
 Nel resoconto anche il titolo delle annotazioni codificato: una virgola
 ("fallito, riprovo") lo tagliava, perche' nei comandi del workflow separa le
 proprieta'.
+
+## Prima build completa in CI (4/10/2026)
+
+Run #7 (`b9f79d3`, con `BUILD_REUSABLE`): 340 passi su 340 in 230 minuti,
+al primo tentativo, in una parte sola (job di 3 ore e 54 minuti). Immagine
+`Lakka-RK3326.aarch64-Next-ci-7-b9f79d3-rf35h.img.gz` da 615 MB, `.tar` da
+640 MB, 34 core, nessuno escluso; `verify-image` conforme (a fine build un
+"non conforme" fa uscire la build con errore: e' uscita 0); re3 assente dal
+SYSTEM. ccache: 21 078 colpi su 159 756 (13%: con i flag cambiati tutti gli
+strumenti per l'host si sono ricompilati), 3,8 GB salvati. Disco: 103 GB
+liberi alla fine, albero di 19 GB. L'immagine resta negli artifact del run
+fino al 18/10.
+
+Quindi una build quasi da zero sta in un job: le parti restano come
+margine (cache vuota, runner piu' lenti). La prossima, con la cache calda
+anche per l'host, dovrebbe metterci meno.

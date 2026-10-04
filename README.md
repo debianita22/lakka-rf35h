@@ -105,10 +105,11 @@ built packages.
   test scripts (`tools/ci-check.sh`, the same locally), and a dry run on the
   pinned Lakka commit with the build plan. A few minutes.
 - **Build**: the whole image in the Ubuntu 24.04 container, on GitHub's free
-  runners. A job lasts at most 6 hours and a build from scratch takes
-  longer, so it runs in up to four parts: each one builds until shortly
-  before its limit and hands its state to the next (`tools/ci-build.sh`);
-  ccache is kept between builds. Triggers:
+  runners. The first complete build, with an almost empty ccache, took 3 h
+  50 min in a single job; a job lasts at most 6 hours, so as a safety net
+  the build can run in up to four parts: each one builds until shortly
+  before its limit and hands its state to the next (`tools/ci-build.sh`).
+  ccache is kept between builds; a failed build is retried once. Triggers:
   - a tag `v*` (`git tag v1.0.0 && git push origin v1.0.0`): build and
     release;
   - *Actions > Build > Run workflow*: with a version, build and release

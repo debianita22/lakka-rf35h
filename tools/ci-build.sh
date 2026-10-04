@@ -288,7 +288,8 @@ cmd_ccache_stats() {
 		'for d in lakka-rf35h-build/build.*; do [ -x "$d/toolchain/bin/ccache" ] && "$d/toolchain/bin/ccache" -d "$d/.ccache" -s; done; true' \
 		2>/dev/null | grep -v '^>>' || true)"
 	echo "${st}"
-	note notice "ccache" "$(echo "${st}" | grep -iE 'hits|misses|cache size' | tr -s ' ' | tr '\n' ';')"
+	# ccache 4 ripete Hits e Misses sotto "Local storage": una volta sola
+	note notice "ccache" "$(echo "${st}" | grep -iE 'hits|misses|cache size' | tr -s ' ' | awk '!seen[$0]++' | tr '\n' ';')"
 }
 
 cmd_collect() {
