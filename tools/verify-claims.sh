@@ -97,6 +97,32 @@ chk "menu: le 7 tendine si rileggono (handle=true)"  "[ \"\$(grep -cE '^\+   SET
 chk "menu: chiave vuota -> stato reale del device"   "grep -q '^+static void rf35h_arrays_fill(settings_t \*settings)' '$M1003B' && grep -q '^+   rf35h_arrays_fill(settings);' '$M1003B'"
 chk "generatore: handle=true per le 7 tendine"       "[ \"\$(grep -cE 'SETTING_ARRAY\(\"rf35h_.*DEFAULT_RF35H_[A-Z_]+, true\);' '$O/tools/gen-retroarch-rf35h-menu.py')\" = 7 ]"
 
+# Revisione delle patch di RetroArch per la 1.1.0: Samba e il modo "transfer"
+# della USB-C (1007), toggle dei servizi senza gare ne' zombie (1007), stop di
+# scraper e aggiornamento senza bloccare il menu, valori del menu giusti subito
+# dopo un cambio, installazione dell'aggiornamento solo dopo "rf35h-update
+# install" (batteria), uscita audio USB per id con ripiego all'avvio (1003), e
+# gli irrobustimenti: password WPA lunghe (1009), tether_status (1008), fsync
+# della directory (1010), nome del SoC (1004), array RF35H nel ciclo (1003).
+M1004="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1004-arm64-neon-cpu-model.patch"
+M1007="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1007-service-toggle-keep-conf.patch"
+chk "Samba: il flag messo da parte conta come spento"    "grep -q '^+bool config_samba_enabled(void)' '$M1007' && [ \"\$(grep -c '^+         settings->bools.samba_enable, config_samba_enabled());' '$M1007')\" = 2 ]"
+chk "Samba: il salvataggio non tocca il flag da parte"   "grep -q '^+   if (!filestream_exists(RF35H_SAMBA_ASIDE_PATH))' '$M1007'"
+chk "Samba: acceso dal menu, via anche il flag da parte" "grep -q '^+      filestream_delete(RF35H_SAMBA_ASIDE_PATH);' '$M1007'"
+chk "Samba: stesso nome del flag in rf35h-usb"           "grep -q 'LAKKA_SAMBA_DISABLED_FILE_PATH \".rf35h-usb\"' '$M1007' && grep -q 'SMB_ASIDE=\"\${SMB_FLAG}.rf35h-usb\"' '$P/scripts/rf35h-usb'"
+chk "toggle servizi: file prima del fork, niente zombie" "grep -q '^+   config_set_service_state(path, enable);' '$M1007' && grep -q '^+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) { }' '$M1007' && grep -q '^+         _exit(127);' '$M1007' && [ \"\$(grep -c '^+   systemd_service_spawn(enable' '$M1007')\" = 2 ]"
+chk "toggle servizi: .conf creato senza troncare"        "grep -q '^+      if ((f = fopen(conf_path, \"a\")))' '$M1007'"
+chk "scraper e aggiornamento: stop senza bloccare"       "[ \"\$(grep -c 'systemctl --no-block stop rf35h-' '$M1003B')\" = 2 ] && ! grep -q 'systemctl stop rf35h-' '$M1003B' && grep -q 'systemctl --no-block stop rf35h-scrape.service' '$O/tools/gen-retroarch-rf35h-menu.py'"
+chk "menu: dopo un cambio 3 s senza rileggere gli stati" "grep -q '^+   rf35h_last_run = cpu_features_get_time_usec();' '$M1003B' && grep -q '^+         && cpu_features_get_time_usec() - rf35h_last_run < 3000000)' '$M1003B'"
+chk "aggiornamento: rf35h-update install, poi riavvio"   "grep -q 'popen(\"/usr/bin/rf35h-update install\", \"r\")' '$M1003B' && grep -q 'WEXITSTATUS(st) == 0' '$M1003B'"
+chk "rf35h-update ha il comando install del menu"        "grep -qE '^[[:space:]]*\"?([a-z-]+[|])*install([|][a-z-]+)*\"?[)]' '$P/scripts/rf35h-update'"
+chk "audio USB: scheda per id, ripiego all'avvio"        "grep -q 'plughw:CARD=%s,DEV=0' '$M1003B' && grep -q '^+   rf35h_audio_device_check(settings);' '$M1003B'"
+chk "array RF35H letti con la loro dimensione"           "grep -q '^+               rf35h_array_size(settings, array_settings\[i\].ptr));' '$M1003B'"
+chk "Wi-Fi: password WPA fino a 63 caratteri"           "grep -q '^+   char passphrase\[65\];' '$M1009'"
+chk "connmanctl: tether_status controlla fgets"         "grep -q '^+   if (!fgets(ln, sizeof(ln), command_file))' '$M1008'"
+chk "config: fsync della directory dopo la rename"      "grep -q 'open(tmp_path, O_RDONLY | O_DIRECTORY)' '$M1010'"
+chk "nome della CPU: niente overflow con vendor lunghi" "grep -q 'i < sl; i++)' '$M1004' && grep -q 'i < sl; i++)' '$O/tools/gen-retroarch-arm64-fixes.py'"
+
 echo "== Vulkan accanto a OpenGL ES, IKEMEN GO"
 OPT="${W}/projects/Rockchip/devices/RK3326/options"
 IK="${O}/packages/ikemen-go"
