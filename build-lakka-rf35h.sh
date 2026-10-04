@@ -101,9 +101,9 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      --cores "gambatte fceumm genesis_plus_gx snes9x2010 mgba"
   --kms              applica anche optional/kms-no-compositor.patch
                      RetroArch su KMS senza sway. Non al primo tentativo.
-  --no-core-lto      toglie ai core il flag LTO messo dall'overlay. Oggi non
-                     cambia niente: quel flag (+lto-parallel) questa
-                     LibreELEC non lo conosce (docs/diario.md, 3/10)
+  --no-core-lto      toglie l'LTO ai 19 core a cui lo mette l'overlay
+                     (+lto: -flto con i -Werror di LibreELEC). Se un core
+                     con LTO si comporta male sulla console
   --no-vulkan        immagine senza Vulkan (Mesa senza PanVK, RetroArch senza
                      il driver vulkan). Di default Vulkan c'e', come
                      alternativa: OpenGL ES resta il predefinito
@@ -689,10 +689,10 @@ printf '  %-34s ok\n' "porta USB-C: gadget, dhcp, blacklist"
 # mette gia' LibreELEC a ogni pacchetto (CFLAGS_OPTIM_DEFAULT).
 ! grep -qE '^[^#]*PROJECT_CFLAGS="[^"]*-O' "${RK}/options" || die "PROJECT_CFLAGS con -O nelle options: glibc non compilerebbe"
 grep -q 'SYSTEM_SIZE=3072' "${RK}/options" || die "manca SYSTEM_SIZE=3072 nelle options"
-# il flag della patch di Mesa c'e', ma questa LibreELEC non lo conosce: per ora
-# l'LTO non e' attivo (docs/diario.md, correzione del 3/10); si controlla solo la patch
-grep -q 'PKG_BUILD_FLAGS="+lto-parallel"' "${WORKDIR}/packages/graphics/mesa/package.mk" || die "manca la patch LTO di Mesa"
-printf "  %-34s ok\n" "SYSTEM 3 GB, glibc ottimizzata, LTO Mesa inerte"
+# LTO su Mesa: "+lto", il flag che questa LibreELEC conosce (fino al 4/10
+# c'era "+lto-parallel", che non faceva niente: docs/diario.md)
+grep -q 'PKG_BUILD_FLAGS="+lto"' "${WORKDIR}/packages/graphics/mesa/package.mk" || die "manca la patch LTO di Mesa"
+printf "  %-34s ok\n" "SYSTEM 3 GB, glibc ottimizzata, LTO Mesa"
 grep -q 'WIRELESS_DAEMON="wpa_supplicant"' "${RK}/options" \
 	|| die "WIRELESS_DAEMON non impostato: con iwd la UI non vede reti"
 grep -q 'WIRELESS_DAEMON.*wpa_supplicant' "${WORKDIR}/packages/network/iwd/package.mk" \
@@ -751,7 +751,7 @@ fi
 # dry-run sia prima di una build vera: e' economico, e una regressione trovata
 # qui costa secondi invece delle ore di una build.
 say "Le modifiche dichiarate sono tutte presenti?"
-"${OVERLAY}/tools/verify-claims.sh" "${WORKDIR}" "${OVERLAY}" \
+RF35H_CORE_LTO="${CORE_LTO}" "${OVERLAY}/tools/verify-claims.sh" "${WORKDIR}" "${OVERLAY}" \
 	|| die "una o piu' modifiche dichiarate non sono nell'albero (vedi sopra)"
 
 # La versione dell'immagine. RF35H_VERSION (la CI ci mette il tag della
@@ -999,7 +999,15 @@ da dove si e' fermata."
 fi
 
 # --- risultato ---------------------------------------------------------------
-check_kernel || warn "kernel incompleto: vedi sopra"
+# Una patch del kernel che manca (uscita 1) e' un kernel sbagliato: ferma.
+# Il sorgente che non c'e' (2: build non arrivata al kernel) solo un avviso.
+krc=0
+check_kernel || krc=$?
+case "${krc}" in
+	0) ;;
+	1) die "kernel incompleto: una o piu' patch non sono nel sorgente (vedi sopra)" ;;
+	*) warn "sorgente del kernel non trovato: le sue patch non sono state verificate" ;;
+esac
 
 say "Fatto"
 find_image

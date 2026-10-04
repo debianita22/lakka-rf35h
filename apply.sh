@@ -29,29 +29,29 @@ echo "[1/8] patch kernel (device tree incluso in z-010)"
 rm -f "$RK"/patches/linux/r-*.patch "$RK"/patches/linux/z-*.patch
 cp "$O"/patches/linux/*.patch "$RK/patches/linux/"
 
-# Kernel 7.2.7, pila snella. Le patch di Lakka per RK3326 sono scritte per la
+# Kernel 7.2.y, pila snella. Le patch di Lakka per RK3326 sono scritte per la
 # 7.0.1 e servono molte console; la RF35H ne usa due: 0000 (il trigger del LED
 # di carica si chiama battery-charging solo col power supply rinominato) e 0012
 # (l'etichetta dmc del device tree). Le altre sono per Odroid, RG351, GameForce
 # ed esp8089, e la 0002 reintroduce API che mainline ha tolto (of_gpio.h non
 # esiste piu' nella 7.2). Elenco di quelle da TENERE, non da togliere: una patch
 # che Lakka aggiungesse in futuro, scritta per la 7.0, verrebbe scartata invece
-# di fallire sulla 7.2.7 - e lo si dice. La 0000 e' la nostra, rigenerata a
+# di fallire sulla 7.2 - e lo si dice. La 0000 e' la nostra, rigenerata a
 # fuzz 0 (quella di Lakka applicava con fuzz 2); cp sopra l'ha gia' sostituita.
 for p in "$RK"/patches/linux/*.patch; do
 	case "$(basename "$p")" in
 		r-*|z-*|0000-rename-rk817-battery.patch|0012-px30-and-rk3326-odroid-go-more-adjustment.patch) ;;
-		*) echo "       pila snella 7.2.7, scartata: $(basename "$p")"; rm -f "$p" ;;
+		*) echo "       pila snella 7.2, scartata: $(basename "$p")"; rm -f "$p" ;;
 	esac
 done
 # Patch generiche di Lakka: le due ntfs portano indietro codice della 7.1, gia'
-# presente nella 7.2.7 (fallirebbero come "gia' applicate"). Si tengono 0062 e
+# presente nella 7.2 (fallirebbero come "gia' applicate"). Si tengono 0062 e
 # 9901; la 9901 e' la nostra, rigenerata a fuzz 0.
 cp "$O"/patches/linux-default/*.patch "$L/packages/linux/patches/default/"
 for p in "$L"/packages/linux/patches/default/*.patch; do
 	case "$(basename "$p")" in
 		linux-0062-imon_pad_ignore_diagonal.patch|linux-9901-pm-disable-async-suspend-resume-by-default.patch) ;;
-		*) echo "       pila snella 7.2.7, scartata: default/$(basename "$p")"; rm -f "$p" ;;
+		*) echo "       pila snella 7.2, scartata: default/$(basename "$p")"; rm -f "$p" ;;
 	esac
 done
 
@@ -136,8 +136,13 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/options-vul
 # ...ma non per sway: il renderer Vulkan di wlroots qui non serve e vorrebbe
 # glslang sull'host prima del tempo
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/wlroots-no-vulkan-rf35h.patch"
-# Kernel 7.2.7: il ramo 7.0 e' fuori supporto dal 27/06/2026.
-patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/linux-7.2.7-rf35h.patch"
+# Kernel 7.2.y: il ramo 7.0 e' fuori supporto dal 27/06/2026. Versione e
+# SHA256 stanno solo in quella patch (un aggiornamento cambia due righe li').
+KV="$(sed -n 's/^+ *PKG_VERSION="\([0-9][0-9.]*\)".*/\1/p' "$O/integration/linux-rf35h.patch")"
+[ -n "$KV" ] || { echo "apply: versione del kernel non trovata in integration/linux-rf35h.patch" >&2; exit 1; }
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/linux-rf35h.patch"
+# ...e il suo sorgente resta anche con AUTOREMOVE=yes, per verify-kernel
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/autoremove-keep-kernel-rf35h.patch"
 # perf usa da solo strumenti dell'host se li trova: rustc (carico di test in
 # Rust, per aarch64 fallisce) e shellcheck (ogni avviso ferma la build).
 # NO_RUST=1 e NO_SHELLCHECK=1 accanto agli altri NO_*.
@@ -181,9 +186,14 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/kconfig-deb
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/busybox-udhcpd-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/connman-blacklist-usb-rf35h.patch"
 
-# Ottimizzazione. Il -O2 globale sta in options-rf35h.patch (PROJECT_CFLAGS).
-# Qui l'LTO: Mesa sempre; i core solo quelli provati in C/C++ puro, senza
-# dynarec. Se un core con LTO si comporta male: RF35H_CORE_LTO=no, oppure
+# Ottimizzazione: -O2 lo mette LibreELEC a tutto (CFLAGS_OPTIM_DEFAULT). Qui
+# l'LTO: Mesa sempre; i core solo quelli provati in C/C++ puro, senza
+# dynarec. Il flag e' "+lto": questa LibreELEC conosce solo lto, lto-fat e
+# lto-off (config/functions, setup_toolchain), e "+lto" da' -flto=N piu' i
+# suoi -Werror=odr, lto-type-mismatch e strict-aliasing, che fermano un core
+# su cui l'LTO rischierebbe codice sbagliato. "+lto-parallel" veniva da una
+# LibreELEC vecchia e qui non faceva niente: fino al 4/10/2026 nessun core ha
+# avuto l'LTO. Se un core con LTO si comporta male: RF35H_CORE_LTO=no, oppure
 # PKG_BUILD_FLAGS="+lto-off" nel suo package.mk.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/mesa-lto-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/sdl-host-flags-rf35h.patch"
@@ -204,11 +214,11 @@ if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 		elif grep -q '^PKG_BUILD_FLAGS=' "$pm"; then
 			# c'e' gia' un flag (es. sameboy: "-parallel", il suo Makefile non
 			# regge make -j): si aggiunge, non si sovrascrive. I due convivono.
-			sed -i 's/^PKG_BUILD_FLAGS="\([^"]*\)"/PKG_BUILD_FLAGS="\1 +lto-parallel"/' "$pm"
-			echo "  $c: +lto-parallel aggiunto a $(grep -oE '^PKG_BUILD_FLAGS="[^"]*"' "$pm")"
+			sed -i 's/^PKG_BUILD_FLAGS="\([^"]*\)"/PKG_BUILD_FLAGS="\1 +lto"/' "$pm"
+			echo "  $c: +lto aggiunto a $(grep -oE '^PKG_BUILD_FLAGS="[^"]*"' "$pm")"
 		else
-			printf '\n# devaOS RF35H: LTO. Core in C/C++ puro senza dynarec; togli con +lto-off.\nPKG_BUILD_FLAGS="+lto-parallel"\n' >> "$pm"
-			echo "  $c: +lto-parallel"
+			printf '\n# devaOS RF35H: LTO. Core in C/C++ puro senza dynarec; togli con +lto-off.\nPKG_BUILD_FLAGS="+lto"\n' >> "$pm"
+			echo "  $c: +lto"
 		fi
 	done
 fi
@@ -330,9 +340,9 @@ for f in "$RK/patches/linux/z-010-add-rf35h-dts.patch" \
 done
 
 need() { grep -q "$2" "$1" || { echo "apply: $3" >&2; exit 1; }; }
-need "$L/packages/linux/package.mk"                      'PKG_VERSION="7.2.7"' "kernel non portato a 7.2.7"
+need "$L/packages/linux/package.mk"                      "PKG_VERSION=\"$KV\"" "kernel non portato a $KV"
 [ -e "$RK/patches/linux/z-001-st7703-xifan-xf35h-panel.patch" ] && { echo "apply: z-001 ancora presente (inerte, e senza 0101 finisce nel punto sbagliato)" >&2; exit 1; }
-[ -e "$RK/patches/linux/0002-add-input-polldev.patch" ] && { echo "apply: 0002-add-input-polldev ancora presente (non applica sulla 7.2.7)" >&2; exit 1; }
+[ -e "$RK/patches/linux/0002-add-input-polldev.patch" ] && { echo "apply: 0002-add-input-polldev ancora presente (non applica sulla 7.2)" >&2; exit 1; }
 need "$L/scripts/uboot_helper"                          "'rf35h'"        "voce rf35h assente da uboot_helper"
 need "$RK/options"                                      "rk915"          "ADDITIONAL_DRIVERS non aggiornato"
 need "$RK/linux/linux.aarch64.conf"                     "^CONFIG_INPUT_RK805_PWRKEY=y" "tasto power: simbolo non abilitato"

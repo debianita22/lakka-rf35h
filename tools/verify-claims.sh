@@ -205,9 +205,34 @@ chk "servizi: il salvataggio non svuota sshd.conf" "grep -q '^+   config_set_ser
 chk "servizi: il toggle non svuota la config"  "grep -q '^+      config_set_service_state(path, enable);' '$R1007'"
 chk "servizi: spento = .disabled, come LibreELEC" "grep -q '^+      filestream_rename(conf_path, disabled_path);' '$R1007' && grep -q '^+            && filestream_rename(disabled_path, conf_path) == 0)' '$R1007'"
 
-# Kernel 7.2.7, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
+# Kernel 7.2.y, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
+# Versione e SHA256 stanno solo in integration/linux-rf35h.patch: l'albero
+# deve avere quelle, e lo SHA256 dev'essere un SHA256.
 LPK="${W}/packages/linux/package.mk"; RKP="${W}/projects/Rockchip/devices/RK3326/patches/linux"; DEF="${W}/packages/linux/patches/default"
-chk "kernel 7.2.7 con il suo SHA256"           "grep -q 'PKG_VERSION=\"7.2.7\"' '$LPK' && grep -q '4ac34c47db2540ffb2713943f8d891ff1702e0ba6934525a493b7d1cad43145a' '$LPK'"
+KV="$(sed -n 's/^+ *PKG_VERSION="\([0-9][0-9.]*\)".*/\1/p' "${O}/integration/linux-rf35h.patch")"
+KS="$(sed -n 's/^+ *PKG_SHA256="\([^"]*\)".*/\1/p' "${O}/integration/linux-rf35h.patch")"
+chk "kernel ${KV:-?} con il suo SHA256"        "[ -n '${KV}' ] && echo '${KS}' | grep -qxE '[0-9a-f]{64}' && grep -q 'PKG_VERSION=\"${KV}\"' '$LPK' && grep -q '${KS}' '$LPK'"
+chk "kernel 7.2.y (ramo supportato)"           "case '${KV}' in 7.2.*) true ;; *) false ;; esac"
+chk "sorgente del kernel tenuto (AUTOREMOVE)"  "grep -q '\[ \"\${PKG_NAME}\" = \"linux\" \] && exit 0' '${W}/scripts/autoremove'"
+chk "patch del kernel mancante: build ferma"   "grep -q 'kernel incompleto: una o piu' '$O/build-lakka-rf35h.sh'"
+
+# LTO: "+lto", il flag che questa LibreELEC conosce (lto, lto-fat, lto-off),
+# sui core che apply.sh elenca, se l'LTO dei core e' acceso (il build script
+# passa RF35H_CORE_LTO). "+lto-parallel" non esiste: con quello per mesi
+# nessun core ha avuto l'LTO, e nessun controllo se n'era accorto.
+LTOC="$(sed -n 's/.*RF35H_LTO_CORES:-\([a-z0-9_ ]*\)}.*/\1/p' "${O}/apply.sh")"
+nolto=""; nlto=0
+for c in ${LTOC}; do
+	pm="${W}/packages/lakka/libretro_cores/${c}/package.mk"
+	[ -f "${pm}" ] || continue
+	nlto=$((nlto + 1))
+	grep -qE '^PKG_BUILD_FLAGS="([^"]* )?[+]lto( [^"]*)?"' "${pm}" || nolto="${nolto} ${c}"
+done
+if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
+	chk "LTO (+lto) su ${nlto} core${nolto:+, manca a:${nolto}}" "[ ${nlto} -ge 19 ] && [ -z '${nolto}' ]"
+fi
+chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${W}/packages/graphics/mesa' '${O}/packages'"
+chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
 chk "pila snella: 6 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 6 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
@@ -245,7 +270,10 @@ chk "strace con i suoi header (kernel 7.2)"      "grep -q 'PKG_CONFIGURE_OPTS_TA
 chk "glibc: nessun -O in PROJECT_CFLAGS"          "! grep -qE '^[^#]*PROJECT_CFLAGS=\"[^\"]*-O' '${W}/projects/Rockchip/devices/RK3326/options'"
 chk "versione della release in os-release"      "grep -q 'CUSTOM_VERSION=\"\${RF35H_VERSION}\"' '$O/build-lakka-rf35h.sh'"
 chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '$O/tools/ci-build.sh'"
-chk "CI: un solo job con contents: write"       "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 1 ]"
+# Scrive solo il job release (build.yml) e il job kernel di upstream.yml (che
+# spinge soltanto un ramo ci-test/kernel-*): le parti della build e i
+# controlli no.
+chk "CI: contents: write solo in release e kernel" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 2 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ]"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
@@ -283,7 +311,7 @@ chk "KMS resta opzionale"                    "[ -f '$O/optional/kms-no-composito
 # build.*/install_pkg/linux-7.2.7 (20 falsi MANCA), la verifica dell'immagine
 # cercava lo script in ${RK}/tools (mai eseguita) e nel container mancava
 # unsquashfs; la firma dell'overlay cambiava fra host e container.
-chk "verify-kernel: sorgente solo da build/"  "grep -qF '/build.*/build/linux-7.' '$O/verify-kernel.sh'"
+chk "verify-kernel: sorgente solo da build/"  "grep -qF '/build.*/build/linux-[0-9]' '$O/verify-kernel.sh'"
 chk "fine build: verify-image dall'overlay"   "grep -qF 'OVERLAY}/tools/verify-image.sh' '$O/build-lakka-rf35h.sh' && ! grep -qF 'RK}/tools/' '$O/build-lakka-rf35h.sh'"
 chk "container con unsquashfs"                "grep -qE '^ +default-jre-headless .*squashfs-tools' '$O/build-in-docker.sh'"
 chk "firma dell'overlay senza percorsi"       "grep -q 'overlay-sig2' '$O/build-lakka-rf35h.sh' && grep -qF 'cd \"\${OVERLAY}\" && find' '$O/build-lakka-rf35h.sh'"

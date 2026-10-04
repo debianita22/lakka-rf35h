@@ -742,6 +742,7 @@ Workflows in [`.github/workflows`](../.github/workflows):
 |---|---|---|
 | Check (`check.yml`) | push to `main`, pull requests, manual | `tools/ci-check.sh` (shellcheck, actionlint, Python syntax, patch hunk counts, `tools/test-*.sh`) and a dry run on the pinned Lakka commit |
 | Build (`build.yml`) | tag `v*`, *Run workflow*, push to `ci-test/**` | the full image in the same Ubuntu 24.04 container, in up to four jobs of at most 6 hours each |
+| Upstream (`upstream.yml`) | every Monday, manual | a newer Linux 7.2.y whose signature (kernel.org keys), SHA-256 and kernel patches (fuzz 0) check out gets a `ci-test/kernel-<version>` branch, a test build and an issue; Lakka `devel` moving past the pinned commit gets an issue. Merging and releasing stay manual |
 
 - **Release**: `git tag v1.0.0 && git push origin v1.0.0`, or *Run workflow*
   with a version (the tag is created at the end; from a branch other than the

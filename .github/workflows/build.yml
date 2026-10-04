@@ -18,6 +18,13 @@
 # SHA256SUMS. Una pre-release non e' "latest": le console non la vedono.
 # Mai re3 (GTA III): non ha licenza, e la build qui non lo ha.
 name: Build
+# Il titolo del run dice cosa costruisce: gli input di "Run workflow" non si
+# vedono dall'API ne' dall'elenco dei run, e la versione e' quello che conta.
+run-name: >-
+  ${{ github.ref_type == 'tag' && format('Release {0}', github.ref_name)
+  || inputs.version != '' && format('Release {0}{1}', inputs.version, inputs.prerelease && ' (pre-release)' || '')
+  || inputs.resume_run != '' && format('Build di prova, ripresa da {0}', inputs.resume_run)
+  || format('Build di prova ({0})', github.ref_name) }}
 
 on:
   push:
@@ -176,7 +183,10 @@ jobs:
       VERSION: ${{ needs.setup.outputs.version }}
       PRERELEASE: ${{ needs.setup.outputs.prerelease }}
     steps:
+      # la storia intera e i tag: le note elencano i commit dall'ultima release
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8
         with:

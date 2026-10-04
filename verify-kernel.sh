@@ -36,13 +36,21 @@ TREE="${1:-./lakka-rf35h-build}"
 # pacchetto si installa per l'immagine), che ha lo stesso nome ma nessun
 # sorgente, e "install_pkg" viene dopo "build" nell'ordinamento: si prendeva
 # quello, e tutti i controlli davano MANCA su un kernel corretto.
-K="$(find "${TREE}" -maxdepth 3 -type d -path '*/build.*/build/linux-7.*' 2>/dev/null | sort -V | tail -1)"
+K="$(find "${TREE}" -maxdepth 3 -type d -path '*/build.*/build/linux-[0-9]*' 2>/dev/null | sort -V | tail -1)"
 [ -n "${K}" ] || {
 	echo "Non trovo il sorgente del kernel sotto ${TREE}." >&2
 	echo "Lo si vede solo dopo che la build ha scompattato il pacchetto linux." >&2
 	exit 2
 }
 echo "kernel: ${K}"
+# La versione che la build doveva usare: quella del package.mk (la riga
+# dell'overlay, integration/linux-rf35h.patch), in mancanza quella della
+# cartella del sorgente.
+KV="$(sed -n 's/^ *PKG_VERSION="\([0-9][0-9.]*\)" *# devaOS RF35H.*/\1/p' "${TREE}/packages/linux/package.mk" 2>/dev/null | head -1)"
+[ -n "${KV}" ] || KV="${K##*/linux-}"
+KPL="$(echo "${KV}" | cut -d. -f2)"
+KSL="$(echo "${KV}" | cut -d. -f3)"
+KSL="${KSL:-0}"
 echo
 
 fail=0
@@ -64,9 +72,10 @@ check "MMC_CAP2_WIFI_RK912" "${K}/include/linux/mmc/host.h"        "r-024 hack S
 # 7.2.7 originale (con la patch diventa due). L'assenza di r-025 la rileva il
 # controllo "riga vecchia rimossa" piu' sotto.
 check "DSI_PWR_UP, POWERUP" "${K}/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c" "r-025 fix MIPI"
-# La build deve aver usato davvero la 7.2.7, non un sorgente rimasto in cache.
-check "^PATCHLEVEL = 2$"   "${K}/Makefile"                          "kernel 7.2 (PATCHLEVEL)"
-check "^SUBLEVEL = 7$"     "${K}/Makefile"                          "kernel 7.2.7 (SUBLEVEL)"
+# La build deve aver usato davvero la versione del package.mk, non un
+# sorgente rimasto in cache.
+check "^PATCHLEVEL = ${KPL}$" "${K}/Makefile"                       "kernel ${KV} (PATCHLEVEL)"
+check "^SUBLEVEL = ${KSL}$"   "${K}/Makefile"                       "kernel ${KV} (SUBLEVEL)"
 # Porting alla 7.2: senza questi due il sorgente compila solo a meta'.
 check "host->mmc->caps2 & MMC_CAP2_WIFI_RK912" "${K}/drivers/mmc/host/dw_mmc.c" "r-024 porting dw_mmc (slot->host)"
 check "devm_drm_panel_alloc" "${K}/drivers/gpu/drm/panel/panel-generic-dsi.c"    "z-002 porting pannello 7.2"
