@@ -680,12 +680,15 @@ grep -q "^CONFIG_USB_CONFIGFS_RNDIS=y" "${RK}/linux/linux.aarch64.conf" || die "
 grep -q "^CONFIG_UDHCPD=y" "${WORKDIR}/packages/sysutils/busybox/config/busybox-target.conf" || die "busybox senza udhcpd"
 grep -q "zt,usb" "${WORKDIR}/packages/network/connman/package.mk" || die "connman senza blacklist usb"
 printf '  %-34s ok\n' "porta USB-C: gadget, dhcp, blacklist"
-grep -q 'PROJECT_CFLAGS="-O2"' "${RK}/options" || die "manca PROJECT_CFLAGS=-O2 nelle options"
+# PROJECT_CFLAGS con un -O rompe glibc: lo toglie dai suoi CFLAGS insieme al
+# proprio -O2 ("glibc cannot be compiled without optimization"). Il -O2 lo
+# mette gia' LibreELEC a ogni pacchetto (CFLAGS_OPTIM_DEFAULT).
+! grep -qE '^[^#]*PROJECT_CFLAGS="[^"]*-O' "${RK}/options" || die "PROJECT_CFLAGS con -O nelle options: glibc non compilerebbe"
 grep -q 'SYSTEM_SIZE=3072' "${RK}/options" || die "manca SYSTEM_SIZE=3072 nelle options"
 # il flag della patch di Mesa c'e', ma questa LibreELEC non lo conosce: per ora
 # l'LTO non e' attivo (docs/diario.md, correzione del 3/10); si controlla solo la patch
 grep -q 'PKG_BUILD_FLAGS="+lto-parallel"' "${WORKDIR}/packages/graphics/mesa/package.mk" || die "manca la patch LTO di Mesa"
-printf "  %-34s ok\n" "-O2, SYSTEM 3 GB, LTO Mesa inerte"
+printf "  %-34s ok\n" "SYSTEM 3 GB, glibc ottimizzata, LTO Mesa inerte"
 grep -q 'WIRELESS_DAEMON="wpa_supplicant"' "${RK}/options" \
 	|| die "WIRELESS_DAEMON non impostato: con iwd la UI non vede reti"
 grep -q 'WIRELESS_DAEMON.*wpa_supplicant' "${WORKDIR}/packages/network/iwd/package.mk" \

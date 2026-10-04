@@ -1,4 +1,4 @@
-Subject: RK3326 options per l\x27RF35H: package del device, wpa_supplicant, cmdline seriale, -O2, SYSTEM da 3 GB
+Subject: RK3326 options per l\x27RF35H: package del device, wpa_supplicant, cmdline seriale, SYSTEM da 3 GB
 
 ---
 --- a/projects/Rockchip/devices/RK3326/options
@@ -57,7 +57,7 @@ Subject: RK3326 options per l\x27RF35H: package del device, wpa_supplicant, cmdl
  
    # additional Firmware to use (dvb-firmware, misc-firmware, wlan-firmware)
    # Space separated list is supported,
-@@ -59,6 +104,57 @@
+@@ -59,6 +104,48 @@
  
    # bootargs for release
      EXTRA_CMDLINE="console=tty0 net.iframes=0 fbcon=rotate:3"
@@ -87,21 +87,12 @@ Subject: RK3326 options per l\x27RF35H: package del device, wpa_supplicant, cmdl
 +      EXTRA_CMDLINE="quiet console=tty0 console=ttyS1,1500000n8 net.ifnames=0"
 +    fi
 +
-+  # devaOS RF35H: ottimizza per velocita', non per dimensione.
-+  #
-+  # config/optimize mette GCC_OPTIM="-Os" per tutto lo userspace: giusto per un
-+  # media center, sbagliato per un emulatore. PROJECT_CFLAGS viene appeso DOPO
-+  # GCC_OPTIM in TARGET_CFLAGS e gcc tiene l'ultimo -O: cosi' tutto quello che
-+  # prende i flag dall'ambiente senza aggiungere i propri passa a -O2. Chi
-+  # conta davvero e' Mesa (meson --buildtype=plain: solo flag dell'ambiente),
-+  # cioe' il driver Panfrost in userspace; poi SDL2, alsa-lib, libpng,
-+  # freetype. RetroArch forza gia' -O2 da solo e i core lo aggiungono nei loro
-+  # Makefile: per loro non cambia niente.
-+  # Il kernel e' un'altra storia: CC_OPTIMIZE_FOR_PERFORMANCE=y c'e' gia', e
-+  # con GCC non esiste LTO (serve Clang). Non si tocca.
-+    if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
-+      PROJECT_CFLAGS="-O2"
-+    fi
++  # devaOS RF35H: niente PROJECT_CFLAGS="-O2". In questo LibreELEC ogni
++  # pacchetto prende gia' -O2 (CFLAGS_OPTIM_DEFAULT, aggiunto dopo
++  # PROJECT_CFLAGS: vince quello), -Os solo chi chiede +size (qui gdb, wsdd2,
++  # busybox). E glibc toglie dai suoi CFLAGS il testo di PROJECT_CFLAGS: con
++  # "-O2" anche il proprio -O2, e senza ottimizzazione non compila ("glibc
++  # cannot be compiled without optimization", prima build pulita in CI).
 +
 +  # devaOS RF35H: partizione SYSTEM da 3 GB invece di 2. Lakka ci fa stare i
 +  # suoi ~120 core in 2 GB, e con -O2 la base cresce di 60-80 MB: ci starebbe

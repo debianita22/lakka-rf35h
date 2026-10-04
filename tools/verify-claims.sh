@@ -236,6 +236,7 @@ chk "aggiornamento: re3 conservato in /storage"  "grep -q '^preserve_re3()' '$U'
 chk "menu: System Update, ultima voce"          "grep -q 'action_ok_rf35h_update' '$M1003' && grep -q 'action_bind_sublabel_rf35h_update' '$M1003' && grep -A1 'MENU_ENUM_LABEL_RF35H_UPDATE, *PARSE_ACTION' '$M1003' | tail -1 | grep -q '};'"
 chk "menu: Update Lakka nascosto sull'RF35H"    "grep -q '!rf35h_present() && menu_entries_append' '$M1003'"
 chk "lakka-update da ssh passa a rf35h-update"  "grep -q 'exec /usr/bin/rf35h-update run' '${W}/packages/lakka/lakka_tools/lakka_update/sources/lakka-update.sh'"
+chk "glibc: nessun -O in PROJECT_CFLAGS"          "! grep -qE '^[^#]*PROJECT_CFLAGS=\"[^\"]*-O' '${W}/projects/Rockchip/devices/RK3326/options'"
 chk "versione della release in os-release"      "grep -q 'CUSTOM_VERSION=\"\${RF35H_VERSION}\"' '$O/build-lakka-rf35h.sh'"
 chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '$O/tools/ci-build.sh'"
 chk "CI: un solo job con contents: write"       "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 1 ]"

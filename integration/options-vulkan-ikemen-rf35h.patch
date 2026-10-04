@@ -3,7 +3,7 @@ Subject: RK3326 options per l'RF35H: Vulkan (PanVK) accanto a OpenGL ES, IKEMEN 
 ---
 --- a/projects/Rockchip/devices/RK3326/options
 +++ b/projects/Rockchip/devices/RK3326/options
-@@ -155,6 +155,56 @@
+@@ -146,6 +146,56 @@
      if [ "${UBOOT_SYSTEM}" = "rf35h" ]; then
        SYSTEM_SIZE=3072
      fi

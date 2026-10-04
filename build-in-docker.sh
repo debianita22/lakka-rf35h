@@ -177,11 +177,15 @@ else
 	set -- ./lakka-rf35h/build-lakka-rf35h.sh --skip-deps "$@"
 fi
 set -- -w /work "${IMAGE}" "$@"
-if [ -n "${RE3_PGO:-}" ]; then set -- -e RE3_PGO "$@"; fi
-# La versione dell'immagine e il repository degli aggiornamenti
-# (/etc/rf35h-release, rf35h-update): li passa la CI, a mano non servono.
-if [ -n "${RF35H_VERSION:-}" ]; then set -- -e RF35H_VERSION "$@"; fi
-if [ -n "${RF35H_UPDATE_REPO:-}" ]; then set -- -e RF35H_UPDATE_REPO "$@"; fi
+# Variabili dell'host che arrivano alla build, solo se definite: RE3_PGO; la
+# versione dell'immagine e il repository degli aggiornamenti (os-release,
+# rf35h-update); AUTOREMOVE (cancella le cartelle dei pacchetti finiti) e le
+# due di ccache per una cache riusabile fra build da zero. Le mette la CI; a
+# mano non servono. CCACHE_DIR no: un percorso dell'host qui non esiste, e
+# LibreELEC lo prenderebbe al posto della sua cache nell'albero.
+for v in RE3_PGO RF35H_VERSION RF35H_UPDATE_REPO AUTOREMOVE CCACHE_COMPILERCHECK CCACHE_SLOPPINESS; do
+	if printenv "${v}" >/dev/null 2>&1; then set -- -e "${v}" "$@"; fi
+done
 if [ -n "${RE3}" ]; then set -- -v "${RE3}:/re3:ro,z" "$@"; fi
 if [ -n "${DEVA}" ]; then set -- -v "${DEVA}:/deva:ro,z" "$@"; fi
 # Un nome al container, per fermarlo da fuori: la CI lo fa allo scadere del

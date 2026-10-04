@@ -3180,7 +3180,7 @@ Cosa fa l'overlay:
 
 | cosa | come | dove |
 |---|---|---|
-| `-O2` per tutto lo userspace | `PROJECT_CFLAGS="-O2"`, appeso dopo `GCC_OPTIM`: gcc tiene l'ultimo `-O` | options-rf35h.patch |
+| `-O2` per tutto lo userspace | ~~`PROJECT_CFLAGS="-O2"`~~ tolto il 4/10: in questo LibreELEC il `-O2` c'e' gia' (vedi sotto) | options-rf35h.patch |
 | LTO su Mesa | `PKG_BUILD_FLAGS="+lto-parallel"` (Fedora e Arch la costruiscono cosi' da anni) | mesa-lto-rf35h.patch |
 | LTO sui core | `+lto-parallel` su snes9x2010, gambatte, fceumm, genesis_plus_gx, mgba: C/C++ puro, niente dynarec | apply.sh |
 | RetroArch | resta `-O2` senza LTO: guadagno marginale, e un frontend rotto e' un device rotto | — |
@@ -4952,3 +4952,34 @@ il servizio attivo diventa "interrupted: select to resume". Italiano:
   nell'immagine serve `usr/share/rf35h/update-repo`, e con `RF35H_VERSION`
   (la CI) la `VERSION` di os-release deve essere quella. test-verify-tools:
   36 prove (4 nuove).
+
+## Prima build pulita in CI: glibc senza ottimizzazione (4/10/2026)
+
+La prima build di prova (run #3) si e' fermata dopo 34 minuti e 83 passi su
+340, a `glibc:target`: `#error "glibc cannot be compiled without
+optimization"`. Il package.mk di glibc normalizza ogni `-O` a `-O2` e poi
+toglie dai suoi CFLAGS il testo di `PROJECT_CFLAGS`; con il nostro
+`PROJECT_CFLAGS="-O2"` toglieva anche il proprio `-O2`, e glibc senza
+ottimizzazione non compila. A mano non si e' mai visto: l'hash di un
+pacchetto copre i suoi file e `PKG_STAMP`, non le options del device, quindi
+glibc, costruita prima che arrivasse `PROJECT_CFLAGS`, non e' mai stata
+ricostruita. Una build da zero lo trova subito.
+
+E `PROJECT_CFLAGS="-O2"` non serviva: in questo LibreELEC `setup_toolchain`
+aggiunge a ogni pacchetto `CFLAGS_OPTIM_DEFAULT` (`-O2 -fomit-frame-pointer`),
+dopo `PROJECT_CFLAGS`, e vince l'ultimo `-O`; `-Os` lo prende solo chi chiede
+`+size` (nel piano gdb, wsdd2 e busybox). Il commento delle options parlava
+di un `GCC_OPTIM="-Os"` per tutto lo userspace che qui non c'e' piu'. Tolto:
+nessun pacchetto cambia flag, e glibc compila. Al suo posto un commento, un
+controllo nel build script e uno in verify-claims (163 verifiche) contro un
+`-O` in `PROJECT_CFLAGS`. `options-vulkan-ikemen-rf35h.patch` rigenerata
+sulle righe nuove (applicava con 9 righe di offset).
+
+Nella stessa build: `AUTOREMOVE` e le due variabili di ccache, definite nel
+workflow, non arrivavano nel container (`build-in-docker.sh` passava solo
+`RF35H_VERSION` e `RF35H_UPDATE_REPO`). Ora una lista sola, solo se definite;
+`CCACHE_DIR` mai (un percorso dell'host nel container non esiste).
+
+Misure utili dalla stessa build: il runner ha un disco solo, 122 GB liberi
+dopo la pulizia (niente `/mnt`), 4 CPU e 15 GB; 83 passi in 34 minuti (la
+toolchain); albero di 20 GB a quel punto.
