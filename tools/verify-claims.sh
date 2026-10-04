@@ -325,6 +325,32 @@ chk "README: patch integrazione" "[ \"\$(readme_n \"patch all'albero\")\" = \"\$
 chk "README: patch RetroArch"   "[ \"\$(readme_n 'patch a RetroArch')\" = \"\$(ls '$O/patches/retroarch' | wc -l)\" ]"
 chk "README: script rf35h-utils" "[ \"\$(readme_n 'script e')\" = \"\$(ls '$P/scripts' | wc -l)\" ]"
 
+echo "== aggiornamento e strumenti per la card: le correzioni dopo la v1.0.0"
+# rf35h-update: (1) la batteria si guardava solo scaricando, e il .tar
+# verificato, gia' in /storage/.update, lo installava qualunque avvio; (2)
+# un'installazione fallita tornava in silenzio a "installed: <la vecchia>"; (3)
+# si installava qualunque ultima release diversa, anche piu' vecchia.
+# Strumenti per il PC: (4) rf35h-reflash-system lasciava in extlinux.conf
+# l'UUID di /storage dell'immagine, e con un'altra build /storage non si
+# trovava; (5) nessun controllo sul disco; (6) nessun modo di rimettere solo il
+# loader; (7) rf35h-rescue cancellava l'autostart.sh dell'utente.
+CT="$O/tools"
+# in cmd_install la batteria viene prima dello spostamento in .update
+upd_install_ok() {
+	local body
+	body="$(sed -n '/^cmd_install() {/,/^}/p' "$U")"
+	[ -n "${body}" ] || return 1
+	printf '%s\n' "${body}" | awk '/battery_check/ && !b { b = NR } index($0, "mv -f \"${f}\" \"${final}\"") { m = NR } END { exit !(b && m && b < m) }'
+}
+chk "rf35h-update: il .tar verificato aspetta fuori dalla vista dell'init" "grep -q '^STAGE=\"\${UPDATE_DIR}/.rf35h-staged\"' '$U' && grep -q 'target=\"\${STAGE}/\${U_TAR}\"' '$U'"
+chk "rf35h-update install: batteria, poi il .tar in .update" "upd_install_ok && grep -q 'install) cmd_install' '$U'"
+chk "rf35h-update boot: un'installazione fallita nel menu" "grep -q 'status \"error: install of \${m_ver} failed' '$U'"
+chk "rf35h-update: dall'ultima release solo in avanti" "grep -q '^version_newer()' '$U' && grep -q 'if ! explicit_source; then' '$U'"
+chk "reflash: extlinux.conf con l'UUID di /storage della card" "grep -qF 's/disk=UUID=\${IMG_UUID}/disk=UUID=\${CARD_UUID}/g' '$CT/rf35h-reflash-system.sh'"
+chk "reflash e rescue: controlli sul disco, card Lakka" "grep -q 'card_check \"\${DEV}\"' '$CT/rf35h-reflash-system.sh' && grep -q 'card_check \"\$DEV\"' '$CT/rf35h-rescue.sh' && grep -q 'LAKKA_DISK' '$CT/rf35h-card.sh'"
+chk "reflash --loader: il known-good verificato, a 32 KiB" "grep -q -- '--loader' '$CT/rf35h-reflash-system.sh' && grep -q 'sha256sum -c --quiet known-good.sha256' '$CT/rf35h-reflash-system.sh' && grep -q 'bs=32768 seek=1' '$CT/rf35h-reflash-system.sh'"
+chk "rescue: l'autostart.sh dell'utente torna al suo posto" "grep -q 'cp -p \"\$AS\" \"\$ASB\"' '$CT/rf35h-rescue.sh' && grep -q 'mv -f /storage/.config/autostart.sh.rf35h-rescue /storage/.config/autostart.sh' '$CT/rf35h-rescue.sh'"
+
 echo
 if [ "$bad" -eq 0 ]; then
 	echo "tutte le $n verifiche passano"
