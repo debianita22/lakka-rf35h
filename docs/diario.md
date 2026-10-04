@@ -5409,3 +5409,32 @@ accesa (anche in transfer e in sospensione, secondo il device tree); i task
 Wi-Fi di RetroArch (uscita durante una connessione fallita, salvataggi
 persi in quei 15 s, righe risolte per indice); "speakers" e' il device ALSA
 di default, cioe' card0, che con un audio USB all'avvio e' la USB.
+
+## v1.1.0-rc1 (4/10/2026)
+
+Pre-release dalla run #11 (`b3884fa`, Run workflow con version e
+prerelease), 340/340 in 120 minuti al primo tentativo, 34 core, nessuno
+escluso; albero di 22 GB (il sorgente del kernel ora resta). Pubblicata alle
+17:45 UTC come pre-release: `releases/latest` resta v1.0.0, le console non la
+vedono. Note di release con "Changes since v1.0.0" (i sei commit). Da qui:
+`rf35h-update` vero con `TAG=v1.1.0-rc1` in `update.conf` e VERSION=v1.0.0
+scarica 638 MB, controlla dimensione e sha256, "ready: v1.1.0-rc1"; nel tar il
+loader e' il known-good, i moduli sono in `lib/modules/7.2.9` (v1.0.0:
+7.2.7).
+
+**L'LTO arriva davvero?** Dimensioni dei `.so` nel SYSTEM, v1.0.0 contro rc1:
+- cambiano 14 dei 19 core: cap32, crocods, fceumm (-1,2 MB), gambatte (-1,5
+  MB), gearsystem, genesis_plus_gx, mednafen_ngp, mednafen_pce_fast (-1,0
+  MB), mednafen_pce (-1,1 MB), nestopia (-1,3 MB), race, snes9x2005,
+  stella2014, tgbdual. E Mesa: libgallium -178 KB, libvulkan_panfrost -698 KB;
+- identici snes9x, snes9x2010, stella, mgba: i loro build file l'LTO lo
+  mettevano gia' da soli (`LTO ?= -flto` nei Makefile per `platform=unix`,
+  `BUILD_LTO` acceso in Release nel CMakeLists di mGBA), quindi ce l'avevano
+  anche nella v1.0.0;
+- identico sameboy, per un altro motivo: il target `libretro` del Makefile di
+  SameBoy chiama `make -C libretro` con `CFLAGS="$(WARNINGS)"`, che butta via
+  tutti i CFLAGS di LibreELEC: niente LTO e nemmeno `-mtune=cortex-a35`
+  (resta il `-O2` del suo Makefile). Si sistema costruendo direttamente
+  `-C libretro` (BOOTROMS_DIR e BIN come li passa il target): da fare dopo la
+  prova della rc1, con una build di prova.
+- invariati, come previsto, i core senza LTO (dynarec, giganti, giochi).
