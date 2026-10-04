@@ -25,8 +25,8 @@ Lakka for the XiFan RF35H, ${v}.
 
 **Update from the console**: *Settings > Device Settings > System Update*
 downloads this release, checks its SHA-256 and asks to restart; the update
-is applied while the console starts. Or copy the \`.tar\` to the \`Update\`
-network share (\`/storage/.update/\`, also over SSH) and restart.
+is applied while the console starts. Or copy the \`.tar\` to
+\`/storage/.update/\` over SSH (with the charger connected) and restart.
 
 **First install** (replace \`sdX\`): \`zcat ${img} | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress\`,
 or \`flash-sd.sh\` from the repository.

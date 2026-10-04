@@ -185,13 +185,13 @@ at boot.
 
 | Entry | Values (default) | Notes |
 |---|---|---|
-| Sleep Timer | 0 (off), 5 to 60 minutes (10) | suspend after this many minutes without input |
+| Sleep Timer | 0 (off), 5 to 60 minutes (10) | suspend after this many minutes without input; postponed while System Update or the scraper runs, or the USB-C port is in transfer mode |
 | Screen Brightness | 5 to 100 % (60) | also L1 + Volume, from anywhere |
 | LED Settings > Joystick LEDs | the 17 modes of the ring controller (colours, `flow`, breathing, `off`), plus `battery`, `charging`, `alert`, `rainbow`, `strobe` (`blue`) | the rings turn off while the console sleeps |
 | LED Settings > Status LEDs | `charge`, `battery`, `heartbeat`, `activity`, `red`, `blue`, `both`, `off` (`charge`) | the red and blue LEDs |
 | LED Settings > LED Effect Speed | `slow`, `normal`, `fast` (`normal`) | for `rainbow` and `strobe` |
 | USB-C Port | `host`, `transfer` (`host`) | see [USB-C port](#usb-c-port) |
-| Audio Output | `speakers`, `usb` (`speakers`) | `speakers` covers the headphone jack too; `usb` is USB-C headphones or a USB DAC, in host mode |
+| Audio Output | `speakers`, `usb` (`speakers`) | `speakers` covers the headphone jack too; `usb` is USB-C headphones or a USB DAC, in host mode, remembered by name: if it is missing at startup, sound goes back to the speakers |
 | Speaker Volume | 0 to 100 % (28) | sound chip level before the amplifier, separate from RetroArch's volume |
 | Rumble | on/off (on) | no intensity control: *Rumble Gain* has no effect on this device |
 | Compressed RAM (zram) | on/off (on) | half the RAM as LZ4-compressed swap; keeps large cores from running out of memory |
@@ -209,11 +209,15 @@ Lakka's *Update Lakka* entry.
 | Games | `ROMs` | `/storage/roms` |
 | BIOS files | `System` | `/storage/system` |
 | Saves / save states | `Savefiles` / `Savestates` | `/storage/savefiles` / `/storage/savestates` |
-| Update files | `Update` | `/storage/.update` |
 
 From Windows the shares are at `\\LAKKA\`. After copying games, create the
 playlists with *Import Content > Scan Directory*. USB drives, NTFS included,
 are mounted under `/media`.
+
+The shares have no password, and anyone on the same network reaches them as
+root. So the configuration (`/storage/.config`), the services
+(`/storage/.cache`) and the update folder (`/storage/.update`) are not
+shared: use SSH for those. `Cores` and `Playlists` are read-only.
 
 ### Cores
 
@@ -281,7 +285,8 @@ The panel runs at 60 Hz (640x480).
 - **Access point**: *Settings > Services > Wi-Fi Access Point*. Each console
   gets its own random 12-character password, shown on screen for 10 seconds
   when the access point starts; `rf35h-ap status` shows it over SSH.
-- **Samba**: on by default, *Settings > Services > Samba*.
+- **Samba**: on by default, *Settings > Services > Samba*. No password: see
+  [Games and BIOS files](#games-and-bios-files) for what is shared.
 
 #### SSH
 
@@ -307,8 +312,9 @@ card's second partition, from a PC.
   controllers), USB drives, keyboards, USB-C headphones and DACs.
 - **transfer**: the console shows up on the PC as a USB network card (RNDIS
   for Windows, ECM for Linux and macOS). It takes 192.168.7.1 and gives the PC
-  an address by DHCP; Samba is switched on for the session if it was off. Then
-  open `\\lakka.local` or `smb://192.168.7.1`, or `ssh root@192.168.7.1`.
+  an address by DHCP; Samba is switched on for the session if it was off, and
+  off again when the port goes back to host, restarts included. Then open
+  `\\lakka.local` or `smb://192.168.7.1`, or `ssh root@192.168.7.1`.
 
 Switch in *Device Settings > USB-C Port*, or `rf35h-usb host|transfer` over
 SSH.
@@ -382,7 +388,7 @@ Over SSH, as root. Their messages are in Italian.
 | Command | Does |
 |---|---|
 | `rf35h-diag [--full]` | state of everything the port relies on; `--full` adds raw dumps |
-| `rf35h-update run\|check\|status\|cancel` | system update (see [Updating](#updating)) |
+| `rf35h-update run\|install\|check\|status\|cancel` | system update (see [Updating](#updating)) |
 | `rf35h-usb [host\|transfer]` | USB-C mode; without an argument, the current one |
 | `rf35h-ap on\|off\|status` | Wi-Fi access point; `status` shows its name and password |
 | `rf35h-brightness [N\|+N\|-N]` | backlight in %; without an argument, the current value |
@@ -402,20 +408,26 @@ Over SSH, as root. Their messages are in Italian.
 
 *Settings > Device Settings > System Update*:
 
-1. checks the latest release (pre-releases excluded);
-2. downloads its `.tar` to `/storage/.update` in the background, resuming
-   after interruptions; selecting the entry again stops the download, and
-   once more resumes it;
-3. checks size and SHA-256 against the release's `update.txt`;
-4. shows *ready*: select the entry again to restart. The update is installed
-   during boot, with the progress on screen.
+1. checks the latest release (pre-releases excluded), and goes only forward:
+   a latest release older than the installed version is ignored;
+2. downloads its `.tar` in the background, resuming after interruptions;
+   selecting the entry again stops the download, and once more resumes it;
+3. checks size and SHA-256 against the release's `update.txt`, and keeps the
+   file aside in `/storage/.update/.rf35h-staged`, where a restart does not
+   install it;
+4. shows *ready*: select the entry again. Battery (30 % or the charger) and
+   free space are checked once more; then the console restarts and installs
+   the update during boot, with the progress on screen. If the check fails,
+   the entry shows why and nothing restarts.
 
 It needs the network, a correct clock (keep *Network Time* on: the download
 is HTTPS), 30 % battery or the charger, and free space for twice the `.tar`
-plus 100 MB. The same over SSH:
+plus 100 MB. If an installation fails, the entry says so; selecting it
+downloads the update again. The same over SSH:
 
 ```sh
 rf35h-update run       # check and download
+rf35h-update install && reboot   # battery and space check, then install at boot
 rf35h-update check     # exit 0: update available, 1: none, 2: could not check
 rf35h-update status    # the status line the menu shows
 rf35h-update cancel    # remove a downloaded or partial update
@@ -436,7 +448,8 @@ on the same line:
 
 ### By hand
 
-Copy the `.tar` to the `Update` share (`/storage/.update`) and restart:
+Copy the `.tar` to `/storage/.update` over SSH and restart. Nothing checks the
+battery here: connect the charger.
 
 ```sh
 scp Lakka-RK3326.aarch64-Next-<version>-rf35h.tar root@<console-ip>:/storage/.update/
@@ -474,7 +487,8 @@ it drives the stick LED controller.
 |---|---|
 | Black screen at boot | Read `boot.log` from a PC. If it is missing, boot stopped before the system started: use the serial console. |
 | `/storage` stays at about 25 MB | The first-boot expansion did not run. From a PC, card unmounted: `sudo parted -s -f /dev/sdX resizepart 2 100%`, `sudo e2fsck -f -p /dev/sdX2`, `sudo resize2fs /dev/sdX2` (data is kept). |
-| Console does not start after an update | `sudo sh tools/rf35h-reflash-system.sh <image>.img.gz /dev/sdX` rewrites partition 1 from an image and removes the failed update; ROMs, saves and settings stay. |
+| Console does not start after an update | `sudo sh tools/rf35h-reflash-system.sh <image>.img.gz /dev/sdX` rewrites partition 1 from an image of this port (any release, newer ones too) and removes the failed update; ROMs, saves and settings stay. It needs `mtools`, `gzip` and `blkid`, and about 700 MB in `$TMPDIR`. |
+| Nothing on screen after installing a generic Lakka RK3326 update or image | `sudo sh tools/rf35h-reflash-system.sh --loader /dev/sdX` writes this port's boot loader back; then rewrite partition 1 with the line above. |
 | No network access to the console | `sudo sh tools/rf35h-rescue.sh /dev/sdX "<ssid>" "<password>"` from a PC (details below). |
 | Buttons wrong or missing | `cat /proc/bus/input/devices \| grep -A8 retrogame_joypad`: the `B: KEY=` line shows the buttons the driver reports. The mapping is in `autoconfig/retrogame_joypad.cfg`. |
 | No Wi-Fi networks | `ls /lib/firmware/rk915_*`, then `dmesg \| grep -i rk915`. |
@@ -483,15 +497,19 @@ it drives the stick LED controller.
 | Stick LEDs off | `cat /sys/class/leds/joyled-power/brightness` must be `1`; then `rf35h-led blue`. |
 | Console hangs on resume | Hold the power key for 5 seconds: it powers off regardless. |
 
+Both tools check that the device is a whole, removable disk holding a Lakka
+card (labels `LAKKA` and `LAKKA_DISK`); for a card reader that does not
+report itself as removable, prefix the command with `FORCE=yes`.
+
 `tools/rf35h-rescue.sh`, run on a PC with the card inserted:
 
 - copies the existing logs to the PC;
 - adds the Wi-Fi network as a connman provisioning file, valid whatever the
   console's MAC address, so the console connects at the next boot;
 - enables SSH;
-- installs a one-shot `/storage/.config/autostart.sh` (replacing yours, if
-  any) that saves the journal and a verbose RetroArch run to
-  `/storage/rescue/` 45 seconds after boot.
+- installs a one-shot `/storage/.config/autostart.sh` that saves the journal
+  and a verbose RetroArch run to `/storage/rescue/` 45 seconds after boot,
+  then puts your own `autostart.sh`, if any, back in place.
 
 The menu cannot forget a network added this way; once the console is
 reachable, remove it over SSH with
@@ -747,8 +765,14 @@ Workflows in [`.github/workflows`](../.github/workflows):
 - **Release**: `git tag v1.0.0 && git push origin v1.0.0`, or *Run workflow*
   with a version (the tag is created at the end; from a branch other than the
   default one, only as a pre-release).
-- **Pre-release**: tags with a dash (`v1.1.0-rc1`) or *Run workflow* with
-  *prerelease*. Consoles ignore pre-releases unless `update.conf` names them.
+- **Pre-release**: any version with a dash (`v1.1.0-rc1`), or *Run
+  workflow* with *prerelease*. Consoles ignore pre-releases unless
+  `update.conf` names them. A tested pre-release becomes the latest release
+  without a rebuild:
+  `gh release edit v1.1.0 --repo <owner>/<repo> --prerelease=false --latest`.
+- **Latest**: a release becomes *latest* only if its version is higher than
+  the current latest one, and a tag of a non-pre-release version must be on a
+  commit of the default branch.
 - **Test build**: *Run workflow* without a version, or a push to a
   `ci-test/...` branch. The image stays in the run's artifacts for 14 days.
 - **Resume**: *Run workflow* with `resume_run` set to the ID of a failed test
@@ -758,7 +782,11 @@ Workflows in [`.github/workflows`](../.github/workflows):
 
 A release contains the `.img.gz`, the `.tar`, `update.txt` (version, file
 name, URL, SHA-256 and size of the `.tar`) and `SHA256SUMS`. Before
-publishing, CI checks that re3 is not in the image.
+publishing, CI checks the downloaded files again: no re3, no empty or broken
+core, and every core of the default set and every enabled game present. A
+build that lost one (CI builds with `--keep-going`) is not published, unless
+*Run workflow* is started with *allow_incomplete*: the notes then list what
+is missing.
 
 In a fork, CI sets `RF35H_UPDATE_REPO` to the fork, so its images update from
 the fork's own releases.

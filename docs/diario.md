@@ -5323,3 +5323,89 @@ server scelto; il ripiego e' connman.
 Provato `rf35h-ntp` con busybox sh e un `systemctl` finto: il predefinito
 finisce nello stato e in `NTP=`, `server time.google.com` lo sostituisce, una
 scelta `it.pool.ntp.org` gia' salvata resta.
+
+## Revisione prima della v1.1.0: cinque revisori, le correzioni (4/10/2026)
+
+Chiesto dall'utente: "prepara una release stabile, correggi i bug che
+stiamo sottovalutando". Cinque revisioni indipendenti, in parallelo e in
+sola lettura (aggiornamento e avvio, sicurezza di rete, patch di RetroArch,
+script e device tree, CI e release), poi quattro correzioni in parallelo su
+worktree separati, unite qui. Ogni difetto e' stato riprodotto prima di
+correggerlo, e ogni controllo nuovo di verify-claims fallisce sul codice
+vecchio.
+
+**Sicurezza.**
+- Samba: in Lakka l'ospite senza password e' root, Samba e' acceso e non c'e'
+  firewall. Chiunque nella stessa Wi-Fi scriveva in `/storage/.config`
+  (`autostart.sh` gira come root all'avvio), in `/storage/.cache` (accende
+  SSH, legge la password dell'AP) e in `/storage/.update` (un `.tar` li' si
+  installa al riavvio), e poteva sostituire un core o far puntare una
+  playlist a un `.so`. Scelta dell'utente: via Configfiles, Services e
+  Update, Cores e Playlists in sola lettura (`samba-shares-rf35h.patch`;
+  `testparm` sul file dopo le sostituzioni di `samba-config`).
+- Samba riacceso per sempre dopo il modo transfer della USB-C, se RetroArch
+  ripartiva con il flag messo da parte (1007).
+- 1007: i toggle toccano i file prima del fork, senza troncare, e systemctl
+  parte con un doppio fork (niente zombie, niente gare).
+- Scraper: `db_name` di una playlist usato come cartella senza controlli
+  (scriveva fuori da `thumbnails`); `scraper.conf` ora 0600.
+- `rf35h-i2c`: ogni scrittura all'RK817 (anche tensioni e carica) vuole
+  `RF35H_I2C_FORCE=1`, e gli argomenti sono controllati.
+
+**Aggiornamenti e card.**
+- La batteria si guardava solo scaricando: il `.tar` pronto stava gia' in
+  `.update` e qualunque riavvio lo installava. Ora aspetta in
+  `.update/.rf35h-staged` (l'init non lo vede e non lo cancella) e
+  `rf35h-update install`, chiamato dal menu, ricontrolla batteria e spazio
+  prima di metterlo in `.update`.
+- Un'installazione fallita ora si vede nel menu; dall'ultima release si va
+  solo avanti (con `TAG`/`URL` in `update.conf` resta possibile tornare
+  indietro).
+- `rf35h-reflash-system.sh` con un'immagine diversa da quella del primo
+  flash lasciava in `extlinux.conf` l'UUID di `/storage` dell'immagine:
+  console ferma. Ora prende quello vero della card, controlla il disco come
+  `flash-sd.sh` e ha `--loader` per rimettere solo il boot loader.
+  `rf35h-rescue.sh` rimette l'`autostart.sh` dell'utente.
+
+**Console.**
+- Volume dell'altoparlante sulla scheda sbagliata con un audio USB collegato
+  all'avvio (card0): ora per id, `rk817ext`.
+- Il colore dei LED salvato come "off" a ogni spegnimento.
+- `config.ini` di IKEMEN svuotato con `/storage` pieno (l'awk di busybox
+  esce 0 sugli errori di scrittura).
+- La diagnostica d'avvio rallentava RetroArch; la sospensione per
+  inattivita' interrompeva download, scraper e trasferimenti USB; i crash log
+  si fermavano dopo una correzione all'indietro dell'orologio.
+- Il link `invocation:` di systemd e' un symlink al suo ID, che come percorso
+  non esiste: `path_is_valid()` (stat) e `[ -e ]` lo davano sempre assente.
+  Scraper e System Update non si fermavano dalla loro voce, l'ora di rete
+  risultava spenta, gli script dei LED non vedevano rf35h-ledd. Ora lstat e
+  `-L`.
+
+**Menu.** Valori vecchi subito dopo un cambio a tendina; menu fermo fino a
+10-15 s fermando scraper o aggiornamento; uscita audio "usb" salvata per
+indice (ora per nome, e senza la scheda si torna agli altoparlanti);
+password Wi-Fi di 33-63 caratteri troncate; piu' quattro irrobustimenti
+(fgets, fsync della cartella, un buffer della CPU, gli array rf35h nel
+caricamento della config).
+
+**CI e release.**
+- Il controllo di re3 non poteva mai scattare: `unsquashfs -l | grep -q`
+  con pipefail, SIGPIPE.
+- Una build che aveva perso core per `--keep-going` diventava la release che
+  tutte le console scaricano: ora la release si ferma (salvo
+  `allow_incomplete`), con la mappa pacchetto -> core presa dall'albero.
+- Core di 0 byte o non ELF fermano l'immagine; i pacchetti interrotti a fine
+  parte si rifanno da zero nella parte dopo.
+- Un trattino vuol dire sempre pre-release; un tag non pre-release deve stare
+  sul ramo principale; "latest" solo alla versione piu' alta.
+
+Provato: `tools/ci-check.sh` (shellcheck su 51 script; test-ci-build 61,
+card-tools 34, ikemen 37, ra-guard 9, update 73, verify-tools 38); la serie
+di RetroArch dal sorgente pulito, nostre a fuzz 0, 99 e 999 come prima;
+1003 e 1004 rigenerate identiche; i file toccati compilano con `HAVE_LAKKA`
+senza warning nuovi. Restano aperti, da provare sul device: VBUS sempre
+accesa (anche in transfer e in sospensione, secondo il device tree); i task
+Wi-Fi di RetroArch (uscita durante una connessione fallita, salvataggi
+persi in quei 15 s, righe risolte per indice); "speakers" e' il device ALSA
+di default, cioe' card0, che con un audio USB all'avvio e' la USB.
