@@ -891,9 +891,22 @@ while : ; do
 		grep -a "FAILURE" "${LOG}" | tail -3 | sed 's/^/    /' >&2 || true
 		break
 	fi
+	# Il log del THREAD contiene solo questo pacchetto; quello complessivo
+	# contiene l'intera build ed e' fuorviante (ci si legge l'errore di un
+	# altro core e si insegue la pista sbagliata). I log dei thread sono
+	# numerati e la build successiva li sovrascrive, quindi si copiano subito,
+	# per ogni pacchetto: anche per uno di sistema, che ferma la build.
+	TLOG="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${LOG}" | tail -1)"
+	if [ -n "${TLOG}" ] && [ -r "${TLOG}" ]; then
+		cp -f "${TLOG}" "${LOG%.log}-${PKG}-fallito.log"
+	else
+		# senza log del thread si ripiega sulla coda di quello complessivo
+		tail -400 "${LOG}" > "${LOG%.log}-${PKG}-fallito.log" 2>/dev/null || true
+	fi
 	EXTRA="$(extra_of "${PKG}")"
 	if [ -z "${EXTRA}" ] && ! is_core "${PKG}"; then
 		warn "${PKG} non e' un core libretro ne' un pezzo di un gioco, ma un pacchetto di sistema: mi fermo"
+		warn "il suo log: $(hp "${LOG%.log}-${PKG}-fallito.log")"
 		case "${PKG}" in
 			openal-soft|mpg123)
 				warn "serve a GTA SA e a GTA III (re3): --no-gtasa --no-re3 fanno l'immagine senza, intanto" ;;
@@ -933,17 +946,6 @@ while : ; do
 		SKIP_CORES="${SKIP_CORES} ${PKG}"
 	fi
 	DROPPED="${DROPPED} ${PKG}"
-	# Il log del THREAD contiene solo questo pacchetto; quello complessivo
-	# contiene l'intera build ed e' fuorviante (ci si legge l'errore di un
-	# altro core e si insegue la pista sbagliata). I log dei thread sono
-	# numerati e la build successiva li sovrascrive, quindi si copiano subito.
-	TLOG="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${LOG}" | tail -1)"
-	if [ -n "${TLOG}" ] && [ -r "${TLOG}" ]; then
-		cp -f "${TLOG}" "${LOG%.log}-${PKG}-fallito.log"
-	else
-		# senza log del thread si ripiega sulla coda di quello complessivo
-		tail -400 "${LOG}" > "${LOG%.log}-${PKG}-fallito.log" 2>/dev/null || true
-	fi
 done
 
 # Resoconto dei core saltati: a fine build e' l'unica cosa che si ricorda.

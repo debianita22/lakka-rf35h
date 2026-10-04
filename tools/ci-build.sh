@@ -107,36 +107,54 @@ cmd_prepare() {
 cmd_build() {
 	: "${W:?}" "${JOB_START:?}" "${BUILD_MINUTES:?}" "${RF35H_CONTAINER:?}"
 	cd "${W}"
-	local deadline now budget rc result
+	local deadline now budget rc result try=1
 	deadline=$(( JOB_START + BUILD_MINUTES * 60 ))
 	now="$(date +%s)"
-	budget=$(( deadline - now ))
-	if [ "${budget}" -lt 1200 ]; then
-		echo "meno di 20 minuti per la build: passo lo stato alla parte successiva"
-		out "result=continue"
-		return 0
-	fi
-	say "Build: $(( budget / 60 )) minuti a disposizione"
-	# Nel log delle actions solo l'avanzamento (il log completo, centinaia di
-	# MB, lo scrive build-lakka-rf35h.sh nell'albero e finisce negli artifact).
-	set +e
-	timeout --signal=TERM --kill-after=30 "${budget}" \
-		./lakka-rf35h/build-in-docker.sh --keep-going --jobs 4 --pkg-jobs 2 2>&1 \
-		| grep --line-buffered -aE '^\[[0-9]+/[0-9]+\] \[(INIT|DONE|FAIL|ACTV|IDLE)|==>|\[!\]|\[x\]|FAILURE|ERROR|NON conforme|Conforme'
-	rc=${PIPESTATUS[0]}
-	set -e
-	# Allo scadere timeout ferma il client docker, non la build: e' il PID 1
-	# del container e ignora il SIGTERM inoltrato. Lo si uccide da fuori.
-	docker kill "${RF35H_CONTAINER}" >/dev/null 2>&1 || true
-	case "${rc}" in
-		0)       result="done" ;;
-		124|137) result="continue" ;;
-		*)       result="failed" ;;
-	esac
+	while : ; do
+		budget=$(( deadline - $(date +%s) ))
+		if [ "${budget}" -lt 1200 ]; then
+			if [ "${try}" -gt 1 ]; then break; fi   # resta l'esito del primo
+			echo "meno di 20 minuti per la build: passo lo stato alla parte successiva"
+			out "result=continue"
+			return 0
+		fi
+		say "Build (tentativo ${try}): $(( budget / 60 )) minuti a disposizione"
+		# Nel log delle actions solo l'avanzamento (il log completo, centinaia
+		# di MB, lo scrive build-lakka-rf35h.sh nell'albero e finisce negli
+		# artifact).
+		set +e
+		timeout --signal=TERM --kill-after=30 "${budget}" \
+			./lakka-rf35h/build-in-docker.sh --keep-going --jobs 4 --pkg-jobs 2 2>&1 \
+			| grep --line-buffered -aE '^\[[0-9]+/[0-9]+\] \[(INIT|DONE|FAIL|ACTV|IDLE)|==>|\[!\]|\[x\]|FAILURE|ERROR|NON conforme|Conforme'
+		rc=${PIPESTATUS[0]}
+		set -e
+		# Allo scadere timeout ferma il client docker, non la build: e' il PID
+		# 1 del container e ignora il SIGTERM inoltrato. Lo si uccide da fuori,
+		# e lo si toglie (--rm lo fa il daemon, dopo): il tentativo dopo
+		# riusa il nome.
+		docker kill "${RF35H_CONTAINER}" >/dev/null 2>&1 || true
+		docker rm -f "${RF35H_CONTAINER}" >/dev/null 2>&1 || true
+		case "${rc}" in
+			0)       result="done" ;;
+			124|137) result="continue" ;;
+			*)       result="failed" ;;
+		esac
+		# Un fallimento si riprova una volta. git fetch (get_git) non riprova
+		# da solo, e un errore di rete al primo minuto (run #5: glsl_shaders,
+		# passo 8 di 340) buttava la build; uno vero si ripete in pochi
+		# minuti, perche' il costruito resta (stamp) e si rifa' solo il
+		# pacchetto fallito.
+		if [ "${result}" = failed ] && [ "${try}" -eq 1 ]; then
+			note warning "Tentativo 1 fallito, riprovo" "$(failure_report)"
+			try=2
+			continue
+		fi
+		break
+	done
 	echo "uscita ${rc}: ${result}"
 	out "result=${result}"
-	summ "- build: uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti"
-	note notice "Build" "uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti; $(progress); disco: $(gb "${W}") GB liberi, albero $(du -sh "${W}/${TREE_NAME}" 2>/dev/null | cut -f1)"
+	summ "- build: uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti, tentativi ${try}"
+	note notice "Build" "uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti, tentativi ${try}; $(progress); disco: $(gb "${W}") GB liberi, albero $(du -sh "${W}/${TREE_NAME}" 2>/dev/null | cut -f1)"
 	if [ "${result}" = failed ]; then
 		note error "Build fallita" "$(failure_report)"
 		exit "${rc}"
@@ -158,17 +176,20 @@ progress() {
 }
 
 # Il pacchetto fallito e le ultime righe del suo log (quello del thread, che
-# --keep-going copia in *-fallito.log; se no la coda del log completo)
+# --keep-going copia in *-fallito.log; se no la coda del log completo, dove
+# si mescolano i log di tutti i pacchetti finiti prima). Oltre agli errori di
+# compilazione quelli di rete: un "fatal:" di git non contiene "error".
 failure_report() {
 	local log pkg flog
 	log="$(mainlog)"
 	[ -n "${log}" ] || { echo "nessun log della build: e' fallita prima (vedi il passo)"; return 0; }
 	pkg="$(sed -n 's|.*FAILURE: scripts/[a-z]* \([A-Za-z0-9_.+-]*\):[a-z]* has failed!.*|\1|p' "${log}" | tail -1)"
 	flog="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${pkg:-nessuno}"-fallito.log 2>/dev/null | head -1)"
-	echo "pacchetto: ${pkg:-?}"
-	grep -aE 'error|Error|FAILED|No such file' "${flog:-${log}}" | grep -av 'Werror\|error\.o\|_error\.' | tail -12 | cut -c1-200
+	echo "pacchetto: ${pkg:-?} (log: $(basename "${flog:-${log}}"))"
+	grep -aE 'error|Error|FAILED|No such file|fatal:|Cannot get|curl: \(|unable to|Could not|Failed to|timed out|reset by peer' "${flog:-${log}}" \
+		| grep -av 'Werror\|error\.o\|_error\.' | tail -10 | cut -c1-180
 	echo "--- coda:"
-	tail -15 "${flog:-${log}}" | cut -c1-200
+	tail -20 "${flog:-${log}}" | cut -c1-180
 }
 
 cmd_pack() {

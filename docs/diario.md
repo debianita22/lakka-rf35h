@@ -5031,3 +5031,31 @@ piu' d'uno con `merge-multiple` due file senza nome si sovrascriverebbero.
 Per questo uno solo, per nome, scelto prima con `gh api` (il filtro jq
 provato: il numero piu' alto fra gli `state-N` non scaduti).
 
+
+## Terza build pulita: un git fetch al primo minuto (4/10/2026)
+
+La run #5 (strace corretto) si e' fermata dopo 40 secondi, al passo 8 di
+340: `install glsl_shaders:target`. Il resoconto non diceva perche':
+glsl_shaders e' un pacchetto di sistema, e il build script si fermava prima
+di copiare il log del suo thread (lo faceva solo per i core da saltare), cosi'
+la CI ha letto la coda del log complessivo, dove si mescolano i log dei
+pacchetti finiti prima (un `curl: (22) ... 400` di un download riuscito al
+tentativo dopo, il configure di make). Nel log del pacchetto c'erano solo i
+due "FAILED COMMAND": nessuna riga con "error", come un `fatal:` di git.
+Ricontrollato a mano: il commit di glsl-shaders si scarica (`git fetch
+--depth 1` dello SHA del package.mk) e `make install` funziona. Un errore di
+rete, quindi, e `get_git` di LibreELEC non riprova (`get_archive` invece
+prova 10 volte, URL e mirror).
+
+- Il build script copia il log del thread in `*-<pacchetto>-fallito.log` per
+  ogni pacchetto fallito, anche di sistema, e lo nomina quando si ferma.
+- `ci-build.sh build` riprova una volta una build fallita (stessa parte,
+  stesso tempo a disposizione): un errore di rete passa, uno vero si ripete
+  in pochi minuti, perche' il costruito resta e si rifa' solo il pacchetto
+  fallito. Il primo tentativo resta in un'annotazione ("Tentativo 1
+  fallito, riprovo"), con il resoconto.
+- Il resoconto cerca anche gli errori di rete (`fatal:`, `Cannot get`,
+  `curl: (`, `Failed to`, `unable to`, `timed out`, `reset by peer`).
+
+Provato con una build finta (fallisce una volta, poi due): un tentativo in
+piu', annotazioni giuste, esito `done` e poi `failed`.
