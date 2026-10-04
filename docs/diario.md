@@ -5209,3 +5209,27 @@ Fuori: `swanstation` (DuckStation) come riserva PlayStation: piu' pesante di
 `pcsx_rearmed`, e non provato qui; Lakka stessa lo toglie sul Pi Zero 2.
 `beetle_psx` lo e' ancora di piu'. Entrambi restano a un `--cores` di
 distanza. Niente LTO sui nuovi: la lista resta quella dei core provati.
+
+## Ora di rete: pool.ntp.org come predefinito (4/10/2026)
+
+Il server predefinito era `it.pool.ntp.org`. Ora e' `pool.ntp.org`, come i
+`FallbackTimeservers` di connman in LibreELEC: il pool risponde da se' con
+server vicini a chi chiede, quindi in Italia non cambia nulla, e fuori
+dall'Italia non si va piu' su server italiani. `it.pool.ntp.org` esce anche
+dalla tendina (restano `pool.ntp.org`, `time.cloudflare.com`,
+`time.google.com`); chi l'aveva scelto a mano lo tiene, perche' lo stato in
+`/storage/.config/rf35h/ntp-server` vince sul predefinito.
+
+Un dettaglio: `retroarch.cfg` conserva il valore della tendina, e una chiave
+non vuota vince sul predefinito. Sulle console gia' installate il menu
+avrebbe continuato a mostrare `it.pool.ntp.org` mentre `rf35h-ntp`, senza
+stato, usava gia' il nuovo. Ora `rf35h-ntp on` scrive nello stato anche il
+server predefinito, e il menu, che all'apertura rilegge lo stato, mostra
+quello vero. La 1003 rigenerata con i due generatori e' identica byte per
+byte a quella corretta a mano. Corretto anche un commento: `FallbackNTP` di
+timesyncd conta solo con `NTP=` vuoto, quindi non e' un ripiego per il
+server scelto; il ripiego e' connman.
+
+Provato `rf35h-ntp` con busybox sh e un `systemctl` finto: il predefinito
+finisce nello stato e in `NTP=`, `server time.google.com` lo sostituisce, una
+scelta `it.pool.ntp.org` gia' salvata resta.

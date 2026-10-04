@@ -21,7 +21,7 @@
 +#define DEFAULT_RF35H_NTP true
 +#define DEFAULT_RF35H_RUMBLE true
 +#define DEFAULT_RF35H_SPEAKER_VOLUME 28
-+#define DEFAULT_RF35H_NTP_SERVER "it.pool.ntp.org"
++#define DEFAULT_RF35H_NTP_SERVER "pool.ntp.org"
 +#endif
  #ifdef HAVE_LAKKA_SWITCH
  #define DEFAULT_SWITCH_OC false
@@ -1336,7 +1336,7 @@
 +#define RF35H_USB_MODES       "host|transfer"
 +#define RF35H_AUDIO_OUTS      "speakers|usb"
 +#define RF35H_SCRAPE_REGIONS  "eu|us|jp|wor"
-+#define RF35H_NTP_SERVERS     "it.pool.ntp.org|pool.ntp.org|time.cloudflare.com|time.google.com"
++#define RF35H_NTP_SERVERS     "pool.ntp.org|time.cloudflare.com|time.google.com"
 +
 +static void rf35h_run(const char *fmt, ...)
 +{

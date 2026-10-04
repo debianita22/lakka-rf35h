@@ -196,7 +196,7 @@ at boot.
 | Rumble | on/off (on) | no intensity control: *Rumble Gain* has no effect on this device |
 | Compressed RAM (zram) | on/off (on) | half the RAM as LZ4-compressed swap; keeps large cores from running out of memory |
 | Thumbnail Scraper | *Scrape Thumbnails*, *Scrape Only Missing Thumbnails* (on), *Scraper Region* (`eu`) | see [Thumbnails](#thumbnails) |
-| Network Time | *Network Time (NTP)* (on), *Time Server* (`it.pool.ntp.org`; also `pool.ntp.org`, `time.cloudflare.com`, `time.google.com`) | the console has no battery-backed clock |
+| Network Time | *Network Time (NTP)* (on), *Time Server* (`pool.ntp.org`; also `time.cloudflare.com`, `time.google.com`) | the console has no battery-backed clock |
 | System Update | action | see [Updating](#updating) |
 
 The Bluetooth menus are hidden (there is no Bluetooth hardware), and so is

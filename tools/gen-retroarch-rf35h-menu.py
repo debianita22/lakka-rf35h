@@ -326,7 +326,7 @@ edit("config.def.h", [
      "#define DEFAULT_RF35H_NTP true\n"
      "#define DEFAULT_RF35H_RUMBLE true\n"
      "#define DEFAULT_RF35H_SPEAKER_VOLUME 28\n"
-     "#define DEFAULT_RF35H_NTP_SERVER \"it.pool.ntp.org\"\n"
+     "#define DEFAULT_RF35H_NTP_SERVER \"pool.ntp.org\"\n"
      "#endif\n"
      "#ifdef HAVE_LAKKA_SWITCH\n#define DEFAULT_SWITCH_OC false\n"),
 ])
@@ -934,7 +934,7 @@ HANDLERS = r'''
 #define RF35H_USB_MODES       "host|transfer"
 #define RF35H_AUDIO_OUTS      "speakers|usb"
 #define RF35H_SCRAPE_REGIONS  "eu|us|jp|wor"
-#define RF35H_NTP_SERVERS     "it.pool.ntp.org|pool.ntp.org|time.cloudflare.com|time.google.com"
+#define RF35H_NTP_SERVERS     "pool.ntp.org|time.cloudflare.com|time.google.com"
 
 static void rf35h_run(const char *fmt, ...)
 {
