@@ -776,7 +776,7 @@
        case ACTION_OK_DL_USER_SETTINGS_LIST:
        case ACTION_OK_DL_DIRECTORY_SETTINGS_LIST:
        case ACTION_OK_DL_PRIVACY_SETTINGS_LIST:
-@@ -6571,6 +6587,123 @@
+@@ -6571,6 +6587,135 @@
  #ifdef HAVE_LAKKA_SWITCH
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_lakka_switch_options, ACTION_OK_DL_LAKKA_SWITCH_OPTIONS_LIST)
  #endif
@@ -785,6 +785,18 @@
 +STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_rf35h_led, ACTION_OK_DL_RF35H_LED_SETTINGS_LIST)
 +STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_rf35h_scraper, ACTION_OK_DL_RF35H_SCRAPER_SETTINGS_LIST)
 +STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_rf35h_ntp_settings, ACTION_OK_DL_RF35H_NTP_SETTINGS_LIST)
++#include <sys/stat.h>
++/* devaOS RF35H: una unit e' attiva finche' esiste
++ * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo
++ * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),
++ * segue il link e lo dava sempre assente. lstat() guarda il link. */
++static bool rf35h_unit_active(const char *unit)
++{
++   char p[128];
++   struct stat st;
++   snprintf(p, sizeof(p), "/run/systemd/units/invocation:%s", unit);
++   return lstat(p, &st) == 0;
++}
 +/* Scraper: parte in background; se sta girando, la stessa voce lo ferma. */
 +static int action_ok_rf35h_scrape(const char *path,
 +      const char *label, unsigned type, size_t idx, size_t entry_idx)
@@ -794,7 +806,7 @@
 +   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;
 +   /* Sta girando? Lo dice systemd: il link invocation:<unit> esiste solo
 +    * mentre la unit e' attiva. Il file di stato dopo un crash puo' mentire. */
-+   if (path_is_valid("/run/systemd/units/invocation:rf35h-scrape.service"))
++   if (rf35h_unit_active("rf35h-scrape.service"))
 +   {
 +      /* devaOS RF35H: --no-block. Lo stop sincrono aspettava la fine del
 +       * servizio, fino al suo TimeoutStopSec (10 s), col menu fermo. */
@@ -836,7 +848,7 @@
 +   FILE *f;
 +   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;
 +   ready[0] = '\0';
-+   if (path_is_valid("/run/systemd/units/invocation:rf35h-update.service"))
++   if (rf35h_unit_active("rf35h-update.service"))
 +   {
 +      /* devaOS RF35H: --no-block, come lo scraper: lo stop sincrono teneva
 +       * fermo il menu fino al TimeoutStopSec del servizio (15 s). */
@@ -900,7 +912,7 @@
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_user_list, ACTION_OK_DL_USER_SETTINGS_LIST)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_netplay_sublist, ACTION_OK_DL_NETPLAY)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_directory_list, ACTION_OK_DL_DIRECTORY_SETTINGS_LIST)
-@@ -9366,6 +9499,14 @@
+@@ -9366,6 +9511,14 @@
  #ifdef HAVE_LAKKA_SWITCH
           {MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS,                action_ok_lakka_switch_options},
  #endif
@@ -917,7 +929,7 @@
           {MENU_ENUM_LABEL_DIRECTORY_SETTINGS,                  action_ok_directory_list},
 --- a/menu/cbs/menu_cbs_sublabel.c
 +++ b/menu/cbs/menu_cbs_sublabel.c
-@@ -392,6 +392,112 @@
+@@ -392,6 +392,124 @@
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_localap_enable,                MENU_ENUM_SUBLABEL_LOCALAP_ENABLE )
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_timezone,                      MENU_ENUM_SUBLABEL_TIMEZONE)
  #endif
@@ -941,6 +953,18 @@
 +DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_rf35h_ntp_server,              MENU_ENUM_SUBLABEL_RF35H_NTP_SERVER)
 +DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_rf35h_scrape_region,           MENU_ENUM_SUBLABEL_RF35H_SCRAPE_REGION)
 +#include <features/features_cpu.h>
++#include <sys/stat.h>
++/* devaOS RF35H: una unit e' attiva finche' esiste
++ * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo
++ * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),
++ * segue il link e lo dava sempre assente. lstat() guarda il link. */
++static bool rf35h_unit_active(const char *unit)
++{
++   char p[128];
++   struct stat st;
++   snprintf(p, sizeof(p), "/run/systemd/units/invocation:%s", unit);
++   return lstat(p, &st) == 0;
++}
 +/* Lo stato dello scraper nel sottotitolo: idle, running n/m, done, error. */
 +static int action_bind_sublabel_rf35h_scrape(
 +      file_list_t *list, unsigned type, unsigned i,
@@ -966,7 +990,7 @@
 +         fclose(f);
 +      }
 +      if (!strncmp(st, "running", 7) &&
-+          !path_is_valid("/run/systemd/units/invocation:rf35h-scrape.service"))
++          !rf35h_unit_active("rf35h-scrape.service"))
 +         strlcpy(st, "interrupted (select to start again)", sizeof(st));
 +   }
 +   snprintf(s, len, "%s\n%s", msg_hash_to_str(MENU_ENUM_SUBLABEL_RF35H_SCRAPE),
@@ -1000,7 +1024,7 @@
 +      /* a meta' ma senza il servizio: fermato, o RetroArch riavviato */
 +      if ((!strncmp(st, "checking", 8) || !strncmp(st, "downloading", 11)
 +               || !strncmp(st, "verifying", 9))
-+            && !path_is_valid("/run/systemd/units/invocation:rf35h-update.service"))
++            && !rf35h_unit_active("rf35h-update.service"))
 +         strlcpy(st, "interrupted: select to resume", sizeof(st));
 +      if (!st[0])
 +      {
@@ -1030,7 +1054,7 @@
  #ifdef HAVE_LAKKA_SWITCH
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_options,                MENU_ENUM_SUBLABEL_LAKKA_SWITCH_OPTIONS)
  DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_oc_enable,              MENU_ENUM_SUBLABEL_SWITCH_OC_ENABLE)
-@@ -5485,6 +5591,68 @@
+@@ -5485,6 +5603,68 @@
              BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_cpu_perf_mode);
              break;
  #endif
@@ -1142,7 +1166,7 @@
     ACTION_OK_DL_PRIVACY_SETTINGS_LIST,
 --- a/menu/menu_displaylist.c
 +++ b/menu/menu_displaylist.c
-@@ -7145,6 +7145,122 @@
+@@ -7145,6 +7145,134 @@
  }
  #endif
  
@@ -1178,6 +1202,19 @@
 +
 +/* l'ora dell'ultimo script lanciato dal menu (rf35h_run, menu_setting.c) */
 +extern retro_time_t rf35h_last_run;
++
++#include <sys/stat.h>
++/* devaOS RF35H: una unit e' attiva finche' esiste
++ * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo
++ * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),
++ * segue il link e lo dava sempre assente. lstat() guarda il link. */
++static bool rf35h_unit_active(const char *unit)
++{
++   char p[128];
++   struct stat st;
++   snprintf(p, sizeof(p), "/run/systemd/units/invocation:%s", unit);
++   return lstat(p, &st) == 0;
++}
 +
 +/* Rilegge dal sistema quello che il menu mostra. L1+vol cambia la
 + * luminosita' senza passare da qui; rf35h-idle.conf si puo' editare a mano;
@@ -1237,8 +1274,7 @@
 +   if (rf35h_read_line("/sys/devices/platform/rocknix-singleadc-joypad/rumble_enable", buf, sizeof(buf)))
 +      settings->bools.rf35h_rumble = (buf[0] == '1');
 +   /* NTP: lo stato vero e' la unit attiva, non il file */
-+   settings->bools.rf35h_ntp = path_is_valid(
-+         "/run/systemd/units/invocation:systemd-timesyncd.service");
++   settings->bools.rf35h_ntp = rf35h_unit_active("systemd-timesyncd.service");
 +   if (rf35h_read_line(RF35H_STATE_DIR "/ntp-server", buf, sizeof(buf)))
 +      strlcpy(settings->arrays.rf35h_ntp_server, buf,
 +            sizeof(settings->arrays.rf35h_ntp_server));
@@ -1265,7 +1301,7 @@
  unsigned menu_displaylist_build_list(
        file_list_t *list,
        settings_t *settings,
-@@ -10248,6 +10364,94 @@
+@@ -10248,6 +10376,94 @@
  
              for (i = 0; i < ARRAY_SIZE(build_list); i++)
              {
@@ -1360,7 +1396,7 @@
                 if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(list,
                          build_list[i].enum_idx,  build_list[i].parse_type,
                          false) == 0)
-@@ -11142,6 +11346,9 @@
+@@ -11142,6 +11358,9 @@
                 {MENU_ENUM_LABEL_ACCESSIBILITY_SETTINGS,      PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_POWER_MANAGEMENT_SETTINGS,   PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_BLUETOOTH_SETTINGS,          PARSE_ACTION, true},
@@ -1370,7 +1406,7 @@
  #ifdef HAVE_NETWORKING
                 {MENU_ENUM_LABEL_WIFI_SETTINGS,               PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_NETWORK_SETTINGS,            PARSE_ACTION, true},
-@@ -11236,6 +11443,14 @@
+@@ -11236,6 +11455,14 @@
                       build_list[i].checked = settings->bools.settings_show_steam;
                       break;
  #endif
@@ -1385,7 +1421,7 @@
                       /* MISSING:
                        * MENU_ENUM_LABEL_BLUETOOTH_SETTINGS
                        * MENU_ENUM_LABEL_WIFI_SETTINGS
-@@ -14652,6 +14867,12 @@
+@@ -14652,6 +14879,12 @@
           case DISPLAYLIST_MENU_FILE_BROWSER_SETTINGS_LIST:
           case DISPLAYLIST_MENU_VIEWS_SETTINGS_LIST:
           case DISPLAYLIST_LAKKA_SERVICES_LIST:
@@ -1398,7 +1434,7 @@
  #ifdef HAVE_LAKKA_SWITCH
           case DISPLAYLIST_LAKKA_SWITCH_OPTIONS_LIST:
  #endif
-@@ -14855,7 +15076,10 @@
+@@ -14855,7 +15088,10 @@
                 video_context_driver_get_flags(&flags);
  #endif
  #ifdef HAVE_LAKKA

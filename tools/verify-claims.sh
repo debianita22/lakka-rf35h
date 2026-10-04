@@ -457,6 +457,15 @@ chk "reflash e rescue: controlli sul disco, card Lakka" "grep -q 'card_check \"\
 chk "reflash --loader: il known-good verificato, a 32 KiB" "grep -q -- '--loader' '$CT/rf35h-reflash-system.sh' && grep -q 'sha256sum -c --quiet known-good.sha256' '$CT/rf35h-reflash-system.sh' && grep -q 'bs=32768 seek=1' '$CT/rf35h-reflash-system.sh'"
 chk "rescue: l'autostart.sh dell'utente torna al suo posto" "grep -q 'cp -p \"\$AS\" \"\$ASB\"' '$CT/rf35h-rescue.sh' && grep -q 'mv -f /storage/.config/autostart.sh.rf35h-rescue /storage/.config/autostart.sh' '$CT/rf35h-rescue.sh'"
 
+echo "== menu: le unit attive si vedono"
+# /run/systemd/units/invocation:<unit> e' un link simbolico al suo invocation
+# ID, che come percorso non esiste: path_is_valid() (stat) lo dava sempre
+# assente. Lo scraper e System Update non si fermavano dalla loro voce, e
+# l'ora di rete risultava spenta.
+M1003C="${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch"
+chk "menu: nessun path_is_valid sui link invocation:" "! grep -q 'path_is_valid(\"/run/systemd/units/invocation:' '$M1003C' && ! grep -q 'path_is_valid(\\\\\"/run/systemd/units/invocation:' '${O}/tools/gen-retroarch-rf35h-menu.py'"
+chk "menu: rf35h_unit_active con lstat, tre file" "[ \"\$(grep -c '^+static bool rf35h_unit_active(const char \*unit)' '$M1003C')\" = 3 ] && grep -q '^+   return lstat(p, &st) == 0;' '$M1003C'"
+
 echo
 if [ "$bad" -eq 0 ]; then
 	echo "tutte le $n verifiche passano"

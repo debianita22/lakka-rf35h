@@ -583,6 +583,18 @@ edit("menu/cbs/menu_cbs_ok.c", [
     ("#ifdef HAVE_LAKKA_SWITCH\nSTATIC_DEFAULT_ACTION_OK_FUNC(action_ok_lakka_switch_options, ACTION_OK_DL_LAKKA_SWITCH_OPTIONS_LIST)\n#endif\n",
      "#ifdef HAVE_LAKKA_SWITCH\nSTATIC_DEFAULT_ACTION_OK_FUNC(action_ok_lakka_switch_options, ACTION_OK_DL_LAKKA_SWITCH_OPTIONS_LIST)\n#endif\n"
      "#ifdef HAVE_LAKKA\nSTATIC_DEFAULT_ACTION_OK_FUNC(action_ok_rf35h_settings, ACTION_OK_DL_RF35H_SETTINGS_LIST)\n"
+     "#include <sys/stat.h>\n"
+     "/* devaOS RF35H: una unit e' attiva finche' esiste\n"
+     " * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo\n"
+     " * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),\n"
+     " * segue il link e lo dava sempre assente. lstat() guarda il link. */\n"
+     "static bool rf35h_unit_active(const char *unit)\n"
+     "{\n"
+     "   char p[128];\n"
+     "   struct stat st;\n"
+     "   snprintf(p, sizeof(p), \"/run/systemd/units/invocation:%s\", unit);\n"
+     "   return lstat(p, &st) == 0;\n"
+     "}\n"
      "/* Scraper: parte in background; se sta girando, la stessa voce lo ferma. */\n"
      "static int action_ok_rf35h_scrape(const char *path,\n"
      "      const char *label, unsigned type, size_t idx, size_t entry_idx)\n"
@@ -592,7 +604,7 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;\n"
      "   /* Sta girando? Lo dice systemd: il link invocation:<unit> esiste solo\n"
      "    * mentre la unit e' attiva. Il file di stato dopo un crash puo' mentire. */\n"
-     "   if (path_is_valid(\"/run/systemd/units/invocation:rf35h-scrape.service\"))\n"
+     "   if (rf35h_unit_active(\"rf35h-scrape.service\"))\n"
      "   {\n"
      "      /* devaOS RF35H: --no-block. Lo stop sincrono aspettava la fine del\n"
      "       * servizio, fino al suo TimeoutStopSec (10 s), col menu fermo. */\n"
@@ -634,7 +646,7 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "   FILE *f;\n"
      "   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;\n"
      "   ready[0] = '\\0';\n"
-     "   if (path_is_valid(\"/run/systemd/units/invocation:rf35h-update.service\"))\n"
+     "   if (rf35h_unit_active(\"rf35h-update.service\"))\n"
      "   {\n"
      "      /* devaOS RF35H: --no-block, come lo scraper: lo stop sincrono teneva\n"
      "       * fermo il menu fino al TimeoutStopSec del servizio (15 s). */\n"
@@ -730,6 +742,18 @@ edit("menu/cbs/menu_cbs_sublabel.c", [
      "DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_rf35h_ntp_server,              MENU_ENUM_SUBLABEL_RF35H_NTP_SERVER)\n"
      "DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_rf35h_scrape_region,           MENU_ENUM_SUBLABEL_RF35H_SCRAPE_REGION)\n"
      "#include <features/features_cpu.h>\n"
+     "#include <sys/stat.h>\n"
+     "/* devaOS RF35H: una unit e' attiva finche' esiste\n"
+     " * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo\n"
+     " * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),\n"
+     " * segue il link e lo dava sempre assente. lstat() guarda il link. */\n"
+     "static bool rf35h_unit_active(const char *unit)\n"
+     "{\n"
+     "   char p[128];\n"
+     "   struct stat st;\n"
+     "   snprintf(p, sizeof(p), \"/run/systemd/units/invocation:%s\", unit);\n"
+     "   return lstat(p, &st) == 0;\n"
+     "}\n"
      "/* Lo stato dello scraper nel sottotitolo: idle, running n/m, done, error. */\n"
      "static int action_bind_sublabel_rf35h_scrape(\n"
      "      file_list_t *list, unsigned type, unsigned i,\n"
@@ -755,7 +779,7 @@ edit("menu/cbs/menu_cbs_sublabel.c", [
      "         fclose(f);\n"
      "      }\n"
      "      if (!strncmp(st, \"running\", 7) &&\n"
-     "          !path_is_valid(\"/run/systemd/units/invocation:rf35h-scrape.service\"))\n"
+     "          !rf35h_unit_active(\"rf35h-scrape.service\"))\n"
      "         strlcpy(st, \"interrupted (select to start again)\", sizeof(st));\n"
      "   }\n"
      "   snprintf(s, len, \"%s\\n%s\", msg_hash_to_str(MENU_ENUM_SUBLABEL_RF35H_SCRAPE),\n"
@@ -789,7 +813,7 @@ edit("menu/cbs/menu_cbs_sublabel.c", [
      "      /* a meta' ma senza il servizio: fermato, o RetroArch riavviato */\n"
      "      if ((!strncmp(st, \"checking\", 8) || !strncmp(st, \"downloading\", 11)\n"
      "               || !strncmp(st, \"verifying\", 9))\n"
-     "            && !path_is_valid(\"/run/systemd/units/invocation:rf35h-update.service\"))\n"
+     "            && !rf35h_unit_active(\"rf35h-update.service\"))\n"
      "         strlcpy(st, \"interrupted: select to resume\", sizeof(st));\n"
      "      if (!st[0])\n"
      "      {\n"
@@ -884,6 +908,19 @@ static bool rf35h_read_line(const char *path, char *s, size_t len)
 /* l'ora dell'ultimo script lanciato dal menu (rf35h_run, menu_setting.c) */
 extern retro_time_t rf35h_last_run;
 
+#include <sys/stat.h>
+/* devaOS RF35H: una unit e' attiva finche' esiste
+ * /run/systemd/units/invocation:<unit>. E' un link simbolico al suo
+ * invocation ID, che come percorso non esiste: path_is_valid() usa stat(),
+ * segue il link e lo dava sempre assente. lstat() guarda il link. */
+static bool rf35h_unit_active(const char *unit)
+{
+   char p[128];
+   struct stat st;
+   snprintf(p, sizeof(p), "/run/systemd/units/invocation:%s", unit);
+   return lstat(p, &st) == 0;
+}
+
 /* Rilegge dal sistema quello che il menu mostra. L1+vol cambia la
  * luminosita' senza passare da qui; rf35h-idle.conf si puo' editare a mano;
  * i modi dei LED li salvano gli script. Il menu deve dire la verita'. */
@@ -942,8 +979,7 @@ static void rf35h_sync_settings(settings_t *settings)
    if (rf35h_read_line("/sys/devices/platform/rocknix-singleadc-joypad/rumble_enable", buf, sizeof(buf)))
       settings->bools.rf35h_rumble = (buf[0] == '1');
    /* NTP: lo stato vero e' la unit attiva, non il file */
-   settings->bools.rf35h_ntp = path_is_valid(
-         "/run/systemd/units/invocation:systemd-timesyncd.service");
+   settings->bools.rf35h_ntp = rf35h_unit_active("systemd-timesyncd.service");
    if (rf35h_read_line(RF35H_STATE_DIR "/ntp-server", buf, sizeof(buf)))
       strlcpy(settings->arrays.rf35h_ntp_server, buf,
             sizeof(settings->arrays.rf35h_ntp_server));
