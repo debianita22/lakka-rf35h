@@ -15,6 +15,9 @@
 #   ci-build.sh ccache-stats
 #   ci-build.sh check-dist D    job release: i file scaricati in D (re3, core
 #                               rotti, core e giochi che mancano)
+#   ci-build.sh version         job setup: versione, release o prova, pre-release
+#   ci-build.sh publish D       job release: la release dai file in D, "latest"
+#                               solo se e' la versione piu' alta
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 30 core) ne chiede di
@@ -25,7 +28,8 @@
 #
 # Variabili (le mette il workflow): GITHUB_WORKSPACE, GITHUB_ENV,
 # GITHUB_OUTPUT, GITHUB_STEP_SUMMARY, JOB_START, BUILD_MINUTES, W,
-# RF35H_VERSION, RF35H_CONTAINER.
+# RF35H_VERSION, RF35H_CONTAINER; per check-dist RF35H_ALLOW_INCOMPLETE; per
+# version e publish quelle scritte prima di cmd_version.
 set -euo pipefail
 
 O="$(cd "$(dirname "$0")/.." && pwd)"
@@ -586,6 +590,182 @@ cmd_collect() {
 	fi
 }
 
+# --- versione e release (build.yml) ---------------------------------------------
+# Le console si aggiornano dalla release "latest" (update.txt): chi la decide e'
+# qui, non GitHub. Variabili: GITHUB_* del runner, DEFAULT_BRANCH, GH_TOKEN; per
+# version IN_VERSION, IN_PRERELEASE, IN_RESUME (gli input di Run workflow); per
+# publish VERSION e PRERELEASE (dal job setup).
+
+# un errore che si legge anche fra le annotazioni del run, poi l'uscita
+fail() { note error "$1" "$2"; die "$2"; }
+
+# Il commit $1 e' nella storia del ramo principale di origin, letto adesso?
+on_default_branch() {
+	local c
+	c="$(git -C "${O}" rev-parse --verify -q "$1^{commit}")" || return 1
+	if [ "$(git -C "${O}" rev-parse --is-shallow-repository)" = true ]; then
+		git -C "${O}" fetch -q --unshallow origin || return 1
+	fi
+	git -C "${O}" fetch -q --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" || return 1
+	git -C "${O}" merge-base --is-ancestor "${c}" "refs/remotes/origin/${DEFAULT_BRANCH}"
+}
+
+# Il commit del tag $1 su origin, vuoto se il tag non c'e': il ^{} di un tag
+# annotato, il tag stesso per uno leggero
+tag_commit() {
+	local out
+	out="$(git -C "${O}" ls-remote --tags origin "refs/tags/$1" "refs/tags/$1^{}")" || return 1
+	awk -v t="refs/tags/$1" '$2 == t "^{}" { p = $1 } $2 == t { l = $1 } END { print (p != "" ? p : l) }' <<< "${out}"
+}
+
+# Le release con il tag $1, righe "<id> <bozza: true|false>". Dall'API REST: le
+# bozze le vede solo chi puo' scrivere (il job release, non setup).
+release_ids() {
+	RF35H_TAG="$1" gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+		--jq '.[] | select(.tag_name == env.RF35H_TAG) | "\(.id) \(.draft)"'
+}
+
+# Il tag della release "latest" di adesso; vuoto se non ce n'e' una
+latest_tag() {
+	local out
+	if out="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>&1)"; then
+		printf '%s\n' "${out}"
+	else
+		case "${out}" in *"HTTP 404"*) return 0 ;; esac
+		echo "${out}" >&2
+		return 1
+	fi
+}
+
+# $1 e' una versione piu' alta di $2? sort -V (v1.10.0 dopo v1.9.0), col
+# trattino come ~ perche' v1.1.0-rc1 venga prima di v1.1.0 (una rc promossa a
+# mano a latest non deve fermare la v1.1.0)
+newer() {
+	local a b
+	a="$(printf '%s' "$1" | sed 's/-/~/g')"; b="$(printf '%s' "$2" | sed 's/-/~/g')"
+	[ "${a}" != "${b}" ] && [ "$(printf '%s\n' "${a}" "${b}" | sort -V | tail -n 1)" = "${a}" ]
+}
+
+# Job setup: la versione, se si pubblica, se e' una pre-release
+# (GITHUB_OUTPUT: version, publish, prerelease, resume).
+cmd_version() {
+	: "${GITHUB_EVENT_NAME:?}" "${GITHUB_REF_NAME:?}" "${GITHUB_RUN_NUMBER:?}" "${GITHUB_REPOSITORY:?}" "${DEFAULT_BRANCH:?}"
+	local version publish=false prerelease=false tag rels
+	# una release si costruisce sempre da zero: la ripresa riusa pacchetti
+	# fatti da un altro commit
+	case "${IN_RESUME:-}" in
+		'') ;;
+		*[!0-9]*) fail "resume_run" "resume_run: un ID di run (numero)" ;;
+		*) [ -z "${IN_VERSION:-}" ] || fail "resume_run" "resume_run solo per le build di prova, senza version" ;;
+	esac
+	if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ]; then
+		version="${GITHUB_REF_NAME}"; publish=true
+	elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${IN_VERSION:-}" ]; then
+		version="${IN_VERSION}"; publish=true
+		prerelease="${IN_PRERELEASE:-false}"
+	else
+		version="ci-${GITHUB_RUN_NUMBER}-$(git -C "${O}" rev-parse --short=7 HEAD)"
+	fi
+	case "${version}" in
+		''|*[!A-Za-z0-9._+-]*) fail "Versione" "versione '${version}': solo lettere, cifre e . _ + -" ;;
+	esac
+	if [ "${publish}" = true ]; then
+		# con un trattino (v1.1.0-rc1) e' una pre-release, dal tag come da Run
+		# workflow, anche senza la casella: le console non la vedono
+		case "${version}" in *-*) prerelease=true ;; esac
+		# le altre le scaricano tutte le console: solo dal ramo principale
+		if [ "${prerelease}" != true ]; then
+			if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]; then
+				fail "Versione" "da ${GITHUB_REF_NAME} solo pre-release: le console aggiornano all'ultima release"
+			fi
+			on_default_branch "${GITHUB_SHA:-HEAD}" \
+				|| fail "Versione" "${version}: il commit non e' su ${DEFAULT_BRANCH}; da altri rami solo pre-release (v1.1.0-rc1, o la casella prerelease)"
+		fi
+		if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
+			tag="$(tag_commit "${version}")" || fail "Versione" "origin non risponde (git ls-remote)"
+			[ -z "${tag}" ] || fail "Versione" "il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
+		fi
+		rels="$(release_ids "${version}")" || fail "Versione" "elenco delle release illeggibile"
+		if grep -q ' false$' <<< "${rels}"; then
+			fail "Versione" "la release ${version} esiste gia'"
+		fi
+	fi
+	{
+		echo "version=${version}"
+		echo "publish=${publish}"
+		echo "prerelease=${prerelease}"
+		echo "resume=${IN_RESUME:-}"
+	} >> "${GITHUB_OUTPUT:-/dev/null}"
+	{
+		echo "### ${version}"
+		if [ "${publish}" != true ]; then
+			echo "Build di prova: nessuna release, l'immagine negli artifact."
+		elif [ "${prerelease}" = true ]; then
+			echo "Pre-release a fine build: le console non la vedono."
+		else
+			echo "Release a fine build: \"latest\" (la scaricano le console) se e' la versione piu' alta."
+		fi
+	} >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+	echo "versione ${version}, release ${publish}, pre-release ${prerelease}"
+}
+
+# Job release: pubblica i file di <d> (dopo check-dist e le note). Bozza, file,
+# poi pubblicata: una console che guarda proprio in quel momento non trova mai
+# una release senza update.txt.
+cmd_publish() {
+	local d="${1:?cartella con i file della release}" pre="${PRERELEASE:-false}" latest=false sha tag rels id draft cur
+	: "${VERSION:?}" "${GITHUB_REPOSITORY:?}" "${GITHUB_SHA:?}" "${DEFAULT_BRANCH:?}"
+	case "${VERSION}" in *-*) pre=true ;; esac
+	sha="$(git -C "${O}" rev-parse --verify -q "${GITHUB_SHA}^{commit}")" || fail "Pubblica" "commit ${GITHUB_SHA} non trovato"
+	# di nuovo, adesso: una release che non e' pre-release solo dal ramo principale
+	if [ "${pre}" != true ] && ! on_default_branch "${sha}"; then
+		fail "Pubblica" "${sha:0:12} non e' su ${DEFAULT_BRANCH}: da qui solo pre-release"
+	fi
+	# il tag, se c'e' gia' (push del tag, o creato nel frattempo), deve essere
+	# sul commit della build
+	tag="$(tag_commit "${VERSION}")" || fail "Pubblica" "origin non risponde (git ls-remote)"
+	if [ -n "${tag}" ] && [ "${tag}" != "${sha}" ]; then
+		fail "Pubblica" "il tag ${VERSION} e' su ${tag:0:12}, la build su ${sha:0:12}: non pubblico"
+	fi
+	# Una release gia' pubblicata con questo tag ferma tutto. Le bozze sono di
+	# un tentativo fallito (il job rilanciato, o un run di prima della stessa
+	# versione): via, e si rifa' da capo.
+	rels="$(release_ids "${VERSION}")" || fail "Pubblica" "elenco delle release illeggibile"
+	while read -r id draft; do
+		[ -n "${id}" ] || continue
+		[ "${draft}" = true ] || fail "Pubblica" "la release ${VERSION} e' gia' pubblicata"
+		echo "  bozza ${id} di un tentativo precedente: la cancello"
+		gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" > /dev/null
+	done <<< "${rels}"
+	# "latest" solo alla versione piu' alta: GitHub fa "latest" ogni release
+	# appena pubblicata, e una versione piu' bassa (una v1.0.1 dopo la v1.1.0,
+	# o il job di una release vecchia rilanciato) farebbe tornare indietro le
+	# console. Mai una pre-release.
+	if [ "${pre}" != true ]; then
+		cur="$(latest_tag)" || fail "Pubblica" "la release latest non si legge"
+		if [ -z "${cur}" ] || newer "${VERSION}" "${cur}"; then latest=true; fi
+	fi
+	local flags=()
+	if [ "${pre}" = true ]; then flags+=(--prerelease); fi
+	cd "${d}"
+	gh release create "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft \
+		--target "${sha}" --title "Lakka RF35H ${VERSION}" \
+		--notes-file RELEASE-NOTES.md "${flags[@]}"
+	gh release upload "${VERSION}" --repo "${GITHUB_REPOSITORY}" --clobber \
+		./*.img.gz ./*.tar update.txt SHA256SUMS
+	gh release edit "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest="${latest}"
+	if [ "${pre}" = true ]; then
+		cur="pre-release: le console non la vedono"
+	elif [ "${latest}" = true ]; then
+		cur="latest: le console si aggiornano a questa"
+	else
+		cur="non latest: resta ${cur}, piu' alta"
+	fi
+	echo "  pubblicata, ${cur}"
+	summ "### Pubblicata: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION} (${cur})"
+	note notice "Release" "${VERSION} pubblicata, ${cur}"
+}
+
 case "${1:-}" in
 	disk)         cmd_disk ;;
 	prepare)      cmd_prepare ;;
@@ -595,6 +775,8 @@ case "${1:-}" in
 	reset)        cmd_reset ;;
 	collect)      cmd_collect ;;
 	check-dist)   cmd_check_dist "${2:-}" ;;
+	version)      cmd_version ;;
+	publish)      cmd_publish "${2:-}" ;;
 	logs)         cmd_logs "${2:-}" ;;
 	ccache-stats) cmd_ccache_stats ;;
 	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;

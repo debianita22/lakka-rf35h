@@ -250,5 +250,115 @@ ok "lo dice nel log" 'grep -q "interrotti: gcc:target mgba:target: si rifanno da
 mkpw; rm -rf "${B}/.threads"; pack failed; rc=$?
 ok "senza .threads (nessuna build in questa parte): non toglie niente" '[ "${rc}" = 0 ] && [ -e "${B}/build/mgba-1.0" ] && [ -e "${B}/build/gcc-15.1.0" ]'
 
+# --- version e publish, con gh e git finti ------------------------------------------
+# git: FAKE_SHA (il commit della build), FAKE_ON_MAIN (yes: e' sul ramo
+# principale), FAKE_LS_REMOTE (righe di git ls-remote). gh: FAKE_RELEASES
+# (righe "<id> <bozza>" delle release col tag), FAKE_LATEST (tag della latest;
+# vuoto: 404; ERRORE: 500). Le chiamate finiscono in calls.log.
+FB="${T}/fakebin"; mkdir -p "${FB}"
+cat > "${FB}/git" <<'EOF'
+#!/bin/bash
+echo "git $*" >> "${CALLS}"
+[ "$1" = -C ] && shift 2
+case "$1 ${2:-}" in
+	"rev-parse --short=7") echo "${FAKE_SHA:0:7}" ;;
+	"rev-parse --is-shallow-repository") echo false ;;
+	"rev-parse --verify")
+		case "${4:-}" in HEAD^{commit}|"${FAKE_SHA}"^{commit}) echo "${FAKE_SHA}" ;; *) exit 1 ;; esac ;;
+	"fetch "*) ;;
+	"merge-base --is-ancestor") [ "${FAKE_ON_MAIN:-yes}" = yes ] ;;
+	"ls-remote --tags") [ -z "${FAKE_LS_REMOTE:-}" ] || printf '%b\n' "${FAKE_LS_REMOTE}" ;;
+	*) echo "git finto: $*" >&2; exit 2 ;;
+esac
+EOF
+cat > "${FB}/gh" <<'EOF'
+#!/bin/bash
+echo "gh $*" >> "${CALLS}"
+case "$*" in
+	"api --paginate repos/"*"/releases?per_page=100 "*) [ -z "${FAKE_RELEASES:-}" ] || printf '%s\n' "${FAKE_RELEASES}" ;;
+	"api repos/"*"/releases/latest "*)
+		case "${FAKE_LATEST:-}" in
+			'') echo '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1 ;;
+			ERRORE) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;
+			*) echo "${FAKE_LATEST}" ;;
+		esac ;;
+	"api -X DELETE "*|"release create "*|"release upload "*|"release edit "*) ;;
+	*) echo "gh finto: $*" >&2; exit 2 ;;
+esac
+EOF
+chmod +x "${FB}/git" "${FB}/gh"
+SHA=0123456789abcdef0123456789abcdef01234567
+export CALLS="${T}/calls.log"
+# ci-build.sh <comando> con gh e git finti; uscita in run.out, output in out.txt
+fake() {
+	: > "${CALLS}"; : > "${T}/out.txt"
+	( export PATH="${FB}:${PATH}" GITHUB_REPOSITORY=o/r DEFAULT_BRANCH=main GITHUB_SHA="${SHA}" \
+		GITHUB_RUN_NUMBER=7 GITHUB_OUTPUT="${T}/out.txt" FAKE_SHA="${SHA}"
+	  bash "${CB}" "$@" > "${T}/run.out" 2>&1 )
+}
+outv() { sed -n "s/^$1=//p" "${T}/out.txt"; }
+called() { grep -q -- "$1" "${CALLS}"; }
+
+echo "version (job setup)"
+vers() { GITHUB_EVENT_NAME="$1" GITHUB_REF_TYPE="$2" GITHUB_REF_NAME="$3" IN_VERSION="${4:-}" IN_PRERELEASE="${5:-false}" fake version; }
+vers workflow_dispatch branch main v1.1.0-rc1 false; rc=$?
+ok "Run workflow v1.1.0-rc1 senza la casella: pre-release" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = true ] && [ "$(outv publish)" = true ]'
+vers workflow_dispatch branch main v1.1.0 true; rc=$?
+ok "Run workflow v1.1.0 con la casella: pre-release" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = true ]'
+vers workflow_dispatch branch main v1.1.0 false; rc=$?
+ok "Run workflow v1.1.0 da main: release, non pre-release" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = false ] && [ "$(outv version)" = v1.1.0 ]'
+vers workflow_dispatch branch prova v1.1.0 false; rc=$?
+ok "Run workflow v1.1.0 da un altro ramo: si ferma" '[ "${rc}" != 0 ] && grep -q "solo pre-release" "${T}/run.out"'
+FAKE_ON_MAIN=no vers workflow_dispatch branch prova v1.1.0 true; rc=$?
+ok "  ...con la casella pre-release: va" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = true ]'
+FAKE_ON_MAIN=no vers push tag v1.1.0; rc=$?
+ok "tag v1.1.0 su un commit fuori da main: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. su main" "${T}/run.out" && called "merge-base --is-ancestor ${SHA} refs/remotes/origin/main"'
+vers push tag v1.1.0; rc=$?
+ok "tag v1.1.0 su main: release" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = false ]'
+FAKE_ON_MAIN=no vers push tag v1.1.0-rc2; rc=$?
+ok "tag v1.1.0-rc2 da qualunque ramo: pre-release" '[ "${rc}" = 0 ] && [ "$(outv prerelease)" = true ] && ! called merge-base'
+FAKE_LS_REMOTE="1111111111111111111111111111111111111111\trefs/tags/v1.1.0" vers workflow_dispatch branch main v1.1.0 false; rc=$?
+ok "Run workflow con un tag che esiste gia': si ferma" '[ "${rc}" != 0 ] && grep -q "il tag v1.1.0 esiste gia" "${T}/run.out"'
+FAKE_RELEASES="42 false" vers push tag v1.1.0; rc=$?
+ok "release gia' pubblicata: si ferma" '[ "${rc}" != 0 ] && grep -q "la release v1.1.0 esiste gia" "${T}/run.out"'
+vers workflow_dispatch branch main ""; rc=$?
+ok "Run workflow senza version: build di prova" '[ "${rc}" = 0 ] && [ "$(outv publish)" = false ] && [ "$(outv version)" = ci-7-0123456 ]'
+IN_RESUME=123 vers workflow_dispatch branch main v1.1.0; rc=$?
+ok "resume_run con una version: si ferma" '[ "${rc}" != 0 ] && grep -q "resume_run solo per le build di prova" "${T}/run.out"'
+
+echo "publish (job release)"
+PD="${T}/pubdist"; mkdir -p "${PD}"
+touch "${PD}/${NAME}.img.gz" "${PD}/${NAME}.tar" "${PD}/update.txt" "${PD}/SHA256SUMS" "${PD}/RELEASE-NOTES.md"
+pub() { VERSION="$1" PRERELEASE="${2:-false}" fake publish "${PD}"; }
+# l'ordine: create (bozza) -> upload -> edit (pubblicata), l'ultima con --latest=$1
+seq_ok() { [ "$(grep -oE '^gh release (create|upload|edit)' "${CALLS}" | tr '\n' ' ')" = "gh release create gh release upload gh release edit " ] && grep -q -- "^gh release edit .*--draft=false --latest=$1$" "${CALLS}"; }
+FAKE_LATEST=v1.1.0 pub v1.2.0; rc=$?
+ok "v1.2.0 dopo la v1.1.0: latest" '[ "${rc}" = 0 ] && seq_ok true && called "release create v1.2.0 --repo o/r --draft --target ${SHA}" && called "release upload v1.2.0 --repo o/r --clobber"'
+ok "  ...non pre-release" '! called "--prerelease"'
+FAKE_LATEST=v1.1.0 pub v1.0.1; rc=$?
+ok "v1.0.1 dopo la v1.1.0: pubblicata, ma non latest" '[ "${rc}" = 0 ] && seq_ok false'
+FAKE_LATEST=v1.9.0 pub v1.10.0; rc=$?
+ok "v1.10.0 dopo la v1.9.0: latest (ordine delle versioni, non delle stringhe)" '[ "${rc}" = 0 ] && seq_ok true'
+pub v1.0.0; rc=$?
+ok "la prima release (nessuna latest, 404): latest" '[ "${rc}" = 0 ] && seq_ok true'
+FAKE_LATEST=v1.1.0-rc1 pub v1.1.0; rc=$?
+ok "v1.1.0 dopo una v1.1.0-rc1 promossa a mano a latest: latest" '[ "${rc}" = 0 ] && seq_ok true'
+FAKE_LATEST=v1.1.0 pub v1.1.0-rc2 false; rc=$?
+ok "v1.1.0-rc2 dopo la v1.1.0: pre-release, la latest resta" '[ "${rc}" = 0 ] && seq_ok false'
+FAKE_LATEST=ERRORE pub v1.2.0; rc=$?
+ok "latest illeggibile (500): si ferma prima di creare" '[ "${rc}" != 0 ] && ! called "release create"'
+FAKE_LATEST=v1.0.0 FAKE_ON_MAIN=no pub v1.1.0-rc1 false; rc=$?
+ok "v1.1.0-rc1 (anche con PRERELEASE=false, fuori da main): pre-release, mai latest" '[ "${rc}" = 0 ] && seq_ok false && called "release create v1.1.0-rc1 .*--prerelease" && ! called "releases/latest"'
+FAKE_ON_MAIN=no pub v1.2.0; rc=$?
+ok "release fuori da main: si ferma prima di creare" '[ "${rc}" != 0 ] && ! called "release create"'
+FAKE_LS_REMOTE="1111111111111111111111111111111111111111\trefs/tags/v1.2.0" pub v1.2.0; rc=$?
+ok "tag v1.2.0 gia' su un altro commit: si ferma" '[ "${rc}" != 0 ] && grep -q "il tag v1.2.0 e. su 111111111111" "${T}/run.out" && ! called "release create"'
+FAKE_LS_REMOTE="2222222222222222222222222222222222222222\trefs/tags/v1.2.0\n${SHA}\trefs/tags/v1.2.0^{}" pub v1.2.0; rc=$?
+ok "tag annotato sullo stesso commit (push del tag): va" '[ "${rc}" = 0 ] && seq_ok true'
+FAKE_RELEASES="555 true" pub v1.2.0; rc=$?
+ok "bozza di un tentativo fallito: cancellata, poi da capo" '[ "${rc}" = 0 ] && called "api -X DELETE repos/o/r/releases/555" && [ "$(grep -n "DELETE" "${CALLS}" | cut -d: -f1)" -lt "$(grep -n "release create" "${CALLS}" | cut -d: -f1)" ]'
+FAKE_RELEASES="556 false" pub v1.2.0; rc=$?
+ok "release gia' pubblicata: si ferma, niente cancellato" '[ "${rc}" != 0 ] && ! called DELETE && ! called "release create"'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]
