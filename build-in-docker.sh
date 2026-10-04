@@ -56,11 +56,27 @@ esac
 ENGINE="$(command -v docker || command -v podman || true)"
 [ -n "${ENGINE}" ] || { echo "Serve docker o podman."; exit 1; }
 
+# Podman, anche dietro il "docker" di podman-docker (che e' podman: lo dice
+# --version). Senza root, Podman porta l'UID dell'utente "b" del container,
+# che e' quello dell'host, su un subuid dell'host: /work, montata, risulta di
+# root e non e' scrivibile: la build si fermerebbe al primo clone (provato
+# con Podman 4.9.3, rootless: "Permission denied" su /work). --userns=keep-id
+# tiene lo stesso UID dentro e fuori, quindi anche i file prodotti restano
+# dell'utente.
+case "$("${ENGINE}" --version 2>/dev/null)" in
+	*[Pp]odman*) PODMAN=yes ;;
+	*)           PODMAN=no ;;
+esac
+
 CTX="$(mktemp -d)"
 trap 'rm -rf "${CTX}"' EXIT
 
+# L'immagine di base col nome completo: per Podman un nome corto come
+# "ubuntu:24.04" dipende dalla configurazione dei registri (alias,
+# unqualified-search-registries) e senza un alias chiede o si ferma; per Docker
+# e' lo stesso riferimento.
 cat > "${CTX}/Dockerfile" <<'DOCKER'
-FROM ubuntu:24.04
+FROM docker.io/library/ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 # Questa lista deve soddisfare scripts/checkdeps di LibreELEC per intero, non
 # "quello che sembra servire": scripts/image lo esegue da se' alla riga 22 e
@@ -194,4 +210,6 @@ if [ -n "${DEVA}" ]; then set -- -v "${DEVA}:/deva:ro,z" "$@"; fi
 if [ -n "${RF35H_CONTAINER:-}" ]; then set -- --name "${RF35H_CONTAINER}" "$@"; fi
 # Il terminale solo se c'e' (in CI no: "the input device is not a TTY").
 if [ -t 0 ] && [ -t 1 ]; then set -- -t "$@"; fi
+# Podman: lo stesso UID dentro e fuori (vedi sopra, dove si riconosce).
+if [ "${PODMAN}" = yes ]; then set -- --userns=keep-id "$@"; fi
 exec "${ENGINE}" run --rm -i -e RF35H_HOST_WORK="${WORK}" -v "${WORK}:/work:z" "$@"
