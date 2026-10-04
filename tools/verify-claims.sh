@@ -466,6 +466,14 @@ M1003C="${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch"
 chk "menu: nessun path_is_valid sui link invocation:" "! grep -q 'path_is_valid(\"/run/systemd/units/invocation:' '$M1003C' && ! grep -q 'path_is_valid(\\\\\"/run/systemd/units/invocation:' '${O}/tools/gen-retroarch-rf35h-menu.py'"
 chk "menu: rf35h_unit_active con lstat, tre file" "[ \"\$(grep -c '^+static bool rf35h_unit_active(const char \*unit)' '$M1003C')\" = 3 ] && grep -q '^+   return lstat(p, &st) == 0;' '$M1003C'"
 
+echo "== Samba: niente condivisioni che danno root"
+# L'ospite senza password e' root: Configfiles (autostart.sh), Services (SSH,
+# password dell'AP) e Update (installato al riavvio) erano codice come root per
+# chiunque nella stessa Wi-Fi; un core o una playlist cambiati pure.
+SMB="${W}/distributions/Lakka/config/smb.conf"
+chk "Samba: via Configfiles, Services e Update" "[ -f '$SMB' ] && ! grep -qE '^\[(Configfiles|Services|Update)\]' '$SMB'"
+chk "Samba: Cores e Playlists in sola lettura"  "(for sh in Cores Playlists; do sed -n \"/^\\[\$sh\\]/,/^\$/p\" '$SMB' | grep -q '^  writeable = no\$' || exit 1; done)"
+
 echo
 if [ "$bad" -eq 0 ]; then
 	echo "tutte le $n verifiche passano"

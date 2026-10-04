@@ -183,11 +183,12 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              35 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              36 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
-                              stamp di RetroArch, ...)
+                              stamp di RetroArch, Samba senza condivisioni
+                              da root, ...)
     tools/                    generatori delle patch RetroArch, checker (#if, @@),
                               verify-claims.sh (le modifiche dichiarate sono
                               presenti?), verify-image.sh, recupero e reflash,

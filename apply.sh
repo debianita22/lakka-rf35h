@@ -185,6 +185,10 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/kconfig-aud
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/kconfig-debug-off-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/busybox-udhcpd-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/connman-blacklist-usb-rf35h.patch"
+# Samba: in Lakka l'ospite senza password e' root. Via le condivisioni che
+# danno codice come root a chiunque nella stessa Wi-Fi (Configfiles,
+# Services, Update); Cores e Playlists in sola lettura.
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/samba-shares-rf35h.patch"
 
 # Ottimizzazione: -O2 lo mette LibreELEC a tutto (CFLAGS_OPTIM_DEFAULT). Qui
 # l'LTO: Mesa sempre; i core solo quelli provati in C/C++ puro, senza
