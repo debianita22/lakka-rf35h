@@ -259,9 +259,11 @@ cp "$O"/patches/retroarch/retroarch-1005-wifi-connect-wait.patch \
 # PulseAudio: 20 pressioni dal 100 % al muto.
 cp "$O"/patches/retroarch/retroarch-1006-volume-steps.patch \
    "$L/packages/lakka/retroarch_base/retroarch/patches/"
-# Il toggle dei servizi Lakka (SSH, Samba, Bluetooth) svuotava il file di
-# configurazione riaccendendoli: per SSH significava perdere la protezione
-# PasswordAuthentication=no e tornare alla password root di default.
+# SSH e Bluetooth: RetroArch svuotava il file del servizio, che contiene anche
+# le opzioni, a ogni salvataggio della configurazione e lo cancellava allo
+# spegnimento dal menu: per SSH voleva dire perdere PasswordAuthentication=no e
+# tornare alla password root di default. Ora spento = <servizio>.disabled, come
+# in LibreELEC.
 cp "$O"/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch \
    "$L/packages/lakka/retroarch_base/retroarch/patches/"
 # connmanctl non controllava mai popen() (un fallimento e' un SEGV) e svuotava

@@ -290,10 +290,10 @@ echo 'SSH_ARGS="-o PasswordAuthentication=no"' > /storage/.cache/services/sshd.c
 systemctl restart sshd
 ```
 
-That file is also SSH's on/off switch: turning SSH off in the menu deletes it,
-line included, so write the line again after turning SSH back on. If you lock
-yourself out, delete the line from `.cache/services/sshd.conf` on the card's
-second partition, from a PC.
+That file is also SSH's on/off switch. Turning SSH off in the menu renames it
+to `sshd.disabled` and turning it back on restores it, so the line stays. If
+you lock yourself out, delete the line from `.cache/services/sshd.conf` on the
+card's second partition, from a PC.
 
 ### USB-C port
 

@@ -1,37 +1,123 @@
-Subject: retroarch: il toggle dei servizi Lakka non svuota piu il file di configurazione
+Subject: retroarch: SSH e Bluetooth non perdono piu le opzioni del servizio
 
-systemd_service_toggle apriva in scrittura il file che fa da interruttore del
-servizio, svuotandolo. Quel file e anche l EnvironmentFile delle opzioni: per
-sshd, SSH_ARGS con PasswordAuthentication=no (la protezione standard contro la
-password root di default) spariva riaccendendo SSH dal menu, e l accesso con
-password tornava attivo senza avviso. Ora il file si crea solo se manca.
-Vale per SSH, Samba e Bluetooth.
+Il file che accende SSH e Bluetooth (sshd.conf e bluez.conf in
+/storage/.cache/services) e anche l EnvironmentFile con le opzioni del
+servizio: per sshd SSH_ARGS="-o PasswordAuthentication=no", la protezione
+standard contro la password root di default. RetroArch lo apriva in scrittura,
+svuotandolo, a ogni salvataggio della configurazione (config_save_on_exit:
+ogni uscita, spegnimento o riavvio dal menu) e a ogni accensione dal menu, e lo
+cancellava allo spegnimento: l accesso con password tornava attivo senza
+avviso. La prima versione di questa patch correggeva solo l accensione dal
+menu, che cosi da sola non bastava.
+
+Ora come fa LibreELEC: spento, il file diventa <servizio>.disabled con il suo
+contenuto; acceso, il .disabled torna .conf, e solo se non c e nessuno dei due
+se ne crea uno vuoto. Un .conf che esiste non si riscrive. Samba non cambia:
+Lakka lo gestisce gia con samba.disabled (retroarch-1000).
 
 ---
+--- a/configuration.c
++++ b/configuration.c
+@@ -1499,6 +1499,46 @@
+    return char_list_new_special(STRING_LIST_TIMEZONES, NULL);
+ }
+ 
++/* devaOS RF35H: SSH e Bluetooth sono accesi se esiste <servizio>.conf, che
++ * e' anche l'EnvironmentFile da cui il servizio legge le sue opzioni (per
++ * sshd SSH_ARGS="-o PasswordAuthentication=no", la protezione di LibreELEC
++ * contro la password root di default). Il codice originale lo apriva in
++ * scrittura, cioe' lo SVUOTAVA, a ogni salvataggio della configurazione
++ * (config_save_on_exit: ogni uscita, spegnimento o riavvio dal menu) e a ogni
++ * accensione dal menu, e lo cancellava allo spegnimento: le opzioni sparivano
++ * senza avviso. Ora come fa LibreELEC, e come si aspetta
++ * bluetooth-defaults.service: spento, il file diventa <servizio>.disabled
++ * con il suo contenuto; acceso, il .disabled torna .conf, e solo se non c'e'
++ * nessuno dei due se ne crea uno vuoto. Un .conf che esiste non si riscrive. */
++void config_set_service_state(const char *conf_path, bool enable)
++{
++   char disabled_path[PATH_MAX_LENGTH];
++   size_t _len = strlen(conf_path);
++
++   if (     _len <= STRLEN_CONST(".conf")
++         || !string_is_equal(conf_path + _len - STRLEN_CONST(".conf"), ".conf"))
++      return;
++   _len -= STRLEN_CONST(".conf");
++   if (_len + sizeof(".disabled") > sizeof(disabled_path))
++      return;
++   memcpy(disabled_path, conf_path, _len);
++   strlcpy(disabled_path + _len, ".disabled", sizeof(disabled_path) - _len);
++
++   if (enable)
++   {
++      if (filestream_exists(conf_path))
++         return;
++      if (     filestream_exists(disabled_path)
++            && filestream_rename(disabled_path, conf_path) == 0)
++         return;
++      filestream_close(filestream_open(conf_path,
++               RETRO_VFS_FILE_ACCESS_WRITE,
++               RETRO_VFS_FILE_ACCESS_HINT_NONE));
++   }
++   else if (filestream_exists(conf_path))
++      filestream_rename(conf_path, disabled_path);
++}
++
+ static void load_timezone(char *s, size_t len)
+ {
+    char haystack[TIMEZONE_LENGTH+32];
+@@ -5740,24 +5780,15 @@
+       video_driver_save_settings(global, conf);
+ 
+ #ifdef HAVE_LAKKA
+-   if (settings->bools.ssh_enable)
+-      filestream_close(filestream_open(LAKKA_SSH_PATH,
+-               RETRO_VFS_FILE_ACCESS_WRITE,
+-               RETRO_VFS_FILE_ACCESS_HINT_NONE));
+-   else
+-      filestream_delete(LAKKA_SSH_PATH);
++   config_set_service_state(LAKKA_SSH_PATH, settings->bools.ssh_enable);
+    if (settings->bools.samba_enable)
+       filestream_delete(LAKKA_SAMBA_DISABLED_FILE_PATH);
+    else
+       filestream_close(filestream_open(LAKKA_SAMBA_DISABLED_FILE_PATH,
+                RETRO_VFS_FILE_ACCESS_WRITE,
+                RETRO_VFS_FILE_ACCESS_HINT_NONE));
+-   if (settings->bools.bluetooth_enable)
+-      filestream_close(filestream_open(LAKKA_BLUETOOTH_PATH,
+-               RETRO_VFS_FILE_ACCESS_WRITE,
+-               RETRO_VFS_FILE_ACCESS_HINT_NONE));
+-   else
+-      filestream_delete(LAKKA_BLUETOOTH_PATH);
++   config_set_service_state(LAKKA_BLUETOOTH_PATH,
++         settings->bools.bluetooth_enable);
+ #endif
+ 
+    for (i = 0; i < MAX_USERS; i++)
+--- a/configuration.h
++++ b/configuration.h
+@@ -1393,6 +1393,7 @@
+ #ifdef HAVE_LAKKA
+ const char *config_get_all_timezones(void);
+ void config_set_timezone(char *timezone);
++void config_set_service_state(const char *conf_path, bool enable);
+ #endif
+ 
+ bool input_config_bind_map_get_valid(unsigned bind_index);
 --- a/menu/menu_setting.c
 +++ b/menu/menu_setting.c
-@@ -9210,10 +9210,21 @@
+@@ -9213,12 +9213,9 @@
  
     if (pid == 0)
     {
-+      /* devaOS RF35H: il file e' l'interruttore del servizio (la unit ha
-+       * ConditionPathExists su di esso), ma e' anche l'EnvironmentFile da cui
-+       * il servizio legge le proprie opzioni. Aprirlo in scrittura lo SVUOTAVA:
-+       * per sshd voleva dire che SSH_ARGS="-o PasswordAuthentication=no" - la
-+       * protezione standard di LibreELEC contro la password root di default -
-+       * spariva la prima volta che si riaccendeva SSH dal menu, e l'accesso con
-+       * password tornava attivo senza alcun avviso. Basta che il file esista:
-+       * lo si crea solo se manca, e il contenuto dell'utente resta. */
-       if (enable)
+-      if (enable)
 -         filestream_close(filestream_open(path,
 -                  RETRO_VFS_FILE_ACCESS_WRITE,
 -                  RETRO_VFS_FILE_ACCESS_HINT_NONE));
-+      {
-+         if (!filestream_exists(path))
-+            filestream_close(filestream_open(path,
-+                     RETRO_VFS_FILE_ACCESS_WRITE,
-+                     RETRO_VFS_FILE_ACCESS_HINT_NONE));
-+      }
-       else
-          filestream_delete(path);
+-      else
+-         filestream_delete(path);
++      /* devaOS RF35H: rinomina invece di svuotare o cancellare, vedi
++       * config_set_service_state() in configuration.c. */
++      config_set_service_state(path, enable);
  
+       execvp(args[0], args);
+    }

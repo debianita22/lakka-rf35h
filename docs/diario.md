@@ -4126,7 +4126,7 @@ lo scraper (credenziali ScreenScraper in HTTPS, mai nei log; ArcadeDB in chiaro
 riceve solo il nome del gioco, API pubblica); la rete USB (niente routing, e
 serve il cavo: accesso fisico).
 
-### 2. Il toggle dei servizi svuotava la configurazione - corretto
+### 2. Il toggle dei servizi svuotava la configurazione - corretto (solo in parte: vedi la correzione del 4/10)
 
 `systemd_service_toggle`, accendendo SSH, Samba o Bluetooth dal menu, apriva
 in scrittura il file che fa da interruttore del servizio, **svuotandolo**. Per
@@ -5146,3 +5146,34 @@ spazio solo) tornano identiche, generate con dash, bash e busybox.
 
 Il Wi-Fi configurato dal menu di RetroArch non aveva il problema: lo crea
 connman sulla console, con il MAC vero.
+
+## SSH: le opzioni sparivano anche salvando la configurazione (4/10/2026)
+
+Rivedendo la guida: `retroarch-1007` correggeva il toggle del menu, ma
+RetroArch tocca lo stesso file anche in `config_save_file()`. Con SSH acceso
+lo apre in scrittura, cioe' lo svuota, a ogni salvataggio della
+configurazione, e Lakka ha `config_save_on_exit = "true"`: ogni uscita,
+spegnimento o riavvio dal menu. Spegnendo SSH dal menu, poi, il file veniva
+cancellato. Quindi `SSH_ARGS="-o PasswordAuthentication=no"` durava fino al
+primo riavvio, e la correzione del punto 2 della revisione di sicurezza non
+bastava. Lo stesso per `bluez.conf`. Samba no: Lakka lo gestisce gia' con
+`samba.disabled` (`retroarch-1000`), e `samba.conf` non viene toccato.
+
+`retroarch-1007` ora fa come LibreELEC (`set_service` del suo add-on delle
+impostazioni, ed e' quello che si aspetta `bluetooth-defaults.service`):
+spento, `<servizio>.conf` diventa `<servizio>.disabled` con il suo
+contenuto; acceso, il `.disabled` torna `.conf`, e solo se non c'e' nessuno
+dei due se ne crea uno vuoto; un `.conf` che esiste non si riscrive. Una sola
+funzione, `config_set_service_state()` in `configuration.c`, usata dal
+salvataggio e dal toggle.
+
+Provato sul RetroArch di Lakka (`69a4f0e`): la serie completa si applica,
+1000-1010 senza fuzz, 99 e 999 con lo stesso fuzz di prima; `configuration.c`
+e `menu_setting.c` compilano con `HAVE_LAKKA` senza warning; la funzione, con
+il `filestream` vero di libretro-common, passa nove casi (acceso da zero,
+salvataggio con le opzioni, spento, rispento, riacceso, entrambi i file,
+nessun file, percorso senza `.conf`), e il controllo negativo sul codice
+originale svuota il file come previsto. Tre righe nuove in `verify-claims`,
+provate anche sulla vecchia patch (mancano tutte e tre). Sulle console con
+un'immagine precedente la riga `SSH_ARGS` e' gia' andata persa: va rimessa
+una volta dopo l'aggiornamento.
