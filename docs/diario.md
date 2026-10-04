@@ -183,7 +183,7 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              33 patch all'albero Lakka (kernel 7.2.7, perf,
+    integration/              34 patch all'albero Lakka (kernel 7.2.7, perf,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, ...)
@@ -4983,3 +4983,22 @@ workflow, non arrivavano nel container (`build-in-docker.sh` passava solo
 Misure utili dalla stessa build: il runner ha un disco solo, 122 GB liberi
 dopo la pulizia (niente `/mnt`), 4 CPU e 15 GB; 83 passi in 34 minuti (la
 toolchain); albero di 20 GB a quel punto.
+
+## Seconda build pulita: strace con gli header della 7.2 (4/10/2026)
+
+La run #4 ha superato glibc ed e' arrivata a 268 passi su 340 in 247 minuti
+(ccache a fine parte: 1,9 GB, 77 816 compilazioni), poi si e' fermata su
+`strace:target`: `static assertion failed: "Unexpected size of arg.resv
+(sizeof(uint64_t) * 3 expected). --enabled-bundled=yes configure option may
+be used to work around that."` (src/macros.h, CHECK_TYPE_SIZE su io_uring).
+Gli header uapi nel sysroot sono quelli del kernel 7.2.7, strace 7.0 e'
+scritto contro quelli della 7.0, e il suo configure di default (`check`) ha
+preso quelli di sistema. `integration/strace-bundled-headers-rf35h.patch`
+aggiunge `--enable-bundled=yes` (opzione verificata nel configure.ac del tag
+v7.0): strace usa la sua copia degli header.
+
+Stessa origine di glibc: l'hash di un pacchetto (`calculate_stamp`) copre i
+suoi file e `PKG_STAMP`, non le dipendenze ne' il kernel. In locale strace
+era quello costruito prima del passaggio alla 7.2.7, e non e' mai stato
+ricostruito. Solo una build da zero dice se l'albero si costruisce davvero,
+ed e' per questo che la CI parte sempre da zero (con la sola ccache).

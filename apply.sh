@@ -163,6 +163,8 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/odroidgo2-u
 # lakka-update (da ssh) installerebbe l'immagine di Lakka per un RK3326
 # generico: sull'RF35H passa a rf35h-update (la voce del menu la toglie la 1003)
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/lakka-update-rf35h.patch"
+# strace 7.0 con gli header del kernel 7.2 non compila: i suoi
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/strace-bundled-headers-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/eventservice-modifier-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/fcft-checksum-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/foot-checksum-rf35h.patch"

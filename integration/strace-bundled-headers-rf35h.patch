@@ -1,0 +1,22 @@
+Subject: strace: header del kernel suoi (--enable-bundled=yes)
+
+Con il kernel 7.2.7 gli header in sysroot sono quelli della 7.2, e strace
+7.0 si ferma su un controllo statico della dimensione di una struttura di
+io_uring ("Unexpected size of arg.resv (sizeof(uint64_t) * 3 expected)").
+Il messaggio stesso suggerisce --enable-bundled=yes: strace usa la copia
+degli header uapi con cui e' stato scritto. Visto alla prima build pulita
+in CI; in locale strace era rimasto quello costruito con gli header della
+7.0 (l'hash di un pacchetto non copre le sue dipendenze).
+
+---
+--- a/packages/debug/strace/package.mk
++++ b/packages/debug/strace/package.mk
+@@ -15,3 +15,8 @@
+ if [ "${TARGET_ARCH}" = x86_64 -o "${TARGET_ARCH}" = "aarch64" ]; then
+   PKG_CONFIGURE_OPTS_TARGET="--enable-mpers=no"
+ fi
++
++# devaOS RF35H: con gli header del kernel 7.2 strace 7.0 non compila (io_uring,
++# "Unexpected size of arg.resv"): i suoi header del kernel, come suggerisce
++# lui stesso. Il default "check" sceglie quelli di sistema.
++PKG_CONFIGURE_OPTS_TARGET+=" --enable-bundled=yes"
