@@ -22,19 +22,29 @@
 # non il default - averlo preso per tale mi aveva portato prima a 72 % e poi a
 # 62 %, entrambi molto piu' alti del vero.
 # --raw N scrive il registro N direttamente, per le prove.
+#
+# La scheda si indica per id ALSA, non per numero. Una cuffia o un DAC USB
+# nella porta USB-C all'avvio (SND_USB_AUDIO=y, porta in host) si registra
+# prima della nostra scheda, che aspetta il modulo dell'amplificatore
+# (SND_SOC_SIMPLE_AMPLIFIER=m), e si prende la 0: con "-c 0" il ripristino e il
+# cursore del menu finivano sulla scheda USB e il DAC restava a fondo scala.
+# L'id e' simple-audio-card,name = "rk817_ext" con i soli caratteri
+# alfanumerici (copy_valid_id_string in sound/core/init.c), come si legge in
+# /proc/asound/cards: "0 [rk817ext]: simple-card - rk817_ext".
 set -u
 STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
 SAVED="${STATE}/dac-volume"
 DEFAULT=28
 CTL="Master Playback Volume"
 AMIXER="${RF35H_AMIXER:-amixer}"
+CARD="${RF35H_CARD_ID:-rk817ext}"
 rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
 is_num() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 pct_to_ctl() { echo $(( ($1 * 255 + 50) / 100 )); }   # volume% -> valore amixer
 ctl_to_reg() { echo $(( 255 - $1 )); }                # solo per stampare il registro
 apply_ctl() {
 	is_num "$1" && [ "$1" -le 255 ] || { echo "rf35h-dac-volume: valore non valido: $1" >&2; return 2; }
-	${AMIXER} -q -c 0 cset name="${CTL}" "$1,$1" 2>/dev/null || { echo "rf35h-dac-volume: amixer fallito (scheda assente?)" >&2; return 1; }
+	${AMIXER} -q -c "${CARD}" cset name="${CTL}" "$1,$1" 2>/dev/null || { echo "rf35h-dac-volume: amixer fallito (scheda ${CARD} assente?)" >&2; return 1; }
 }
 case "${1:-status}" in
 	--restore)
@@ -56,11 +66,11 @@ case "${1:-status}" in
 		# valore e' il CONTROLLO ALSA, non il registro: il registro e' 255 meno
 		# il controllo. Etichettarli male e' stato l'errore che per mezza
 		# giornata ha fatto ragionare all'incontrario sulla scala del volume.
-		c="$(${AMIXER} -c 0 cget name="${CTL}" 2>/dev/null | sed -n 's/^ *: values=\([0-9]*\).*/\1/p')"
+		c="$(${AMIXER} -c "${CARD}" cget name="${CTL}" 2>/dev/null | sed -n 's/^ *: values=\([0-9]*\).*/\1/p')"
 		if is_num "${c}"; then
 			echo "attuale: $(( (c * 100 + 127) / 255 )) % (controllo ${c}, registro $(( 255 - c ))/255, dove 0 = massimo)"
 		else
-			echo "attuale: scheda audio non disponibile"
+			echo "attuale: scheda audio ${CARD} non disponibile"
 		fi ;;
 	*)
 		is_num "$1" && [ "$1" -le 100 ] || { echo "uso: rf35h-dac-volume 0-100 | --raw 0-255 | --restore | status" >&2; exit 2; }

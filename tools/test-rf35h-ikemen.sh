@@ -152,5 +152,28 @@ ok "start vulkan: rifiutato, resta opengl, servizio avviato" '[ "$(state)" = ope
 ok "start con renderer sconosciuto: ignorato, servizio avviato" '[ "$(state)" = opengl ] && grep -q "non applicato" "${T}/out/err" && grep -q "start rf35h-ikemen.service" "${T}/out/systemctl"'
 ${SH} "${L}" renderer opengles
 
+# Disco pieno. La busybox awk esce con 0 anche quando non riesce a scrivere, e
+# "awk > tmp && mv" sostituiva config.ini (o il .lrtl) con un file vuoto o
+# troncato. Qui la scrittura fallisce davvero senza bisogno di root: ulimit -f
+# con SIGXFSZ ignorato, e write() da' EFBIG oltre i 2 kB. awk e' quella della
+# busybox, come sulla console (altrimenti quella dell'host, che l'errore lo vede).
+AWKDIR="${T}/bbawk"; mkdir -p "${AWKDIR}"
+command -v busybox >/dev/null && ln -s "$(command -v busybox)" "${AWKDIR}/awk"
+full() { ( trap '' XFSZ; ulimit -f 2; PATH="${AWKDIR}:${PATH}" "$@" ); }
+{ printf '[Config]\nFirstRun = 0\n'; i=0; while [ ${i} -lt 300 ]; do printf 'Key%03d = valore %03d\n' ${i} ${i}; i=$((i + 1)); done
+  printf '[Video]\nRenderMode = OpenGL ES 3.2\nEnableModelShadow = 0\n'; } > "${C}"
+cp "${C}" "${T}/out/config.prima"
+full ${SH} "${L}" renderer opengl 2>"${T}/out/err"; rc=$?
+ok "disco pieno: renderer fallisce col motivo, config.ini intatto, niente temporanei" '[ ${rc} != 0 ] && grep -q "non riesco a scrivere" "${T}/out/err" && cmp -s "${T}/out/config.prima" "${C}" && ! ls "${G}/save" | grep -q rf35h'
+${SH} "${L}" renderer opengles
+mkdir -p "${T}/pl/logs/IKEMEN GO"; f="${T}/pl/logs/IKEMEN GO/IKEMEN GO.lrtl"
+{ printf '{\n  "version": "1.0",\n  "runtime": "0:59:58",\n'; i=0; while [ ${i} -lt 120 ]; do printf '  "extra_%03d": "riempitivo",\n' ${i}; i=$((i + 1)); done
+  printf '  "state_slot": "0"\n}\n'; } > "${f}"
+cp "${f}" "${T}/out/lrtl.prima"
+mode play3; HOME="${T}" full ${SH} "${L}" run 2>/dev/null
+ok "disco pieno: .lrtl intatto" 'cmp -s "${T}/out/lrtl.prima" "${f}"'
+mode play3; HOME="${T}" ${SH} "${L}" run 2>/dev/null
+ok "  ...con spazio il tempo si somma, il resto resta" 'grep -qE "\"runtime\": \"1:00:0[1-3]\"," "${f}" && [ "$(diff "${T}/out/lrtl.prima" "${f}" | grep -c "^[<>]")" = 2 ]'
+
 echo "--- ${pass} ok, ${fail} falliti"
 [ "${fail}" = 0 ]

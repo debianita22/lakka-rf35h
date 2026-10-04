@@ -13,7 +13,7 @@
 //             entrambe, ma decodifica in base all'estensione)
 //             con nel nome i caratteri &*/:`"<>?\| sostituiti da _, come fa
 //             gfx_thumbnail_fill_content_img in RetroArch.
-//   config    /storage/.config/rf35h/scraper.conf
+//   config    /storage/.config/rf35h/scraper.conf   (0600: ha le credenziali)
 //                DEVID= DEVPASSWORD=      credenziali developer ScreenScraper:
 //                                         senza, l'API rifiuta ogni richiesta;
 //                                         si chiedono sul sito e non sono qui.
@@ -39,6 +39,7 @@
 // ha quote, e risponde per id MAME - proprio dove ScreenScraper e' piu' debole.
 #include <curl/curl.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -124,6 +125,26 @@ static std::string thumbDir(const std::string &db) {
 	if (bar != std::string::npos) d = d.substr(0, bar);
 	if (d.compare(0, 4, "MAME") == 0) return "MAME";
 	return d;
+}
+// Il nome della cartella viene dal db_name della playlist, cioe' da un file
+// che chiunque scriva in /storage (Samba, una playlist copiata) controlla: con
+// "../../.config/rf35h" le cartelle e le immagini finivano fuori da
+// /storage/thumbnails. Deve essere un nome solo: niente '/', '\', "..", niente
+// nome vuoto o che comincia con '.'. I nomi dei sistemi veri non hanno
+// nessuna di queste cose ("Nintendo - Game Boy", "MAME").
+static bool safeDirName(const std::string &d) {
+	return !d.empty() && d[0] != '.' && d.find('/') == std::string::npos &&
+	       d.find('\\') == std::string::npos && d.find("..") == std::string::npos;
+}
+// scraper.conf ha le credenziali di ScreenScraper: lo legge solo il
+// proprietario. --init lo crea 0600; uno scritto a mano o da una versione
+// precedente (0644) si stringe al primo giro.
+static void tightenConf() {
+	struct stat st;
+	if (stat(CONF, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 077)) {
+		if (chmod(CONF, st.st_mode & 0700) == 0) logf("permessi di %s ristretti (erano %03o)", CONF, (unsigned)(st.st_mode & 0777));
+		else logf("non riesco a restringere i permessi di %s", CONF);
+	}
 }
 static std::string thumbBase(const std::string &label) {   // senza estensione
 	std::string s = label;
@@ -505,9 +526,12 @@ int main(int argc, char **argv) {
 	}
 	if (init) {
 		mkdirs(ROOT + "/storage/.config/rf35h");
-		if (exists(CONF)) { fprintf(stderr, "%s esiste gia', non lo tocco\n", CONF); return 1; }
-		FILE *f = fopen(CONF, "w");
-		if (!f) { perror(CONF); return 1; }
+		if (exists(CONF)) { tightenConf(); fprintf(stderr, "%s esiste gia', non lo sovrascrivo\n", CONF); return 1; }
+		// 0600 dalla creazione (fopen "w" dava 0644: credenziali leggibili da
+		// tutti); O_EXCL: se nel frattempo e' comparso, non lo si sovrascrive
+		const int fd = open(CONF, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		FILE *f = fd >= 0 ? fdopen(fd, "w") : nullptr;
+		if (!f) { perror(CONF); if (fd >= 0) close(fd); return 1; }
 		fputs("# rf35h-scrape: credenziali e opzioni. Le credenziali developer di\n"
 		      "# ScreenScraper si chiedono su screenscraper.fr (forum, sezione API):\n"
 		      "# senza, l'API rifiuta ogni richiesta. L'account utente alza la quota.\n"
@@ -525,6 +549,7 @@ int main(int argc, char **argv) {
 	}
 	mkdirs(ROOT + "/storage/.config/rf35h");
 	g_log = fopen(LOG, "w");
+	tightenConf();
 	Conf conf = readConf();
 	if (all) conf.onlyMissing = false;
 	setRegion(regionArg.empty() ? conf.region : regionArg);
@@ -573,7 +598,12 @@ int main(int argc, char **argv) {
 	};
 	for (const Item &it : items) {
 		if (g_stop) { setStatus("stopped " + std::to_string(done) + "/" + std::to_string(total) + " found=" + std::to_string(found)); logf("interrotto"); return 0; }
-		const std::string dir = std::string(THUMBS) + "/" + thumbDir(it.db);
+		const std::string tdir = thumbDir(it.db);
+		if (!safeDirName(tdir)) {
+			logf("salto %s: db_name \"%s\" non e' un nome di cartella valido", it.label.c_str(), it.db.c_str());
+			++skipped; ++done; continue;
+		}
+		const std::string dir = std::string(THUMBS) + "/" + tdir;
 		const std::string name = thumbBase(it.label);
 		const std::string box = dir + "/Named_Boxarts/" + name, snap = dir + "/Named_Snaps/" + name, title = dir + "/Named_Titles/" + name;
 		if (conf.onlyMissing && haveThumb(box)) { ++skipped; ++done; continue; }

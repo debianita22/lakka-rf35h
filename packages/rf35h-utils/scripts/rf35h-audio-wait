@@ -1,14 +1,21 @@
 #!/bin/sh
-# rf35h-audio-wait - aspetta che la scheda audio esista (ExecStartPre di
-# rf35h-audio.service). Al massimo 20 s, poi si va avanti comunque.
+# rf35h-audio-wait - aspetta che la scheda audio dell'rk817 esista
+# (ExecStartPre di rf35h-dacvol.service e rf35h-audio.service). Al massimo
+# 20 s, poi si va avanti comunque.
 #
 # Era una riga di sh inline nella unit. Errore: systemd espande $var nelle
 # righe Exec* PRIMA di passarle a sh, anche fra apici (per un $ letterale serve
 # $$). Il mio $i diventava vuoto e il ciclo usciva subito: l'attesa era un
 # no-op silenzioso. Uno script non ha questo problema.
+#
+# Si aspetta la scheda per id, non card0: /proc/asound/rk817ext e' il link che
+# ALSA crea verso la cardN della scheda (snd_info_card_register). card0 puo'
+# essere una cuffia USB collegata all'avvio, che si registra prima della nostra
+# (vedi rf35h-dac-volume): l'attesa finiva subito e il volume andava sulla
+# scheda sbagliata.
 set -u
 i=0
-while [ ! -e "${RF35H_CARD:-/proc/asound/card0}" ] && [ "$i" -lt 40 ]; do
+while [ ! -e "${RF35H_CARD:-/proc/asound/rk817ext}" ] && [ "$i" -lt 40 ]; do
 	sleep 0.5
 	i=$((i + 1))
 done

@@ -255,6 +255,63 @@ chk "RetroArch: niente core dump"                    "grep -qx 'LimitCORE=0' '$P
 # systemctl enable a ogni boot faceva ricaricare systemd: ~5 s di boot fermo.
 chk "rf35h-ntp: niente ricaricamento di systemd"    "grep -q -- '--no-reload enable' '$P/scripts/rf35h-ntp' && ! grep -qE '^[[:space:]]*systemctl (enable|disable) ' '$P/scripts/rf35h-ntp'"
 
+# Revisione per la v1.1.0, parte console (script, tool C, unit): volume sulla
+# scheda rk817 per id ALSA, LED degli stick non salvati "off" a ogni
+# spegnimento (e rf35h-ledd visto davvero), config.ini di IKEMEN a disco pieno,
+# bootlog che non ferma RetroArch, sospensione rimandata durante update,
+# scraping e transfer, crash log con l'orologio tornato indietro, rf35h-i2c
+# sulla PMIC, scraper (db_name come cartella, scraper.conf 0600).
+dev_audio_card() {   # mai la scheda 0 per numero: con una cuffia USB all'avvio e' lei
+	grep -q 'CARD="${RF35H_CARD_ID:-rk817ext}"' "$P/scripts/rf35h-dac-volume" \
+		&& grep -q 'RF35H_CARD:-/proc/asound/rk817ext' "$P/scripts/rf35h-audio-wait" \
+		&& grep -q 'hw:CARD=${CARD},DEV=0' "$P/scripts/rf35h-audiotest" \
+		&& ! grep -rqE 'amixer[^|;]* -c 0|amixer -q cset|hw:0|asound/card0' "$P/scripts" "$P/system.d" \
+		&& grep -qx 'ExecStart=/usr/bin/rf35h-dac-volume --restore' "$P/system.d/rf35h-dacvol.service"
+}
+dev_led_shutdown() {   # "rf35h-led off" salvava "off" come scelta dell'utente
+	grep -qx 'ExecStop=-/usr/bin/rf35h-led --sleep' "$P/system.d/rf35h-state.service" \
+		&& ! grep -q '^ExecStop=.*rf35h-led off' "$P/system.d/rf35h-state.service"
+}
+dev_ledd_flag() {   # il link invocation: e' un symlink senza bersaglio: -L, non -e
+	grep -q '\[ -L "${_f}" \]' "$P/scripts/rf35h-led" && grep -q '\[ -L "${f}" \]' "$P/scripts/rf35h-statusled"
+}
+dev_ikemen_full() {   # niente "awk > tmp && mv": la busybox awk non segnala gli errori di scrittura
+	local f="${O}/packages/ikemen-go/scripts/rf35h-ikemen"
+	grep -q '^write_atomic()' "$f" && [ "$(grep -c 'write_atomic "' "$f")" -ge 2 ] \
+		&& ! grep -qF '> "${tmp}"' "$f" && ! grep -qF '> "${f}.rf35h.$$"' "$f"
+}
+dev_bootlog() {   # multi-user.target, e quindi RetroArch, non aspetta la diagnosi
+	local u="$P/system.d/rf35h-bootlog.service"
+	grep -qx 'DefaultDependencies=no' "$u" && grep -qx 'Conflicts=shutdown.target' "$u" \
+		&& grep -qx 'Before=shutdown.target' "$u" && grep -qE '^After=.*basic.target' "$u" \
+		&& grep -qx 'Type=oneshot' "$u" && grep -qE '^TimeoutStartSec=[0-9]+$' "$u"
+}
+dev_idle_busy() {
+	local c="$P/sources/rf35h-idle.c"
+	grep -q 'lstat(path, &st)' "$c" && grep -q '"rf35h-update.service", "rf35h-scrape.service"' "$c" \
+		&& grep -q 'usb_gadget/rf35h/UDC' "$c" && grep -q 'const char \*why = busy();' "$c"
+}
+dev_crash_clock() { grep -q '\[ "${age}" -ge 0 \] && \[ "${age}" -lt 60 \]' "$P/scripts/rf35h-crashlog"; }
+dev_i2c_pmic() {   # ogni scrittura all'rk817 (codec e PMIC) solo con RF35H_I2C_FORCE=1
+	local c="$P/sources/rf35h-i2c.c"
+	grep -q 'if (val >= 0 && bus == 0 && addr == 0x20) {' "$c" && grep -q 'strcmp(force, "1") != 0' "$c" \
+		&& ! grep -q 'reg >= 0x10 && reg <= 0x4f && !getenv' "$c"
+}
+dev_scrape() {
+	local c="$P/sources/rf35h-scrape.cpp"
+	grep -q 'if (!safeDirName(tdir))' "$c" && grep -q 'O_WRONLY | O_CREAT | O_EXCL, 0600' "$c" \
+		&& grep -qE '^[[:space:]]+tightenConf\(\);' "$c" && ! grep -q 'fopen(CONF, "w")' "$c"
+}
+chk "audio: scheda rk817 per id, ripristino fallito visibile" "dev_audio_card"
+chk "LED: allo spegnimento --sleep, il modo salvato resta"    "dev_led_shutdown"
+chk "LED: rf35h-ledd attivo visto (symlink invocation, -L)"   "dev_ledd_flag"
+chk "IKEMEN: config.ini e .lrtl intatti a disco pieno"        "dev_ikemen_full"
+chk "bootlog: RetroArch non lo aspetta, durata limitata"      "dev_bootlog"
+chk "idle: sospensione rimandata (update, scrape, transfer)"  "dev_idle_busy"
+chk "crashlog: sentinel nel futuro = scaduto"                 "dev_crash_clock"
+chk "rf35h-i2c: ogni scrittura all'rk817 rifiutata"           "dev_i2c_pmic"
+chk "scraper: db_name come cartella, scraper.conf 0600"       "dev_scrape"
+
 echo "== aggiornamento di sistema e release"
 U="${P}/scripts/rf35h-update"
 chk "rf35h-update: script e due unit"          "[ -x '$U' ] && [ -f '$P/system.d/rf35h-update.service' ] && [ -f '$P/system.d/rf35h-update-boot.service' ]"
