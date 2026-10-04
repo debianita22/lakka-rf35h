@@ -3,8 +3,10 @@
 An overlay that adds the `rf35h` device to the
 [Lakka-LibreELEC](https://github.com/libretro/Lakka-LibreELEC) tree (`devel`
 branch, pinned commit) for the XiFan RF35H handheld: Rockchip RK3326, Mali-G31,
-640×480 panel at 60 Hz. Mainline Linux 7.2.7, Mesa with Panfrost, Wayland and
-sway; RetroArch uses OpenGL ES by default, with Vulkan (PanVK) selectable.
+640×480 panel at 60 Hz. Mainline Linux 7.2 (stable), Mesa with Panfrost,
+Wayland and sway; RetroArch uses OpenGL ES by default, with Vulkan (PanVK)
+selectable. The 19 interpreter cores without a dynarec are built with
+link-time optimization.
 
 It takes the hardware pieces of devaOS (device tree, kernel patches, the two
 out-of-tree drivers, the boot loader) and builds them with LibreELEC's build

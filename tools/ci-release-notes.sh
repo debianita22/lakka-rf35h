@@ -53,6 +53,16 @@ if [ -s "${D}/cores.txt" ]; then
 	echo "RetroArch cores ($(wc -l < "${D}/cores.txt")): $(tr '\n' ' ' < "${D}/cores.txt" | sed 's/ $//; s/ /, /g')."
 fi
 
+# I cambi dall'ultima release vera (le pre-release, con il trattino, no): i
+# soggetti dei commit, in inglese. Serve la storia con i tag (build.yml:
+# checkout con fetch-depth 0); il tag di questa release ancora non c'e'.
+prev="$(git -C "${O}" describe --tags --abbrev=0 --match 'v*' --exclude '*-*' "${sha}^" 2>/dev/null || true)"
+if [ -n "${prev}" ]; then
+	echo
+	echo "Changes since ${prev}:"
+	git -C "${O}" log --no-merges --format='- %s' "${prev}..${sha}"
+fi
+
 if [ -s "${D}/dropped.txt" ]; then
 	echo
 	echo "Left out because they did not build:"

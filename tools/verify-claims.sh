@@ -200,9 +200,31 @@ chk "AP: converte la password pubblica"       "grep -q \"grep -qx 'PASSWORD=Retr
 chk "AP: il menu mostra le credenziali"       "grep -q 'rf35h-ap prepare' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch' && grep -q 'password: %s' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
 chk "toggle servizi: non svuota la config"    "grep -q 'if (!filestream_exists(path))' '${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch'"
 
-# Kernel 7.2.7, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
+# Kernel 7.2.y, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
+# Versione e SHA256 stanno solo in integration/linux-rf35h.patch: l'albero
+# deve avere quelle, e lo SHA256 dev'essere un SHA256.
 LPK="${W}/packages/linux/package.mk"; RKP="${W}/projects/Rockchip/devices/RK3326/patches/linux"; DEF="${W}/packages/linux/patches/default"
-chk "kernel 7.2.7 con il suo SHA256"           "grep -q 'PKG_VERSION=\"7.2.7\"' '$LPK' && grep -q '4ac34c47db2540ffb2713943f8d891ff1702e0ba6934525a493b7d1cad43145a' '$LPK'"
+KV="$(sed -n 's/^+ *PKG_VERSION="\([0-9][0-9.]*\)".*/\1/p' "${O}/integration/linux-rf35h.patch")"
+KS="$(sed -n 's/^+ *PKG_SHA256="\([^"]*\)".*/\1/p' "${O}/integration/linux-rf35h.patch")"
+chk "kernel ${KV:-?} con il suo SHA256"        "[ -n '${KV}' ] && echo '${KS}' | grep -qxE '[0-9a-f]{64}' && grep -q 'PKG_VERSION=\"${KV}\"' '$LPK' && grep -q '${KS}' '$LPK'"
+chk "kernel 7.2.y (ramo supportato)"           "case '${KV}' in 7.2.*) true ;; *) false ;; esac"
+
+# LTO: "+lto", il flag che questa LibreELEC conosce (lto, lto-fat, lto-off),
+# sui core che apply.sh elenca, se l'LTO dei core e' acceso (il build script
+# passa RF35H_CORE_LTO). "+lto-parallel" non esiste: con quello per mesi
+# nessun core ha avuto l'LTO, e nessun controllo se n'era accorto.
+LTOC="$(sed -n 's/.*RF35H_LTO_CORES:-\([a-z0-9_ ]*\)}.*/\1/p' "${O}/apply.sh")"
+nolto=""; nlto=0
+for c in ${LTOC}; do
+	pm="${W}/packages/lakka/libretro_cores/${c}/package.mk"
+	[ -f "${pm}" ] || continue
+	nlto=$((nlto + 1))
+	grep -qE '^PKG_BUILD_FLAGS="([^"]* )?[+]lto( [^"]*)?"' "${pm}" || nolto="${nolto} ${c}"
+done
+if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
+	chk "LTO (+lto) su ${nlto} core${nolto:+, manca a:${nolto}}" "[ ${nlto} -ge 19 ] && [ -z '${nolto}' ]"
+fi
+chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${O}/packages'"
 chk "pila snella: 6 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 6 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
@@ -278,7 +300,7 @@ chk "KMS resta opzionale"                    "[ -f '$O/optional/kms-no-composito
 # build.*/install_pkg/linux-7.2.7 (20 falsi MANCA), la verifica dell'immagine
 # cercava lo script in ${RK}/tools (mai eseguita) e nel container mancava
 # unsquashfs; la firma dell'overlay cambiava fra host e container.
-chk "verify-kernel: sorgente solo da build/"  "grep -qF '/build.*/build/linux-7.' '$O/verify-kernel.sh'"
+chk "verify-kernel: sorgente solo da build/"  "grep -qF '/build.*/build/linux-[0-9]' '$O/verify-kernel.sh'"
 chk "fine build: verify-image dall'overlay"   "grep -qF 'OVERLAY}/tools/verify-image.sh' '$O/build-lakka-rf35h.sh' && ! grep -qF 'RK}/tools/' '$O/build-lakka-rf35h.sh'"
 chk "container con unsquashfs"                "grep -qE '^ +default-jre-headless .*squashfs-tools' '$O/build-in-docker.sh'"
 chk "firma dell'overlay senza percorsi"       "grep -q 'overlay-sig2' '$O/build-lakka-rf35h.sh' && grep -qF 'cd \"\${OVERLAY}\" && find' '$O/build-lakka-rf35h.sh'"

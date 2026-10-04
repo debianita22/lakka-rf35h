@@ -97,9 +97,9 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      --cores "gambatte fceumm genesis_plus_gx snes9x2010 mgba"
   --kms              applica anche optional/kms-no-compositor.patch
                      RetroArch su KMS senza sway. Non al primo tentativo.
-  --no-core-lto      toglie ai core il flag LTO messo dall'overlay. Oggi non
-                     cambia niente: quel flag (+lto-parallel) questa
-                     LibreELEC non lo conosce (docs/diario.md, 3/10)
+  --no-core-lto      toglie l'LTO ai 19 core a cui lo mette l'overlay
+                     (+lto: -flto con i -Werror di LibreELEC). Se un core
+                     con LTO si comporta male sulla console
   --no-vulkan        immagine senza Vulkan (Mesa senza PanVK, RetroArch senza
                      il driver vulkan). Di default Vulkan c'e', come
                      alternativa: OpenGL ES resta il predefinito
@@ -744,7 +744,7 @@ fi
 # dry-run sia prima di una build vera: e' economico, e una regressione trovata
 # qui costa secondi invece delle ore di una build.
 say "Le modifiche dichiarate sono tutte presenti?"
-"${OVERLAY}/tools/verify-claims.sh" "${WORKDIR}" "${OVERLAY}" \
+RF35H_CORE_LTO="${CORE_LTO}" "${OVERLAY}/tools/verify-claims.sh" "${WORKDIR}" "${OVERLAY}" \
 	|| die "una o piu' modifiche dichiarate non sono nell'albero (vedi sopra)"
 
 # La versione dell'immagine. RF35H_VERSION (la CI ci mette il tag della

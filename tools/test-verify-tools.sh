@@ -31,6 +31,9 @@ B="${W}/build.Lakka-RK3326.aarch64"
 K="${B}/build/linux-7.2.7"
 D="${K}/arch/arm64/boot/dts/rockchip"
 mkdir -p "${W}/packages" "${B}/build/linux-7.0.1" "${B}/install_pkg/linux-7.2.7/usr/lib"
+# le variabili dei controlli di versione, come le calcola verify-kernel per
+# un sorgente linux-7.2.7 senza package.mk
+KV=7.2.7; KPL=2; KSL=7
 # ogni check "marcatore" "file" "descrizione": il marcatore, senza ancore, nel file
 grep -E '^check ' "${O}/verify-kernel.sh" > "${T}/checks"
 while IFS= read -r line; do
@@ -56,6 +59,15 @@ f="${K}/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c"; mv "${f}" "${T}/dsi"; rc
 ok "controllo negativo di r-025 senza il file: non passa" '[ "${rc}" = 1 ] && grep -q "riga vecchia rimossa *MANCA" "${T}/vk.out"'
 mv "${B}/build" "${T}/build.off"; rc="$(vk)"; mv "${T}/build.off" "${B}/build"
 ok "sorgente assente (solo install_pkg): esce 2, non 1" '[ "${rc}" = 2 ]'
+# il package.mk chiede un'altra versione: il sorgente in cache non basta
+mkdir -p "${W}/packages/linux"
+printf '    PKG_VERSION="7.2.9" # devaOS RF35H: prova\n' > "${W}/packages/linux/package.mk"
+rc="$(vk)"
+ok "package.mk 7.2.9, sorgente 7.2.7: esce 1 (SUBLEVEL)" '[ "${rc}" = 1 ] && grep -q "kernel 7.2.9 (SUBLEVEL) *MANCA" "${T}/vk.out"'
+printf '    PKG_VERSION="7.2.7" # devaOS RF35H: prova\n' > "${W}/packages/linux/package.mk"
+rc="$(vk)"
+ok "package.mk 7.2.7 come il sorgente: esce 0" '[ "${rc}" = 0 ]'
+rm -r "${W}/packages/linux"
 
 # --- board e immagine finte ----------------------------------------------------------
 BOARD="${T}/board"; mkdir -p "${BOARD}/loader"

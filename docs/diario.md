@@ -5146,3 +5146,50 @@ spazio solo) tornano identiche, generate con dash, bash e busybox.
 
 Il Wi-Fi configurato dal menu di RetroArch non aveva il problema: lo crea
 connman sulla console, con il MAC vero.
+
+## Verso la v1.1: LTO vero, kernel 7.2.9, note di release (4/10/2026)
+
+Chiesto dall'utente: "procedi con tutto quello che puoi fare gia', alla fine
+provero' la release nuova ottimizzata".
+
+**LTO.** Questa LibreELEC conosce tre flag: `lto`, `lto-fat`, `lto-off`
+(`setup_toolchain` in config/functions; `flag_enabled` confronta parole
+intere). `+lto-parallel`, preso da una LibreELEC vecchia, non corrispondeva a
+niente: i 19 core, Mesa e wpa_supplicant non hanno mai avuto l'LTO. Elencando
+i flag usati nell'albero contro quelli che `flag_enabled` conosce,
+`lto-parallel` e' l'unico sconosciuto (22 pacchetti); `gold`, `bfd`, `mold`
+sono i linker, che si guardano a parte. Ora i core hanno `+lto`: `-flto=N
+-fno-fat-lto-objects` piu' i `-Werror=odr`, `-Werror=lto-type-mismatch`,
+`-Werror=strict-aliasing` di LibreELEC, che fermano un core su cui l'LTO
+rischierebbe codice sbagliato (`-Werror=x` accende anche `-Wx`). Un core che
+non compila cosi' lo toglie `--keep-going`, e la build di prova dice quali.
+Mesa su un ramo a parte (`ci-test/mesa-lto`): e' un pacchetto di sistema, e un
+suo errore fermerebbe la build prima dei core. wpa_supplicant senza LTO:
+per un demone del Wi-Fi non serve. verify-claims controlla `+lto` sui 19 core
+(se l'LTO dei core e' acceso: il build script passa `RF35H_CORE_LTO`) e che
+`+lto-parallel` non ci sia piu'. `--no-core-lto` torna a voler dire qualcosa.
+
+**Kernel 7.2.9** (uscito il 3/10). SHA256 di `linux-7.2.9.tar.xz` da due
+fonti indipendenti: l'hash di nixpkgs (`kernels-org.json`, base32 di Nix
+convertito; la stessa conversione da' per la 7.2.7 il valore gia' in uso) e
+il `sha256sums.asc` di kernel.org; coincidono. Le 8 patch del kernel (0062 e
+9901 generiche, poi 0000, 0012, r-024, r-025, z-002, z-010 del device,
+nell'ordine di scripts/unpack) applicano a fuzz 0 sul tag v7.2.9 del mirror
+stable. Fra 7.2.7 e 7.2.9 nelle parti che ci riguardano (panfrost, drm
+rockchip, dw_mmc, rk817, dts px30, audio) nessun cambiamento; piccoli fix nel
+core mmc e nel governor termico step_wise.
+
+La versione ora sta in un posto solo, `integration/linux-rf35h.patch` (era
+`linux-7.2.7-rf35h.patch`): apply.sh la legge per il controllo finale,
+verify-claims controlla che l'albero abbia quella versione e quello SHA256,
+verify-kernel ricava PATCHLEVEL e SUBLEVEL attesi dal package.mk dell'albero
+(non piu' "7" scritto nello script) e cerca il sorgente in `linux-[0-9]*`.
+test-verify-tools: 38 prove (2 nuove: package.mk 7.2.9 con sorgente 7.2.7
+in cache esce 1 sul SUBLEVEL; versioni uguali esce 0).
+
+**CI.** Il titolo di ogni run dice cosa costruisce ("Release v1.1.0",
+"Build di prova (ramo)", "ripresa da N"): gli input di Run workflow non si
+vedono dall'API, e nella run #8 non si poteva dire se era una release. Le
+note di release elencano i commit dall'ultima release vera (`git describe`
+escludendo i tag con il trattino; il checkout del job release ora ha la
+storia intera). Provato su un clone con tag finti.

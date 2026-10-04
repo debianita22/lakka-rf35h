@@ -33,7 +33,8 @@ PKG_SOURCE_DIR="wpa-${PKG_VERSION}"
 PKG_DEPENDS_TARGET="toolchain dbus libnl openssl"
 PKG_LONGDESC="A free software implementation of an IEEE 802.11i supplicant."
 PKG_TOOLCHAIN="make"
-PKG_BUILD_FLAGS="+lto-parallel"
+# Niente LTO: "+lto-parallel" (della v5.x) qui non esiste e non faceva niente,
+# e per un demone del Wi-Fi l'LTO non porta niente che si veda.
 
 PKG_MAKE_OPTS_TARGET="-C wpa_supplicant V=1 LIBDIR=/usr/lib BINDIR=/usr/bin"
 PKG_MAKEINSTALL_OPTS_TARGET="-C wpa_supplicant V=1 LIBDIR=/usr/lib BINDIR=/usr/bin"
