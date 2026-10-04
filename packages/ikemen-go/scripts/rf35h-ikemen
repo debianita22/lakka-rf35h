@@ -89,15 +89,27 @@ ini_get() {
 	}' "$1"
 }
 
+# write_atomic <file> <contenuto>: il contenuto (piu' un a capo) in un file
+# temporaneo accanto, poi rename. Il contenuto passa da una variabile, non da
+# "awk > tmp": la busybox awk esce con 0 anche quando la scrittura fallisce
+# (awk_exit non guarda ferror), quindi con /storage pieno "awk > tmp && mv"
+# metteva al posto del file uno vuoto o troncato. printf e' un builtin di ash
+# e un errore di scrittura gli da' un codice diverso da 0 (evalbltin:
+# status |= ferror(stdout)): il temporaneo si butta e il file resta com'era.
+write_atomic() {
+	[ -n "$2" ] || return 1
+	printf '%s\n' "$2" > "$1.rf35h.$$" && mv -f "$1.rf35h.$$" "$1" || { rm -f "$1.rf35h.$$"; return 1; }
+}
+
 # ini_set <file> <sezione> <chiave> <valore>: cambia solo il valore e lascia
 # com'e' il resto della riga a sinistra dell'uguale (IKEMEN allinea le colonne);
 # aggiunge la chiave in fondo alla sezione, o la sezione in fondo al file.
-# Scrittura su file temporaneo e rename: un'interruzione non lascia un
-# config.ini a meta', che IKEMEN rimpiazzerebbe con i valori di fabbrica.
+# Scrittura su file temporaneo e rename (write_atomic): un'interruzione o il
+# disco pieno non lasciano un config.ini a meta', che IKEMEN rimpiazzerebbe
+# con i valori di fabbrica.
 ini_set() {
 	[ "$(ini_get "$1" "$2" "$3")" = "$4" ] && return 0
-	tmp="$1.rf35h.$$"
-	awk -v sec="$2" -v key="$3" -v val="$4" '
+	new="$(awk -v sec="$2" -v key="$3" -v val="$4" '
 	function flush() { if (insec && !done) { print key " = " val; done = 1 } }
 	/^[[:space:]]*\[/ {
 		if (insec) flush()
@@ -118,7 +130,8 @@ ini_set() {
 	END {
 		if (insec) flush()
 		if (!seen) { print ""; print "[" sec "]"; print key " = " val }
-	}' "$1" > "${tmp}" && mv -f "${tmp}" "$1" || { rm -f "${tmp}"; return 1; }
+	}' "$1")" || return 1
+	write_atomic "$1" "${new}"
 }
 
 # Il file di stato ("renderer" lo stampa, il core lanciatore lo mostra fra le
@@ -154,13 +167,14 @@ runtime_add() {
 	esac
 	for f in "${dir}/IKEMEN GO/IKEMEN GO.lrtl" "${dir}/IKEMEN GO.lrtl"; do
 		[ -f "${f}" ] || continue
-		awk -v add="$1" '
+		# come ini_set: awk in memoria, poi write_atomic (disco pieno = file intatto)
+		new="$(awk -v add="$1" '
 		/"runtime"[[:space:]]*:/ && match($0, /"[0-9]+:[0-9][0-9]:[0-9][0-9]"/) {
 			split(substr($0, RSTART + 1, RLENGTH - 2), t, ":")
 			sec = t[1] * 3600 + t[2] * 60 + t[3] + add
 			$0 = substr($0, 1, RSTART) sprintf("%d:%02d:%02d", int(sec / 3600), int((sec % 3600) / 60), sec % 60) substr($0, RSTART + RLENGTH - 1)
 		}
-		{ print }' "${f}" > "${f}.rf35h.$$" && mv -f "${f}.rf35h.$$" "${f}" || rm -f "${f}.rf35h.$$"
+		{ print }' "${f}")" && write_atomic "${f}" "${new}"
 	done
 }
 
