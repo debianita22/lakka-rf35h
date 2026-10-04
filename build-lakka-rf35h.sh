@@ -735,9 +735,12 @@ if [ -n "${CORES}" ]; then
 	fi
 else
 	say "Core libretro"
+	# contati da CORES_DEFAULT, non scritti: il numero scritto era rimasto a 13
+	# quando il set e' passato a 30
+	n=0; for c in ${CORES_DEFAULT}; do n=$((n+1)); done
 	warn "tutti i ~120 di Lakka per RK3326, mame/ppsspp/scummvm compresi: sono ore,"
 	warn "e su questo SoC molti non sono giocabili. Il default (senza --all-cores)"
-	warn "e' un set curato di 13."
+	warn "e' un set curato di ${n}."
 fi
 
 # Ogni modifica dichiarata deve essere davvero nell'albero. Si verifica sia al
