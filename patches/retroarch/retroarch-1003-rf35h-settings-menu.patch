@@ -69,7 +69,7 @@
  #if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
     SETTING_UINT("menu_screensaver_animation",    &settings->uints.menu_screensaver_animation, true, DEFAULT_MENU_SCREENSAVER_ANIMATION, false);
  #endif
-@@ -3776,6 +3796,119 @@
+@@ -3776,6 +3796,137 @@
   * Loads a config file and reads all the values into memory.
   *
   */
@@ -114,6 +114,24 @@
 +   s[n] = '\0';
 +   if (!*s)
 +      strlcpy(s, def, len);
++}
++
++/* devaOS RF35H: quanto e' grande l'array a cui punta ptr. config_load_file
++ * leggeva ogni array con PATH_MAX_LENGTH: le nostre tendine sono di 8-64
++ * byte, e un valore lungo scritto a mano in retroarch.cfg traboccava sui
++ * campi vicini di settings_t. Gli array di RetroArch restano come sono. */
++static size_t rf35h_array_size(settings_t *settings, const char *ptr)
++{
++#define RF35H_ARRAY_SIZE(a) if (ptr == settings->arrays.a) return sizeof(settings->arrays.a)
++   RF35H_ARRAY_SIZE(rf35h_joyled);
++   RF35H_ARRAY_SIZE(rf35h_statusled);
++   RF35H_ARRAY_SIZE(rf35h_usb_mode);
++   RF35H_ARRAY_SIZE(rf35h_audio_out);
++   RF35H_ARRAY_SIZE(rf35h_scrape_region);
++   RF35H_ARRAY_SIZE(rf35h_ledspeed);
++   RF35H_ARRAY_SIZE(rf35h_ntp_server);
++#undef RF35H_ARRAY_SIZE
++   return PATH_MAX_LENGTH;
 +}
 +
 +/* devaOS RF35H: con "Audio Output = usb" audio_device nomina la scheda USB-C
@@ -189,9 +207,16 @@
  static bool config_load_file(global_t *global,
        const char *path, settings_t *settings)
  {
-@@ -4058,6 +4191,9 @@
+@@ -4056,8 +4207,16 @@
+    {
+       if (array_settings[i].flags & CFG_BOOL_FLG_HANDLE)
           config_get_array(conf, array_settings[i].ident,
++#ifdef HAVE_LAKKA
++               array_settings[i].ptr,
++               rf35h_array_size(settings, array_settings[i].ptr));
++#else
                 array_settings[i].ptr, PATH_MAX_LENGTH);
++#endif
     }
 +#ifdef HAVE_LAKKA
 +   rf35h_arrays_fill(settings);

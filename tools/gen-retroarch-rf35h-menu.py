@@ -412,6 +412,24 @@ static void rf35h_array_fill(char *s, size_t len, const char *state,
       strlcpy(s, def, len);
 }
 
+/* devaOS RF35H: quanto e' grande l'array a cui punta ptr. config_load_file
+ * leggeva ogni array con PATH_MAX_LENGTH: le nostre tendine sono di 8-64
+ * byte, e un valore lungo scritto a mano in retroarch.cfg traboccava sui
+ * campi vicini di settings_t. Gli array di RetroArch restano come sono. */
+static size_t rf35h_array_size(settings_t *settings, const char *ptr)
+{
+#define RF35H_ARRAY_SIZE(a) if (ptr == settings->arrays.a) return sizeof(settings->arrays.a)
+   RF35H_ARRAY_SIZE(rf35h_joyled);
+   RF35H_ARRAY_SIZE(rf35h_statusled);
+   RF35H_ARRAY_SIZE(rf35h_usb_mode);
+   RF35H_ARRAY_SIZE(rf35h_audio_out);
+   RF35H_ARRAY_SIZE(rf35h_scrape_region);
+   RF35H_ARRAY_SIZE(rf35h_ledspeed);
+   RF35H_ARRAY_SIZE(rf35h_ntp_server);
+#undef RF35H_ARRAY_SIZE
+   return PATH_MAX_LENGTH;
+}
+
 /* devaOS RF35H: con "Audio Output = usb" audio_device nomina la scheda USB-C
  * (plughw:CARD=<id>,DEV=0; prima plughw:<indice>,0). La USB-C e' anche la
  * porta di ricarica: se all'avvio quella scheda non c'e', ALSA non apre il
@@ -490,6 +508,20 @@ RF35H_ARRAY_LOOP = ('   /* Array settings  */\n'
     '         config_get_array(conf, array_settings[i].ident,\n'
     '               array_settings[i].ptr, PATH_MAX_LENGTH);\n'
     '   }\n')
+# devaOS RF35H: le 7 tendine sono array di 8-64 byte dentro settings_t, e il
+# ciclo li leggeva con PATH_MAX_LENGTH: un valore lungo scritto a mano in
+# retroarch.cfg traboccava sui campi vicini. Per le nostre il ciclo passa la
+# dimensione vera (rf35h_array_size); gli array di RetroArch restano come sono.
+# (Non con un campo in config_array_setting riempito da SETTING_ARRAY: quella
+# macro registra anche due path, log_dir e app_icon, in populate_settings_path.)
+RF35H_ARRAY_LOOP_LEN = RF35H_ARRAY_LOOP.replace(
+    '               array_settings[i].ptr, PATH_MAX_LENGTH);\n',
+    '#ifdef HAVE_LAKKA\n'
+    '               array_settings[i].ptr,\n'
+    '               rf35h_array_size(settings, array_settings[i].ptr));\n'
+    '#else\n'
+    '               array_settings[i].ptr, PATH_MAX_LENGTH);\n'
+    '#endif\n')
 edit("configuration.c", [
     ('   SETTING_BOOL("menu_show_online_updater",      &settings->bools.menu_show_online_updater, true, DEFAULT_MENU_SHOW_ONLINE_UPDATER, false);\n',
      '   SETTING_BOOL("menu_show_online_updater",      &settings->bools.menu_show_online_updater, true, DEFAULT_MENU_SHOW_ONLINE_UPDATER, false);\n'
@@ -520,7 +552,7 @@ edit("configuration.c", [
     ("static bool config_load_file(global_t *global,\n",
      RF35H_ARRAYS_FILL + "static bool config_load_file(global_t *global,\n"),
     (RF35H_ARRAY_LOOP,
-     RF35H_ARRAY_LOOP + "#ifdef HAVE_LAKKA\n   rf35h_arrays_fill(settings);\n#endif\n"),
+     RF35H_ARRAY_LOOP_LEN + "#ifdef HAVE_LAKKA\n   rf35h_arrays_fill(settings);\n#endif\n"),
 ])
 
 # --------------------------------------------------------- menu_displaylist.h
