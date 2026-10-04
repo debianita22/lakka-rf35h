@@ -198,7 +198,12 @@ chk "led raw: validazione stretta"            "grep -q '(0-255 o 0x00-0xFF)' '$P
 chk "AP: nessuna password pubblica di default" "grep -q 'gen_pass()' '$P/scripts/rf35h-ap' && ! grep 'printf' '$P/scripts/rf35h-ap' | grep -q 'PASSWORD=RetroArch'"
 chk "AP: converte la password pubblica"       "grep -q \"grep -qx 'PASSWORD=RetroArch'\" '$P/scripts/rf35h-ap'"
 chk "AP: il menu mostra le credenziali"       "grep -q 'rf35h-ap prepare' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch' && grep -q 'password: %s' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
-chk "toggle servizi: non svuota la config"    "grep -q 'if (!filestream_exists(path))' '${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch'"
+# 1007: non basta il toggle del menu, anche il salvataggio della configurazione
+# (a ogni uscita, spegnimento o riavvio) svuotava sshd.conf
+R1007="${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch"
+chk "servizi: il salvataggio non svuota sshd.conf" "grep -q '^+   config_set_service_state(LAKKA_SSH_PATH, settings->bools.ssh_enable);' '$R1007' && grep -q '^-      filestream_delete(LAKKA_SSH_PATH);' '$R1007'"
+chk "servizi: il toggle non svuota la config"  "grep -q '^+   config_set_service_state(path, enable);' '$R1007'"
+chk "servizi: spento = .disabled, come LibreELEC" "grep -q '^+      filestream_rename(conf_path, disabled_path);' '$R1007' && grep -q '^+            && filestream_rename(disabled_path, conf_path) == 0)' '$R1007'"
 
 # Kernel 7.2.y, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
 # Versione e SHA256 stanno solo in integration/linux-rf35h.patch: l'albero
