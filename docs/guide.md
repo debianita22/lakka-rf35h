@@ -217,7 +217,7 @@ are mounted under `/media`.
 
 ### Cores
 
-The default image has 30 libretro cores: a main core and, where one exists, a
+The default image has 34 libretro cores: a main core and, where one exists, a
 fallback for each system. Names are the ones `--cores` takes.
 
 | System | Main | Fallback |
@@ -233,14 +233,20 @@ fallback for each system. Names are the ones `--cores` takes.
 | Neo Geo, CPS1/2/3 | `fbneo` | `fbalpha2012`, `mame2010` |
 | MAME (0.139 romset) | `mame2010` | `mame2015` (0.160; many 0.139 sets load) |
 | Nintendo 64 | `mupen64plus_next` | `parallel_n64` |
+| PlayStation | `pcsx_rearmed` | none in the default set (`swanstation` with `--cores`) |
 | Neo Geo Pocket | `beetle_ngp` | `race` |
+| WonderSwan / Color | `beetle_wswan` | none |
+| Atari Lynx | `handy` | `beetle_lynx` |
 | Atari 2600 | `stella2014` | `stella` |
 | Nintendo DS | `melonds` | `melondsds` |
 | Amstrad CPC | `cap32` | `crocods` |
 | Dreamcast | `flycast` | none |
 
-Other systems (PlayStation, WonderSwan, Lynx and more) need an image built
-with `--cores` or `--all-cores` (see [Build options](#build-options)).
+`pcsx_rearmed` and `handy` run without BIOS files; a real PlayStation BIOS
+(`scph5501.bin` and the like) improves compatibility, and `beetle_lynx` needs
+`lynxboot.img`. *Settings > Core > Manage Cores*, then a core, lists the BIOS
+files it looks for and whether they are present. Other systems need an image
+built with `--cores` or `--all-cores` (see [Build options](#build-options)).
 
 Per-core defaults, copied to `/storage/.config/retroarch/config/` only when
 missing (delete a file to get the default back):

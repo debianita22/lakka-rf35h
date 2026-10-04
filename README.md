@@ -34,7 +34,7 @@ need a port (device tree, boot loader, controls): see
 
 ## Features
 
-- RetroArch with a curated set of 30 libretro cores: a main core and, where
+- RetroArch with a curated set of 34 libretro cores: a main core and, where
   one exists, a fallback for each system, chosen for the Cortex-A35. All of
   Lakka's RK3326 cores are available as a build option.
 - Mesa Panfrost with OpenGL ES by default; Vulkan (PanVK) selectable in

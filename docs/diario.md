@@ -3100,7 +3100,7 @@ peggio. Due righe arrivavano prima del logo:
 
 Non si e' abbassato `loglevel`: gli errori veri devono restare visibili.
 
-## Core: 30 di default, principale e riserva per ogni sistema
+## Core: 30 di default, principale e riserva per ogni sistema (34 dal 4/10)
 
 Ognuno verificato nel suo `package.mk` e nel suo Makefile: che esista per
 aarch64, come rileva l'architettura in cross, se ha dynarec.
@@ -5177,3 +5177,35 @@ originale svuota il file come previsto. Tre righe nuove in `verify-claims`,
 provate anche sulla vecchia patch (mancano tutte e tre). Sulle console con
 un'immagine precedente la riga `SSH_ARGS` e' gia' andata persa: va rimessa
 una volta dopo l'aggiornamento.
+
+## Core: PlayStation, WonderSwan e Lynx nel set di default (4/10/2026)
+
+Il set di default seguiva i sistemi della nostra collezione, ma le immagini
+delle release le usa anche chi ha altri giochi, e un core che manca
+nell'immagine si aggiunge solo ricompilando. Mancavano la PlayStation, uno
+dei sistemi piu' giocati su questi handheld, e WonderSwan e Lynx, che avevano
+gia' i loro override di scala intera (`Beetle WonderSwan`, `Handy`) senza
+avere il core. Entrano quattro core, da 30 a 34:
+
+| sistema | principale | riserva |
+|---|---|---|
+| PlayStation | `pcsx_rearmed` | nessuna nel default |
+| WonderSwan / Color | `beetle_wswan` | nessuna: unico core WonderSwan |
+| Atari Lynx | `handy` | `beetle_lynx` |
+
+Verificati sull'albero pinnato: i quattro `package.mk` esistono, e per
+Rockchip Lakka esclude solo `lr_moonlight` e `vitaquake3`, quindi li compila
+gia' nelle sue immagini RK3326. `pcsx_rearmed` su aarch64 va con
+`platform=unix DYNAREC=ari64`, e al commit pinnato (`3a7850f`) il dynarec ha
+il backend arm64 (`assem_arm64.c`, `linkage_arm64.o` con `ARCH` aarch64 da
+`-dumpmachine`). I `library_name` letti nei sorgenti ai commit pinnati:
+`PCSX-ReARMed`, `Beetle WonderSwan`, `Handy`, `Beetle Lynx`; per l'ultimo un
+override nuovo, uguale a quello di Handy (Lynx 4x), e `verify-claims` conta 11
+`.cfg`. BIOS dal core-info pinnato (`bd81a0b`): facoltativi per
+`pcsx_rearmed` (`scph5500/5501/5502.bin`, `psxonpsp660.bin`) e `handy`
+(`lynxboot.img`), obbligatorio per `beetle_lynx`.
+
+Fuori: `swanstation` (DuckStation) come riserva PlayStation: piu' pesante di
+`pcsx_rearmed`, e non provato qui; Lakka stessa lo toglie sul Pi Zero 2.
+`beetle_psx` lo e' ancora di piu'. Entrambi restano a un `--cores` di
+distanza. Niente LTO sui nuovi: la lista resta quella dei core provati.

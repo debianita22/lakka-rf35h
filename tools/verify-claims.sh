@@ -179,7 +179,7 @@ echo "== pacchetto rf35h-utils"
 chk "DAC: default 28% applicato sempre"      "grep -q '^DEFAULT=28' '$P/scripts/rf35h-dac-volume' && ! grep -q '^ConditionPathExists' '$P/system.d/rf35h-dacvol.service'"
 chk "headphone-sense non abilitato"          "! grep -q 'enable_service rf35h-audio.service' '$P/package.mk'"
 chk "servizi rk915-load, overrides, dacvol"  "grep -q 'enable_service rf35h-rk915-load.service' '$P/package.mk' && grep -q 'enable_service rf35h-overrides.service' '$P/package.mk' && grep -q 'enable_service rf35h-dacvol.service' '$P/package.mk'"
-chk "override: 10 .cfg e 1 .opt"             "[ \$(find '$P/overrides' -name '*.cfg' | wc -l) = 10 ] && [ \$(find '$P/overrides' -name '*.opt' | wc -l) = 1 ]"
+chk "override: 11 .cfg e 1 .opt"             "[ \$(find '$P/overrides' -name '*.cfg' | wc -l) = 11 ] && [ \$(find '$P/overrides' -name '*.opt' | wc -l) = 1 ]"
 chk "rf35h-i2c rifiuta scritture al codec"   "grep -q RF35H_I2C_FORCE '$P/sources/rf35h-i2c.c'"
 chk "timesyncd: nessun ordinamento"          "! grep -qE '^(After|Wants|Requires)=' '$P'/system.d/systemd-timesyncd.service.d/*.conf"
 
