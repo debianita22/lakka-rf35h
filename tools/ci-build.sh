@@ -372,13 +372,16 @@ le() {
 # Una libreria ELF a 64 bit little-endian per aarch64 (ET_DYN, EM_AARCH64),
 # intera: la tabella delle sezioni (e_shoff + e_shnum * e_shentsize), che il
 # linker scrive in fondo, sta dentro il file. Provata sui 34 core della v1.0.0.
+# Un e_shoff col bit alto acceso in bash e' negativo: fuori anche quello.
 elf_ok() {
-	local so="$1" h size
+	local so="$1" h size off end
 	size="$(stat -c%s "${so}")"
 	[ "${size}" -ge 64 ] || return 1
 	h="$(od -An -v -tx1 -N64 "${so}" | tr -d ' \n')"
 	[ "${h:0:12}" = 7f454c460201 ] && [ "${h:32:8}" = 0300b700 ] || return 1
-	[ "$(( $(le "${h:80:16}") + $(le "${h:120:4}") * $(le "${h:116:4}") ))" -le "${size}" ]
+	off="$(le "${h:80:16}")"
+	end=$(( off + $(le "${h:120:4}") * $(le "${h:116:4}") ))
+	[ "${off}" -ge 0 ] && [ "${end}" -ge "${off}" ] && [ "${end}" -le "${size}" ]
 }
 
 # Il SYSTEM prima di darlo alle console. Scrive <dir>/cores.txt (i nomi dei

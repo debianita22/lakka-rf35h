@@ -54,7 +54,7 @@ mkelf() {
 		printf '\x03\x00\xb7\x00\x01\x00\x00\x00'                          # ET_DYN, EM_AARCH64, versione
 		printf '\x00\x00\x00\x00\x00\x00\x00\x00'                          # e_entry
 		printf '\x00\x00\x00\x00\x00\x00\x00\x00'                          # e_phoff
-		printf '%b' "$(le8 $((64 + n)))"                                    # e_shoff
+		printf '%b' "$(le8 "${3:-$((64 + n))}")"                            # e_shoff ($3: un altro)
 		printf '\x00\x00\x00\x00\x40\x00\x38\x00\x00\x00\x40\x00\x02\x00\x01\x00'
 		head -c "${n}" /dev/zero
 		head -c 128 /dev/zero
@@ -133,6 +133,9 @@ if command -v mksquashfs >/dev/null 2>&1 && command -v unsquashfs >/dev/null 2>&
 	head -c 3000 "${R}/usr/lib/libretro/mgba_libretro.so" > "${T}/half"; cp "${T}/half" "${R}/usr/lib/libretro/mgba_libretro.so"
 	collect "${R}"; rc=$?
 	ok "un core troncato (ELF senza la tabella delle sezioni): fallisce" '[ "${rc}" != 0 ] && grep -q "mgba_libretro.so (3000 byte" "${T}/collect.out"'
+	mkelf "${R}/usr/lib/libretro/mgba_libretro.so" 1000 -64
+	collect "${R}"; rc=$?
+	ok "un core con e_shoff assurdo (bit alto: negativo in bash): fallisce" '[ "${rc}" != 0 ] && grep -q "core rotti.*mgba_libretro.so" "${T}/collect.out"'
 	echo "non sono un ELF" > "${R}/usr/lib/libretro/mgba_libretro.so"
 	collect "${R}"; rc=$?
 	ok "un core che non e' un ELF: fallisce" '[ "${rc}" != 0 ] && grep -q "core rotti.*mgba_libretro.so" "${T}/collect.out"'
