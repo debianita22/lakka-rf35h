@@ -1,11 +1,10 @@
 Subject: linux: kernel 7.2.y per la RF35H
 
 Il ramo 7.0 e fuori supporto dal 27/06/2026. E' l'unico posto con la versione
-del kernel: apply.sh, verify-claims e verify-kernel la leggono da qui.
-SHA256 di linux-7.2.9.tar.xz: lo stesso nell'hash di nixpkgs
-(kernels-org.json, base32 1fnqp28v... convertito) e nel sha256sums.asc di
-kernel.org (v7.x); i due confrontati il 4/10/2026. Le 8 patch del kernel
-applicano a fuzz 0 sul tag v7.2.9 (stable).
+del kernel: apply.sh, verify-claims e verify-kernel la leggono da qui, e
+tools/upstream-kernel.sh la aggiorna (le righe PKG_VERSION e PKG_SHA256 e la
+riga Provenienza qui sotto).
+Provenienza: linux-7.2.9.tar.xz, SHA256 uguale nell'hash di nixpkgs (kernels-org.json) e nel sha256sums.asc di kernel.org; 8 patch a fuzz 0 sul tag v7.2.9 (a mano, 04/10/2026).
 
 ---
 --- a/packages/linux/package.mk

@@ -1,0 +1,75 @@
+# Ogni lunedi': c'e' un kernel 7.2.y piu' nuovo? Lakka devel si e' mosso?
+#
+#   kernel  un 7.2.y nuovo, firmato e con le patch a fuzz 0: ramo
+#           ci-test/kernel-<versione>, la sua build di prova e un issue
+#           (tools/upstream-kernel.sh). Merge e release restano a mano.
+#   lakka   devel dopo il commit pinnato: un issue, aggiornato a ogni giro e
+#           chiuso quando torna pari (tools/upstream-lakka.sh). Il pin si
+#           sposta a mano.
+#
+# A mano (Run workflow): "dry_run" fa tutte le verifiche senza ramo, build ne'
+# issue; "kernel_version" verifica quella versione invece dell'ultima.
+name: Upstream
+run-name: ${{ inputs.dry_run && 'Upstream (prova)' || 'Upstream' }}
+
+on:
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Solo verifiche: niente ramo, build ne' issue"
+        type: boolean
+        default: false
+      kernel_version:
+        description: "Kernel da verificare (es. 7.2.9); vuoto: l'ultimo 7.2.y"
+        type: string
+        default: ""
+
+permissions:
+  contents: write   # il ramo ci-test/kernel-*
+  actions: write    # avviare la build di prova (un push del GITHUB_TOKEN non la avvia)
+  issues: write
+
+concurrency:
+  group: upstream
+  cancel-in-progress: false
+
+jobs:
+  kernel:
+    name: Kernel 7.2.y
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Nuovo 7.2.y?
+        env:
+          IN_DRY: ${{ inputs.dry_run }}
+          IN_VERSION: ${{ inputs.kernel_version }}
+        run: |
+          args=()
+          if [ "${IN_DRY:-false}" = true ]; then args+=(--dry-run); fi
+          if [ -n "${IN_VERSION:-}" ]; then args+=(--version "${IN_VERSION}"); fi
+          ./tools/upstream-kernel.sh "${args[@]}"
+
+  lakka:
+    name: Lakka devel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Commit dopo il pin?
+        env:
+          IN_DRY: ${{ inputs.dry_run }}
+        run: |
+          if [ "${IN_DRY:-false}" = true ]; then
+            ./tools/upstream-lakka.sh --dry-run
+          else
+            ./tools/upstream-lakka.sh
+          fi

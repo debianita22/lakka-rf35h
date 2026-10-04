@@ -124,6 +124,12 @@ built packages.
     check a fix in an hour instead of a day; never for a release, since the
     image mixes packages built from two commits.
 
+- **Upstream**, every Monday: a newer Linux 7.2.y whose tarball signature
+  (kernel.org keys), SHA-256 and kernel patches (fuzz 0) check out gets a
+  `ci-test/kernel-<version>` branch, a test build and an issue; Lakka
+  `devel` moving past the pinned commit gets an issue. Merging and
+  releasing stay manual.
+
 A release has the image (`.img.gz`), the update (`.tar`), `update.txt`
 (version, name, size and SHA-256 of the `.tar`: what System Update reads,
 always from the latest release) and `SHA256SUMS`. Tags with a dash

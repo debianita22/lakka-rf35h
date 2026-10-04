@@ -5193,3 +5193,26 @@ vedono dall'API, e nella run #8 non si poteva dire se era una release. Le
 note di release elencano i commit dall'ultima release vera (`git describe`
 escludendo i tag con il trattino; il checkout del job release ora ha la
 storia intera). Provato su un clone con tag finti.
+
+**Upstream ogni settimana** (`upstream.yml`, lunedi' 04:23 UTC; a mano con
+`dry_run` e `kernel_version`). Lakka devel e' fermo al commit pinnato dal
+9/5 (verificato il 4/10), il kernel 7.2 no. Per il kernel il giro completo e'
+automatico fino alla build di prova: `tools/upstream-kernel.sh` legge la
+versione dalla patch d'integrazione, chiede a `releases.json` l'ultimo
+7.2.y, scarica tarball, `.tar.sign` e `sha256sums.asc`, verifica la firma
+sul `.tar` non compresso con le chiavi del WKD di kernel.org confrontate con
+le impronte di kernel.org/signature.html (Torvalds, Kroah-Hartman, Levin,
+Hutchings), lo SHA256 contro `sha256sums.asc`, poi applica le patch del
+kernel a fuzz 0 prendendole da un albero Lakka pinnato con apply.sh sopra.
+Solo allora: ramo `ci-test/kernel-X` (commit di github-actions[bot] con le
+due righe e la riga Provenienza), `gh workflow run build.yml` (un push del
+GITHUB_TOKEN non avvia altri workflow) e un issue con i comandi per il
+merge. Un ramo gia' esistente vuol dire gia' proposto. Se il ramo 7.2 sparisce
+da kernel.org o e' a fine vita, solo un avviso: cambiare ramo e' una scelta.
+Per Lakka solo un issue, aggiornato e chiuso da solo (`tools/upstream-lakka.sh`):
+le patch d'integrazione sono scritte contro il commit pinnato, un ramo
+automatico fallirebbe al dry run. Provati in locale con kernel.org, gpg e gh
+finti (Lakka, apply.sh e le patch veri; tarball rifatto dal tag v7.2.9):
+--dry-run, il giro vero contro un origin locale (ramo, commit, patch
+aggiornata, build e issue chiesti), il secondo giro ("gia' proposto"), e
+l'avviso di Lakka con l'issue da aggiornare.
