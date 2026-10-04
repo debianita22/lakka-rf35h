@@ -2,21 +2,48 @@
 # rf35h-update - aggiornamento di sistema dalle release di GitHub.
 #
 #   rf35h-update run      se l'ultima release e' diversa da quella installata,
-#                         scarica il suo .tar in /storage/.update e ne verifica
-#                         dimensione e sha256: al riavvio l'init di LibreELEC
-#                         lo installa (KERNEL, SYSTEM, device tree e il loader
-#                         known-good, che verify-image controlla in ogni
-#                         release). ROM, salvataggi e impostazioni restano.
+#                         ne scarica il .tar e ne verifica dimensione e sha256,
+#                         poi lo tiene da parte in /storage/.update/.rf35h-staged:
+#                         pronto, ma l'init non lo vede
+#   rf35h-update install  ricontrolla batteria (30%, o il caricatore) e spazio,
+#                         sposta il .tar pronto in /storage/.update ed esce 0:
+#                         chi chiama riavvia, e l'init di LibreELEC lo installa
+#                         (KERNEL, SYSTEM, device tree e il loader known-good,
+#                         che verify-image controlla in ogni release). ROM,
+#                         salvataggi e impostazioni restano. Se non si puo',
+#                         esce 1 con il motivo in una riga su stdout (il menu la
+#                         mostra) e il .tar resta fuori da .update.
 #   rf35h-update check    solo il controllo: esce 0 se c'e' un aggiornamento,
 #                         1 se no, 2 se non si e' potuto controllare
 #   rf35h-update status   la riga di stato, quella che mostra il menu
 #   rf35h-update cancel   toglie l'aggiornamento scaricato, o quello a meta'
-#   rf35h-update boot     all'avvio: lo stato di prima non vale piu'
+#   rf35h-update boot     all'avvio: com'e' andata l'installazione chiesta con
+#                         "install", e lo stato di prima che non vale piu'
 #
 # Lo avvia il menu (Device Settings > System Update) attraverso
 # rf35h-update.service, come lo scraper: un figlio di RetroArch morirebbe con
 # lui, e "sta girando?" lo si chiede a systemd. Fermare il servizio (la stessa
-# voce del menu) lascia il file a meta': il giro dopo riprende da li'.
+# voce del menu) lascia il file a meta': il giro dopo riprende da li'. Con un
+# aggiornamento pronto la voce chiama "install", e riavvia solo se esce 0.
+#
+# Perche' "install" a parte: all'avvio l'init installa qualunque aggiornamento
+# trovi in /storage/.update, senza chiedere, e riscrive KERNEL e poi SYSTEM
+# (~650 MB): se la batteria muore li', la card va riscritta. La batteria si
+# guarda quindi subito prima del riavvio, non quando si scarica, e fino ad
+# allora il .tar sta in .update/.rf35h-staged. L'init cerca solo in cima a
+# .update (KERNEL con SYSTEM, il primo *.tar, *.img.gz o *.img), e la sua
+# pulizia (rm -rf .update/[0-9a-zA-Z]*, poi .tmp, .nocheck e .nocompat) non
+# tocca una cartella col punto: li' dentro il .tar non viene ne' installato
+# ne' cancellato. Un .tar gia' in .update con update.ready (lo scaricava cosi'
+# la v1.0.0) va come prima: "install" lo lascia dov'e', e se rifiuta lo mette
+# da parte.
+#
+# update.ready: il .tar pronto (la prima riga, quella che legge il menu) e la
+# sua versione. update.install: la versione e il .tar che "install" ha messo in
+# .update. L'init cancella il .tar sia quando lo installa sia quando fallisce:
+# al riavvio "boot" sa com'e' andata dalla versione che gira, e un'installazione
+# fallita la dice nella riga del menu invece di tornare in silenzio a
+# "installed: <la vecchia>".
 #
 # Da dove: update.txt dell'ultima release (le pre-release no) del repository
 # scritto alla build in /usr/share/rf35h/update-repo, cioe'
@@ -50,8 +77,11 @@ DEFAULT_REPO="debianita22/lakka-rf35h"
 # lascia la card da riscrivere
 MIN_BATTERY=30
 
+# il .tar verificato, finche' non lo si installa (vedi sopra)
+STAGE="${UPDATE_DIR}/.rf35h-staged"
 STATUS="${STATE}/update.status"
 READY="${STATE}/update.ready"
+MARK="${STATE}/update.install"
 RE3_MARK="${STATE}/re3-preserved"
 INFO="${STATE}/update.info"
 
@@ -125,6 +155,29 @@ battery_check() {
 	echo ok
 }
 
+# Il .tar pronto, se c'e' davvero: la prima riga di update.ready, un .tar in
+# .rf35h-staged oppure gia' in .update (dopo "install", o della v1.0.0).
+ready_file() {
+	[ -f "${READY}" ] || return 1
+	_r=""; IFS= read -r _r < "${READY}"
+	_n="${_r##*/}"
+	case "${_n}" in ''|.*|*[!A-Za-z0-9._+-]*) return 1 ;; *.tar) ;; *) return 1 ;; esac
+	[ "${_r}" = "${STAGE}/${_n}" ] || [ "${_r}" = "${UPDATE_DIR}/${_n}" ] || return 1
+	[ -f "${_r}" ] || return 1
+	echo "${_r}"
+}
+# la sua versione: la seconda riga di update.ready, o update.info se parla
+# dello stesso .tar (update.ready della v1.0.0 ha solo la prima)
+ready_version() {
+	_v="$(sed -n 2p "${READY}" 2>/dev/null)"
+	case "${_v}" in *[!A-Za-z0-9._+-]*) _v="" ;; esac
+	if [ -z "${_v}" ] && [ "$(kv tar "${INFO}")" = "${1##*/}" ]; then _v="$(kv version "${INFO}")"; fi
+	echo "${_v}"
+}
+set_ready() {   # .tar versione
+	mkdir -p "${STATE}" && printf '%s\n%s\n' "$1" "$2" > "${READY}.tmp" && mv -f "${READY}.tmp" "${READY}"
+}
+
 # Senza orologio tamponato la data giusta arriva solo dall'NTP. TLS con una
 # data sbagliata fallisce: si aspetta un po' la sincronizzazione, poi si prova
 # comunque (curl dira' se il certificato non torna).
@@ -181,6 +234,37 @@ preserve_re3() {
 }
 
 cmd_boot() {
+	cur="$(installed_version)"
+	# Un'installazione chiesta con "install": com'e' andata. Conta solo se
+	# update.ready dice ancora lo stesso .tar (un marcatore rimasto da un giro
+	# vecchio, o da una versione che non lo conosce, no).
+	if [ -f "${MARK}" ]; then
+		m_ver=""; m_tar=""; t=""
+		{ IFS= read -r m_ver; IFS= read -r m_tar; } < "${MARK}"
+		[ -f "${READY}" ] && { IFS= read -r t < "${READY}" || :; }
+		if [ -z "${m_ver}" ] || [ -z "${m_tar}" ] || [ "${t}" != "${m_tar}" ]; then
+			rm -f "${MARK}"
+		elif [ "${m_ver}" = "${cur}" ]; then
+			rm -f "${MARK}" "${READY}" "${STATUS}"
+			rmdir "${STAGE}" 2>/dev/null
+			say "${cur} installata"
+		elif [ -f "${m_tar}" ]; then
+			# ancora in .update: l'init non e' ancora passato (boot lanciato a
+			# mano), lo installa al prossimo avvio
+			:
+		elif [ -f "${STAGE}/${m_tar##*/}" ]; then
+			# spenta a meta' di "install", prima di spostarlo: non e' successo
+			# niente, resta pronto
+			rm -f "${MARK}"
+			set_ready "${STAGE}/${m_tar##*/}" "${m_ver}"
+		else
+			# l'init l'ha preso e cancellato, ma gira ancora la versione di
+			# prima: il perche' l'ha scritto sullo schermo durante l'avvio
+			rm -f "${MARK}" "${READY}"
+			status "error: install of ${m_ver} failed: select to try again"
+			say "installazione di ${m_ver} non riuscita, gira ancora ${cur:-?}"
+		fi
+	fi
 	# L'aggiornamento scaricato e' stato installato (o tolto): "ready" e una
 	# riga di avanzamento rimasta da un giro interrotto non valgono piu'.
 	if [ -f "${READY}" ]; then
@@ -190,6 +274,8 @@ cmd_boot() {
 	if [ -f "${STATUS}" ] && [ ! -f "${READY}" ]; then
 		case "$(cat "${STATUS}" 2>/dev/null)" in
 			ready*|checking*|downloading*|verifying*) rm -f "${STATUS}" ;;
+			# fallita, ma intanto installata in un altro modo
+			"error: install of ${cur} failed"*) [ -n "${cur}" ] && rm -f "${STATUS}" ;;
 		esac
 	fi
 	# re3 copiato da noi, e l'immagine ora lo ha di suo: la copia lo
@@ -204,17 +290,74 @@ cmd_boot() {
 }
 
 cmd_cancel() {
-	rm -f "${UPDATE_DIR}"/*.part "${UPDATE_DIR}/.rf35h-update.tmp"
-	if [ -f "${READY}" ]; then
-		IFS= read -r t < "${READY}" || t=""
-		case "${t}" in "${UPDATE_DIR}"/*.tar) rm -f "${t}" ;; esac
-		rm -f "${READY}"
-	fi
+	rm -f "${UPDATE_DIR}"/*.part "${UPDATE_DIR}/.rf35h-update.tmp" "${STAGE}"/*.part "${STAGE}"/*.tar
+	if t="$(ready_file)"; then rm -f "${t}"; fi
+	rm -f "${READY}" "${MARK}"
+	rmdir "${STAGE}" 2>/dev/null
 	status "cancelled"
 	echo "aggiornamento tolto"
 }
 
-# check: la release da installare, in U_*. 0 = c'e', 1 = gia' installata
+# install: il motivo del no in una riga su stdout, ed esce 1
+refuse() { echo "$1"; exit 1; }
+
+cmd_install() {
+	# non durante un controllo o un download (il menu e un ssh)
+	if command -v flock >/dev/null 2>&1; then
+		exec 9> "${LOCK}" || refuse "cannot create ${LOCK}"
+		flock -n 9 || refuse "an update check or download is running"
+	fi
+	f="$(ready_file)" || refuse "no update ready: select System Update to download it"
+	n="${f##*/}"
+	v="$(ready_version "${f}")"
+	final="${UPDATE_DIR}/${n}"
+
+	why=""
+	bat="$(battery_check)"
+	if [ "${bat}" != ok ]; then
+		why="battery at ${bat}%: connect the charger"
+	else
+		# l'init estrae il .tar accanto a se' prima di installarlo
+		need=$(( $(fsize "${f}") / 1024 + 102400 ))
+		[ "$(free_kb "${UPDATE_DIR}")" -ge "${need}" ] 2>/dev/null \
+			|| why="not enough space in /storage: $(( need / 1024 )) MB needed"
+	fi
+	if [ -n "${why}" ]; then
+		# gia' in .update (v1.0.0, o un "install" senza riavvio): da parte,
+		# o l'init lo installerebbe al primo avvio qualunque
+		if [ "${f}" = "${final}" ] && mkdir -p "${STAGE}" && mv -f "${f}" "${STAGE}/${n}"; then
+			set_ready "${STAGE}/${n}" "${v}"
+			rm -f "${MARK}"
+			sync
+		fi
+		[ -t 1 ] || say "non installo ${v:-${n}}: ${why}"
+		refuse "${why}"
+	fi
+
+	# un solo aggiornamento in .update: l'init applica il primo che trova
+	for t in "${UPDATE_DIR}"/*.tar "${UPDATE_DIR}"/*.img "${UPDATE_DIR}"/*.img.gz; do
+		[ -e "${t}" ] || continue
+		[ "${t}" = "${final}" ] && continue
+		rm -f "${t}"
+	done
+	# Prima il marcatore e update.ready, poi il .tar: se si spegne qui a meta',
+	# "boot" vede dove e' rimasto. Senza versione niente marcatore: al
+	# riavvio non si saprebbe dire se e' andata.
+	rm -f "${MARK}"
+	if [ -n "${v}" ] && ! { printf '%s\n%s\n' "${v}" "${final}" > "${MARK}.tmp" && mv -f "${MARK}.tmp" "${MARK}"; }; then
+		refuse "cannot write ${STATE}"
+	fi
+	set_ready "${final}" "${v}" || { rm -f "${MARK}"; refuse "cannot write ${STATE}"; }
+	if [ "${f}" != "${final}" ] && ! mv -f "${f}" "${final}"; then
+		rm -f "${MARK}"; set_ready "${f}" "${v}"
+		refuse "cannot move the update to ${UPDATE_DIR}"
+	fi
+	sync
+	say "${v:-${n}} in ${UPDATE_DIR}: l'init lo installa al prossimo avvio"
+	return 0
+}
+
+# check: la release da installare, in U_*. 0 = c'e', 1 = niente da installare
 cmd_check() {
 	src="$(source_url)"
 	mkdir -p "${STATE}" || fail "cannot write ${STATE}"
@@ -254,14 +397,11 @@ cmd_run() {
 	fi
 	trap on_term TERM INT
 
-	if [ -f "${READY}" ]; then
-		IFS= read -r t < "${READY}" || t=""
-		if [ -n "${t}" ] && [ -f "${t}" ]; then
-			status "ready: $(kv version "${INFO}"), select to restart and install"
-			return 0
-		fi
-		rm -f "${READY}"
+	if t="$(ready_file)"; then
+		status "ready: $(ready_version "${t}"), select to restart and install"
+		return 0
 	fi
+	rm -f "${READY}" "${MARK}"
 
 	rc=0; cmd_check || rc=$?
 	[ "${rc}" = 0 ] || return 0
@@ -269,16 +409,20 @@ cmd_run() {
 	bat="$(battery_check)"
 	[ "${bat}" = ok ] || fail "battery at ${bat}%: charge it or plug it in"
 
-	mkdir -p "${UPDATE_DIR}" || fail "cannot create ${UPDATE_DIR}"
-	target="${UPDATE_DIR}/${U_TAR}"
+	mkdir -p "${STAGE}" || fail "cannot create ${STAGE}"
+	target="${STAGE}/${U_TAR}"
 	part="${target}.part"
-	# Un solo aggiornamento in .update: l'init applica il primo .tar che
-	# trova, e uno vecchio lasciato li' passerebbe davanti.
-	for t in "${UPDATE_DIR}"/*.tar "${UPDATE_DIR}"/*.img "${UPDATE_DIR}"/*.img.gz "${UPDATE_DIR}"/*.part; do
+	# Niente altri aggiornamenti: in .update l'init applica il primo .tar che
+	# trova, e uno vecchio lasciato li' passerebbe davanti; in .rf35h-staged
+	# solo questo, anche a meta'.
+	for t in "${UPDATE_DIR}"/*.tar "${UPDATE_DIR}"/*.img "${UPDATE_DIR}"/*.img.gz "${UPDATE_DIR}"/*.part "${STAGE}"/*; do
 		[ -e "${t}" ] || continue
 		[ "${t}" = "${part}" ] && continue
+		[ "${t}" = "${target}" ] && continue
 		rm -f "${t}"
 	done
+	# gia' scaricato ma update.ready mai scritto (spenta li'): si riverifica
+	[ -f "${target}" ] && mv -f "${target}" "${part}"
 
 	have="$(fsize "${part}")"
 	if [ "${have}" -gt "${U_SIZE}" ]; then rm -f "${part}"; have=0; fi
@@ -334,23 +478,24 @@ cmd_run() {
 
 	mv -f "${part}" "${target}" || fail "cannot write ${target}"
 	sync
-	printf '%s\n' "${target}" > "${READY}"
+	set_ready "${target}" "${U_VERSION}" || fail "cannot write ${READY}"
 	status "ready: ${U_VERSION}, select to restart and install"
-	say "pronto: ${target}. Al riavvio l'init lo installa."
+	say "pronto: ${target}. Per installarlo: rf35h-update install, poi riavvia."
 	return 0
 }
 
 case "${1:-}" in
-	run)    cmd_run ;;
+	run)     cmd_run ;;
+	install) cmd_install ;;
 	check)
 		rc=0; cmd_check || rc=$?
 		if [ "${rc}" = 0 ]; then echo "disponibile ${U_VERSION} (installata $(installed_version))"; fi
 		exit "${rc}" ;;
 	status)
 		if [ -s "${STATUS}" ]; then cat "${STATUS}"; else echo "installed: $(installed_version)"; fi ;;
-	cancel) cmd_cancel ;;
-	boot)   cmd_boot ;;
+	cancel)  cmd_cancel ;;
+	boot)    cmd_boot ;;
 	*)
-		echo "uso: rf35h-update run|check|status|cancel|boot" >&2
+		echo "uso: rf35h-update run|install|check|status|cancel|boot" >&2
 		exit 2 ;;
 esac
