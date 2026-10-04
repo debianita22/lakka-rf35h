@@ -1,4 +1,4 @@
-Subject: retroarch: SSH e Bluetooth non perdono piu le opzioni del servizio
+Subject: retroarch: servizi SSH, Bluetooth e Samba senza opzioni perse, gare o zombie
 
 Il file che accende SSH e Bluetooth (sshd.conf e bluez.conf in
 /storage/.cache/services) e anche l EnvironmentFile con le opzioni del
@@ -12,13 +12,29 @@ menu, che cosi da sola non bastava.
 
 Ora come fa LibreELEC: spento, il file diventa <servizio>.disabled con il suo
 contenuto; acceso, il .disabled torna .conf, e solo se non c e nessuno dei due
-se ne crea uno vuoto. Un .conf che esiste non si riscrive. Samba non cambia:
-Lakka lo gestisce gia con samba.disabled (retroarch-1000).
+se ne crea uno vuoto, senza troncare (O_CREAT senza O_TRUNC). Un .conf che
+esiste non si riscrive.
+
+I toggle del menu toccavano i file nel figlio dopo fork() e non lo
+raccoglievano mai: uno zombie a ogni toggle, e due chiamate ravvicinate (Start
+sul toggle chiama il gestore due volte) correvano sullo stesso file, e chi
+perdeva troncava il .conf appena rimesso a posto dall altra. Ora i file si
+toccano prima del fork, e systemctl parte con un doppio fork che non lascia
+zombie. Vale anche per il toggle di Samba di Lakka.
+
+Samba: retroarch-1000 lo considera spento se esiste samba.disabled. Con la
+porta USB-C in modo transfer rf35h-usb lo accende spostando quel flag in
+samba.disabled.rf35h-usb, e lo rimette tornando in host. Un RetroArch avviato
+o riavviato in quel momento leggeva samba_enable=true, e da li ogni
+salvataggio cancellava samba.disabled: Samba ripartiva a ogni avvio anche se
+l utente lo aveva spento. Ora conta come spento anche il flag messo da parte,
+il salvataggio non tocca il flag finche e da parte, e accendere Samba dal menu
+toglie anche quello, cosi tornare in host non lo rispegne.
 
 ---
 --- a/configuration.c
 +++ b/configuration.c
-@@ -1499,6 +1499,46 @@
+@@ -1499,6 +1499,63 @@
     return char_list_new_special(STRING_LIST_TIMEZONES, NULL);
  }
  
@@ -32,7 +48,9 @@ Lakka lo gestisce gia con samba.disabled (retroarch-1000).
 + * senza avviso. Ora come fa LibreELEC, e come si aspetta
 + * bluetooth-defaults.service: spento, il file diventa <servizio>.disabled
 + * con il suo contenuto; acceso, il .disabled torna .conf, e solo se non c'e'
-+ * nessuno dei due se ne crea uno vuoto. Un .conf che esiste non si riscrive. */
++ * nessuno dei due se ne crea uno vuoto. Un .conf che esiste non si riscrive.
++ * Lo si crea con fopen("a"), cioe' O_CREAT senza O_TRUNC: se nel frattempo il
++ * .conf e' comparso (un altro toggle lo ha appena rinominato), resta intero. */
 +void config_set_service_state(const char *conf_path, bool enable)
 +{
 +   char disabled_path[PATH_MAX_LENGTH];
@@ -49,23 +67,60 @@ Lakka lo gestisce gia con samba.disabled (retroarch-1000).
 +
 +   if (enable)
 +   {
++      FILE *f;
 +      if (filestream_exists(conf_path))
 +         return;
 +      if (     filestream_exists(disabled_path)
 +            && filestream_rename(disabled_path, conf_path) == 0)
 +         return;
-+      filestream_close(filestream_open(conf_path,
-+               RETRO_VFS_FILE_ACCESS_WRITE,
-+               RETRO_VFS_FILE_ACCESS_HINT_NONE));
++      if ((f = fopen(conf_path, "a")))
++         fclose(f);
 +   }
 +   else if (filestream_exists(conf_path))
 +      filestream_rename(conf_path, disabled_path);
 +}
 +
++/* devaOS RF35H: Samba e' spento se c'e' samba.disabled (retroarch-1000), ma
++ * anche se c'e' samba.disabled.rf35h-usb. Con la porta USB-C in modo
++ * "transfer" rf35h-usb accende Samba mettendo da parte il flag dell'utente
++ * con quel nome, e lo rimette tornando in "host". Un RetroArch avviato o
++ * riavviato in quel momento (riavvio con il modo "transfer" ripristinato,
++ * crash) leggeva samba_enable=true, e da li' ogni salvataggio cancellava
++ * samba.disabled: Samba ripartiva a ogni avvio anche se l'utente lo aveva
++ * spento. Finche' il flag e' da parte, conta come spento, e il salvataggio
++ * della configurazione non lo tocca (vedi config_save_file). */
++bool config_samba_enabled(void)
++{
++   return     !filestream_exists(LAKKA_SAMBA_DISABLED_FILE_PATH)
++           && !filestream_exists(RF35H_SAMBA_ASIDE_PATH);
++}
++
  static void load_timezone(char *s, size_t len)
  {
     char haystack[TIMEZONE_LENGTH+32];
-@@ -5740,24 +5780,15 @@
+@@ -3057,8 +3114,9 @@
+ #ifdef HAVE_LAKKA
+    configuration_set_bool(settings,
+          settings->bools.ssh_enable, filestream_exists(LAKKA_SSH_PATH));
++   /* devaOS RF35H: anche il flag messo da parte da rf35h-usb */
+    configuration_set_bool(settings,
+-         settings->bools.samba_enable, !filestream_exists(LAKKA_SAMBA_DISABLED_FILE_PATH));
++         settings->bools.samba_enable, config_samba_enabled());
+    configuration_set_bool(settings,
+          settings->bools.bluetooth_enable, filestream_exists(LAKKA_BLUETOOTH_PATH));
+    configuration_set_bool(settings, settings->bools.localap_enable, false);
+@@ -4567,8 +4625,9 @@
+ #ifdef HAVE_LAKKA
+    configuration_set_bool(settings,
+          settings->bools.ssh_enable, filestream_exists(LAKKA_SSH_PATH));
++   /* devaOS RF35H: anche il flag messo da parte da rf35h-usb */
+    configuration_set_bool(settings,
+-         settings->bools.samba_enable, !filestream_exists(LAKKA_SAMBA_DISABLED_FILE_PATH));
++         settings->bools.samba_enable, config_samba_enabled());
+    configuration_set_bool(settings,
+          settings->bools.bluetooth_enable, filestream_exists(LAKKA_BLUETOOTH_PATH));
+ #endif
+@@ -5811,24 +5870,22 @@
        video_driver_save_settings(global, conf);
  
  #ifdef HAVE_LAKKA
@@ -75,19 +130,32 @@ Lakka lo gestisce gia con samba.disabled (retroarch-1000).
 -               RETRO_VFS_FILE_ACCESS_HINT_NONE));
 -   else
 -      filestream_delete(LAKKA_SSH_PATH);
-+   config_set_service_state(LAKKA_SSH_PATH, settings->bools.ssh_enable);
-    if (settings->bools.samba_enable)
-       filestream_delete(LAKKA_SAMBA_DISABLED_FILE_PATH);
-    else
-       filestream_close(filestream_open(LAKKA_SAMBA_DISABLED_FILE_PATH,
-                RETRO_VFS_FILE_ACCESS_WRITE,
-                RETRO_VFS_FILE_ACCESS_HINT_NONE));
+-   if (settings->bools.samba_enable)
+-      filestream_delete(LAKKA_SAMBA_DISABLED_FILE_PATH);
+-   else
+-      filestream_close(filestream_open(LAKKA_SAMBA_DISABLED_FILE_PATH,
+-               RETRO_VFS_FILE_ACCESS_WRITE,
+-               RETRO_VFS_FILE_ACCESS_HINT_NONE));
 -   if (settings->bools.bluetooth_enable)
 -      filestream_close(filestream_open(LAKKA_BLUETOOTH_PATH,
 -               RETRO_VFS_FILE_ACCESS_WRITE,
 -               RETRO_VFS_FILE_ACCESS_HINT_NONE));
 -   else
 -      filestream_delete(LAKKA_BLUETOOTH_PATH);
++   config_set_service_state(LAKKA_SSH_PATH, settings->bools.ssh_enable);
++   /* devaOS RF35H: finche' rf35h-usb tiene da parte il flag di Samba (porta
++    * USB-C in "transfer"), la scelta dell'utente e' quel file, e il flag non
++    * si tocca: rf35h-usb lo rimette tornando in "host". Vedi
++    * config_samba_enabled(). */
++   if (!filestream_exists(RF35H_SAMBA_ASIDE_PATH))
++   {
++      if (settings->bools.samba_enable)
++         filestream_delete(LAKKA_SAMBA_DISABLED_FILE_PATH);
++      else
++         filestream_close(filestream_open(LAKKA_SAMBA_DISABLED_FILE_PATH,
++                  RETRO_VFS_FILE_ACCESS_WRITE,
++                  RETRO_VFS_FILE_ACCESS_HINT_NONE));
++   }
 +   config_set_service_state(LAKKA_BLUETOOTH_PATH,
 +         settings->bools.bluetooth_enable);
  #endif
@@ -95,17 +163,40 @@ Lakka lo gestisce gia con samba.disabled (retroarch-1000).
     for (i = 0; i < MAX_USERS; i++)
 --- a/configuration.h
 +++ b/configuration.h
-@@ -1393,6 +1393,7 @@
+@@ -1393,6 +1393,11 @@
  #ifdef HAVE_LAKKA
  const char *config_get_all_timezones(void);
  void config_set_timezone(char *timezone);
 +void config_set_service_state(const char *conf_path, bool enable);
++/* devaOS RF35H: dove rf35h-usb mette samba.disabled mentre la porta USB-C e'
++ * in modo "transfer" (vedi config_samba_enabled) */
++#define RF35H_SAMBA_ASIDE_PATH LAKKA_SAMBA_DISABLED_FILE_PATH ".rf35h-usb"
++bool config_samba_enabled(void);
  #endif
  
  bool input_config_bind_map_get_valid(unsigned bind_index);
 --- a/menu/menu_setting.c
 +++ b/menu/menu_setting.c
-@@ -9213,12 +9213,9 @@
+@@ -9203,25 +9203,40 @@
+ }
+ 
+ #ifdef HAVE_LAKKA
+-static void systemd_service_toggle(const char *path, char *unit, bool enable)
++#include <errno.h>
++#include <sys/wait.h>
++/* devaOS RF35H: "systemctl start|stop <unit>" senza aspettarlo e senza
++ * zombie. Il codice originale faceva fork() e non raccoglieva mai il figlio:
++ * uno zombie a ogni toggle, fino all'uscita di RetroArch. Doppio fork: il
++ * figlio intermedio esce subito e lo si raccoglie qui (un istante), il nipote
++ * esegue systemctl, resta orfano e lo raccoglie init. */
++static void systemd_service_spawn(char *verb, char *unit)
+ {
++   char *args[] = {(char*)"systemctl", verb, unit, NULL};
+    pid_t pid    = fork();
+-   char* args[] = {(char*)"systemctl",
+-                   enable ? (char*)"start" : (char*)"stop",
+-                   unit,
+-                   NULL};
  
     if (pid == 0)
     {
@@ -115,9 +206,64 @@ Lakka lo gestisce gia con samba.disabled (retroarch-1000).
 -                  RETRO_VFS_FILE_ACCESS_HINT_NONE));
 -      else
 -         filestream_delete(path);
-+      /* devaOS RF35H: rinomina invece di svuotare o cancellare, vedi
-+       * config_set_service_state() in configuration.c. */
-+      config_set_service_state(path, enable);
- 
-       execvp(args[0], args);
+-
+-      execvp(args[0], args);
++      if (fork() == 0)
++      {
++         execvp(args[0], args);
++         _exit(127);
++      }
++      _exit(0);
     }
++   if (pid > 0)
++      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) { }
++}
++
++static void systemd_service_toggle(const char *path, char *unit, bool enable)
++{
++   /* devaOS RF35H: rinomina invece di svuotare o cancellare, vedi
++    * config_set_service_state() in configuration.c. Qui, prima del fork: nel
++    * figlio due toggle ravvicinati (Start sul toggle chiama il gestore due
++    * volte) correvano sullo stesso file, e chi perdeva troncava il .conf
++    * appena rimesso a posto dall'altro. */
++   config_set_service_state(path, enable);
++   systemd_service_spawn(enable ? (char*)"start" : (char*)"stop", unit);
+ }
+ 
+ static void systemd_samba_service_toggle(const char *path, char *unit, bool enable)
+@@ -9232,23 +9247,20 @@
+     * - bluetooth.service is enabled if "/storage/.cache/services/bluez.conf" file is exist.
+     * So it separates the systemd_service_toggle for samba.service. */
+ 
+-   pid_t pid    = fork();
+-   char* args[] = {(char*)"systemctl",
+-                   enable ? (char*)"start" : (char*)"stop",
+-                   unit,
+-                   NULL};
+-
+-   if (pid == 0)
++   /* devaOS RF35H: il flag prima del fork, come in systemd_service_toggle.
++    * Accenderlo dal menu toglie anche il flag messo da parte da rf35h-usb
++    * (porta USB-C in "transfer"): tornando in "host" rf35h-usb lo
++    * rimetterebbe, e Samba si spegnerebbe di nuovo. */
++   if (enable)
+    {
+-      if (enable)
+-         filestream_delete(path);
+-      else
+-         filestream_close(filestream_open(path,
+-                  RETRO_VFS_FILE_ACCESS_WRITE,
+-                  RETRO_VFS_FILE_ACCESS_HINT_NONE));
+-
+-      execvp(args[0], args);
++      filestream_delete(path);
++      filestream_delete(RF35H_SAMBA_ASIDE_PATH);
+    }
++   else
++      filestream_close(filestream_open(path,
++               RETRO_VFS_FILE_ACCESS_WRITE,
++               RETRO_VFS_FILE_ACCESS_HINT_NONE));
++   systemd_service_spawn(enable ? (char*)"start" : (char*)"stop", unit);
+ }
+ 
+ #ifdef HAVE_LAKKA_SWITCH

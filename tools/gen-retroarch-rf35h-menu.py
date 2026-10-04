@@ -16,7 +16,8 @@ Quattro voci:
 
 System Update e' un'azione, come lo scraper: avvia o ferma
 rf35h-update.service, il sottotitolo mostra lo stato che scrive rf35h-update,
-e con un aggiornamento pronto riavvia. Sull'RF35H toglie "Update Lakka"
+e con un aggiornamento pronto chiama "rf35h-update install" (che ricontrolla
+la batteria) e riavvia solo se esce 0. Sull'RF35H toglie "Update Lakka"
 dall'Online Updater: quelle immagini sono per un RK3326 generico (kernel,
 SYSTEM e loader), e installate qui lasciano la console senza avvio.
 
@@ -411,6 +412,71 @@ static void rf35h_array_fill(char *s, size_t len, const char *state,
       strlcpy(s, def, len);
 }
 
+/* devaOS RF35H: quanto e' grande l'array a cui punta ptr. config_load_file
+ * leggeva ogni array con PATH_MAX_LENGTH: le nostre tendine sono di 8-64
+ * byte, e un valore lungo scritto a mano in retroarch.cfg traboccava sui
+ * campi vicini di settings_t. Gli array di RetroArch restano come sono. */
+static size_t rf35h_array_size(settings_t *settings, const char *ptr)
+{
+#define RF35H_ARRAY_SIZE(a) if (ptr == settings->arrays.a) return sizeof(settings->arrays.a)
+   RF35H_ARRAY_SIZE(rf35h_joyled);
+   RF35H_ARRAY_SIZE(rf35h_statusled);
+   RF35H_ARRAY_SIZE(rf35h_usb_mode);
+   RF35H_ARRAY_SIZE(rf35h_audio_out);
+   RF35H_ARRAY_SIZE(rf35h_scrape_region);
+   RF35H_ARRAY_SIZE(rf35h_ledspeed);
+   RF35H_ARRAY_SIZE(rf35h_ntp_server);
+#undef RF35H_ARRAY_SIZE
+   return PATH_MAX_LENGTH;
+}
+
+/* devaOS RF35H: con "Audio Output = usb" audio_device nomina la scheda USB-C
+ * (plughw:CARD=<id>,DEV=0; prima plughw:<indice>,0). La USB-C e' anche la
+ * porta di ricarica: se all'avvio quella scheda non c'e', ALSA non apre il
+ * dispositivo e RetroArch resta senza audio finche' non si cambia
+ * l'impostazione. Si controlla qui, al caricamento, prima che l'audio parta:
+ * una scheda che non e' in /proc/asound vuol dire dispositivo predefinito
+ * (""), cioe' gli altoparlanti. Solo per i driver ALSA. */
+static void rf35h_audio_device_check(settings_t *settings)
+{
+   char path[64];
+   char *dev     = settings->arrays.audio_device;
+   const char *c = strstr(dev, "CARD=");
+   bool digits   = true;
+   size_t n, i;
+
+   if (!strstr(settings->arrays.audio_driver, "alsa"))
+      return;
+   if (c)
+      c += STRLEN_CONST("CARD=");
+   else if (!strncmp(dev, "hw:", 3) || !strncmp(dev, "plughw:", 7))
+      c = strchr(dev, ':') + 1;
+   else
+      return;
+   n = strcspn(c, ",");
+   if (!n || n > 32)
+      return;
+   for (i = 0; i < n; i++)
+   {
+      if (c[i] < '0' || c[i] > '9')
+         digits = false;
+      if (!(   (c[i] >= 'a' && c[i] <= 'z') || (c[i] >= 'A' && c[i] <= 'Z')
+            || (c[i] >= '0' && c[i] <= '9') || c[i] == '_' || c[i] == '-'))
+         return;
+   }
+   /* un numero e' l'indice (cardN); un nome e' l'id, e ALSA mette in
+    * /proc/asound un collegamento per ogni id */
+   snprintf(path, sizeof(path), "/proc/asound/%s%.*s",
+         digits ? "card" : "", (int)n, c);
+   if (path_is_valid(path))
+      return;
+   RARCH_WARN("[RF35H] audio_device \"%s\": scheda assente, uso il dispositivo predefinito.\n",
+         dev);
+   dev[0] = '\0';
+   strlcpy(settings->arrays.rf35h_audio_out, "speakers",
+         sizeof(settings->arrays.rf35h_audio_out));
+}
+
 static void rf35h_arrays_fill(settings_t *settings)
 {
    rf35h_array_fill(settings->arrays.rf35h_joyled,
@@ -425,6 +491,7 @@ static void rf35h_arrays_fill(settings_t *settings)
          sizeof(settings->arrays.rf35h_usb_mode), "usb", DEFAULT_RF35H_USB_MODE);
    rf35h_array_fill(settings->arrays.rf35h_scrape_region,
          sizeof(settings->arrays.rf35h_scrape_region), NULL, DEFAULT_RF35H_SCRAPE_REGION);
+   rf35h_audio_device_check(settings);
    /* audio_out non ha file di stato: il suo gestore imposta audio_device */
    if (string_is_empty(settings->arrays.rf35h_audio_out))
       strlcpy(settings->arrays.rf35h_audio_out,
@@ -441,6 +508,20 @@ RF35H_ARRAY_LOOP = ('   /* Array settings  */\n'
     '         config_get_array(conf, array_settings[i].ident,\n'
     '               array_settings[i].ptr, PATH_MAX_LENGTH);\n'
     '   }\n')
+# devaOS RF35H: le 7 tendine sono array di 8-64 byte dentro settings_t, e il
+# ciclo li leggeva con PATH_MAX_LENGTH: un valore lungo scritto a mano in
+# retroarch.cfg traboccava sui campi vicini. Per le nostre il ciclo passa la
+# dimensione vera (rf35h_array_size); gli array di RetroArch restano come sono.
+# (Non con un campo in config_array_setting riempito da SETTING_ARRAY: quella
+# macro registra anche due path, log_dir e app_icon, in populate_settings_path.)
+RF35H_ARRAY_LOOP_LEN = RF35H_ARRAY_LOOP.replace(
+    '               array_settings[i].ptr, PATH_MAX_LENGTH);\n',
+    '#ifdef HAVE_LAKKA\n'
+    '               array_settings[i].ptr,\n'
+    '               rf35h_array_size(settings, array_settings[i].ptr));\n'
+    '#else\n'
+    '               array_settings[i].ptr, PATH_MAX_LENGTH);\n'
+    '#endif\n')
 edit("configuration.c", [
     ('   SETTING_BOOL("menu_show_online_updater",      &settings->bools.menu_show_online_updater, true, DEFAULT_MENU_SHOW_ONLINE_UPDATER, false);\n',
      '   SETTING_BOOL("menu_show_online_updater",      &settings->bools.menu_show_online_updater, true, DEFAULT_MENU_SHOW_ONLINE_UPDATER, false);\n'
@@ -471,7 +552,7 @@ edit("configuration.c", [
     ("static bool config_load_file(global_t *global,\n",
      RF35H_ARRAYS_FILL + "static bool config_load_file(global_t *global,\n"),
     (RF35H_ARRAY_LOOP,
-     RF35H_ARRAY_LOOP + "#ifdef HAVE_LAKKA\n   rf35h_arrays_fill(settings);\n#endif\n"),
+     RF35H_ARRAY_LOOP_LEN + "#ifdef HAVE_LAKKA\n   rf35h_arrays_fill(settings);\n#endif\n"),
 ])
 
 # --------------------------------------------------------- menu_displaylist.h
@@ -513,7 +594,9 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "    * mentre la unit e' attiva. Il file di stato dopo un crash puo' mentire. */\n"
      "   if (path_is_valid(\"/run/systemd/units/invocation:rf35h-scrape.service\"))\n"
      "   {\n"
-     "      if (system(\"systemctl stop rf35h-scrape.service >/dev/null 2>&1\")) { }\n"
+     "      /* devaOS RF35H: --no-block. Lo stop sincrono aspettava la fine del\n"
+     "       * servizio, fino al suo TimeoutStopSec (10 s), col menu fermo. */\n"
+     "      if (system(\"systemctl --no-block stop rf35h-scrape.service >/dev/null 2>&1\")) { }\n"
      "      msg = \"Scraping stopped\";\n"
      "   }\n"
      "   else if (!path_is_valid(\"/storage/.config/rf35h/scraper.conf\"))\n"
@@ -535,21 +618,27 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);\n"
      "   return 0;\n"
      "}\n"
+     "#include <sys/wait.h>\n"
      "/* Aggiornamento di sistema: rf35h-update con la sua unit, come lo scraper.\n"
      " * Se sta girando, la stessa voce lo ferma (il file a meta' resta, il giro\n"
-     " * dopo riprende). Con un aggiornamento pronto in /storage/.update riavvia:\n"
-     " * l'init lo installa all'avvio. */\n"
+     " * dopo riprende). Con un aggiornamento pronto, \"rf35h-update install\" lo\n"
+     " * mette in /storage/.update dopo aver ricontrollato la batteria, e si\n"
+     " * riavvia solo se esce 0: l'init lo installa all'avvio. */\n"
      "static int action_ok_rf35h_update(const char *path,\n"
      "      const char *label, unsigned type, size_t idx, size_t entry_idx)\n"
      "{\n"
-     "   const char *msg = NULL;\n"
+     "   const char *msg                   = NULL;\n"
+     "   enum message_queue_category cat   = MESSAGE_QUEUE_CATEGORY_INFO;\n"
      "   char ready[PATH_MAX_LENGTH];\n"
+     "   char why[192];\n"
      "   FILE *f;\n"
      "   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;\n"
      "   ready[0] = '\\0';\n"
      "   if (path_is_valid(\"/run/systemd/units/invocation:rf35h-update.service\"))\n"
      "   {\n"
-     "      if (system(\"systemctl stop rf35h-update.service >/dev/null 2>&1\")) { }\n"
+     "      /* devaOS RF35H: --no-block, come lo scraper: lo stop sincrono teneva\n"
+     "       * fermo il menu fino al TimeoutStopSec del servizio (15 s). */\n"
+     "      if (system(\"systemctl --no-block stop rf35h-update.service >/dev/null 2>&1\")) { }\n"
      "      msg = \"System update stopped: select again to resume\";\n"
      "   }\n"
      "   else\n"
@@ -561,18 +650,48 @@ edit("menu/cbs/menu_cbs_ok.c", [
      "         fclose(f);\n"
      "         ready[strcspn(ready, \"\\r\\n\")] = '\\0';\n"
      "      }\n"
-     "      /* pronto e ancora li': si riavvia (CMD_EVENT_REBOOT salva la\n"
-     "       * configurazione, come il riavvio del menu) */\n"
+     "      /* devaOS RF35H: pronto e ancora li'. Prima si riavviava subito, e la\n"
+     "       * batteria era stata controllata solo al download: un'installazione\n"
+     "       * interrotta all'avvio lascia la card da riscrivere. Ora \"rf35h-update\n"
+     "       * install\" ricontrolla la batteria e mette l'aggiornamento in\n"
+     "       * /storage/.update (meno di un secondo): esce 0 se si deve riavviare,\n"
+     "       * altrimenti stampa il motivo su una riga e si resta nel menu. */\n"
      "      if (ready[0] && path_is_valid(ready))\n"
      "      {\n"
-     "         command_event(CMD_EVENT_REBOOT, NULL);\n"
-     "         return 0;\n"
+     "         char line[192];\n"
+     "         int st = -1;\n"
+     "         why[0] = '\\0';\n"
+     "         if ((f = popen(\"/usr/bin/rf35h-update install\", \"r\")))\n"
+     "         {\n"
+     "            /* tutto l'output, per non lasciarlo a meta' (SIGPIPE): conta\n"
+     "             * la prima riga */\n"
+     "            while (fgets(line, sizeof(line), f))\n"
+     "            {\n"
+     "               if (!why[0])\n"
+     "                  strlcpy(why, line, sizeof(why));\n"
+     "            }\n"
+     "            st = pclose(f);\n"
+     "         }\n"
+     "         if (st != -1 && WIFEXITED(st) && WEXITSTATUS(st) == 0)\n"
+     "         {\n"
+     "            /* CMD_EVENT_REBOOT salva la configurazione, come il riavvio\n"
+     "             * del menu */\n"
+     "            command_event(CMD_EVENT_REBOOT, NULL);\n"
+     "            return 0;\n"
+     "         }\n"
+     "         why[strcspn(why, \"\\r\\n\")] = '\\0';\n"
+     "         msg = why[0] ? why : \"System update not installed: rf35h-update install failed\";\n"
+     "         cat = MESSAGE_QUEUE_CATEGORY_WARNING;\n"
      "      }\n"
-     "      if (system(\"systemctl start rf35h-update.service >/dev/null 2>&1\")) { }\n"
-     "      msg = \"Checking for updates, progress below the menu entry\";\n"
+     "      else\n"
+     "      {\n"
+     "         if (system(\"systemctl start rf35h-update.service >/dev/null 2>&1\")) { }\n"
+     "         msg = \"Checking for updates, progress below the menu entry\";\n"
+     "      }\n"
      "   }\n"
-     "   runloop_msg_queue_push(msg, strlen(msg), 1, 180, true, NULL,\n"
-     "         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);\n"
+     "   runloop_msg_queue_push(msg, strlen(msg), 1,\n"
+     "         cat == MESSAGE_QUEUE_CATEGORY_WARNING ? 300 : 180, true, NULL,\n"
+     "         MESSAGE_QUEUE_ICON_DEFAULT, cat);\n"
      "   return 0;\n"
      "}\n"
      "#endif\n"),
@@ -762,12 +881,25 @@ static bool rf35h_read_line(const char *path, char *s, size_t len)
    return s[0] != '\0';
 }
 
+/* l'ora dell'ultimo script lanciato dal menu (rf35h_run, menu_setting.c) */
+extern retro_time_t rf35h_last_run;
+
 /* Rilegge dal sistema quello che il menu mostra. L1+vol cambia la
  * luminosita' senza passare da qui; rf35h-idle.conf si puo' editare a mano;
  * i modi dei LED li salvano gli script. Il menu deve dire la verita'. */
 static void rf35h_sync_settings(settings_t *settings)
 {
    char buf[64];
+
+   /* devaOS RF35H: scelto un valore da una tendina, RetroArch ricostruisce
+    * subito la lista, ma il gestore ha appena lanciato lo script in
+    * background e il file di stato dice ancora il valore di prima: il menu
+    * mostrava quello (e al salvataggio lo scriveva in retroarch.cfg). Per
+    * 3 secondi dall'ultimo script valgono i valori in memoria, cioe' quelli
+    * appena scelti. */
+   if (rf35h_last_run
+         && cpu_features_get_time_usec() - rf35h_last_run < 3000000)
+      return;
 
    if (rf35h_read_line(RF35H_STATE_DIR "/brightness", buf, sizeof(buf)))
    {
@@ -927,6 +1059,11 @@ HANDLERS = r'''
    "battery|charging|alert|rainbow|strobe"
 #define RF35H_LED_SPEEDS "slow|normal|fast"
 #include <retro_dirent.h>
+#include <features/features_cpu.h>
+/* devaOS RF35H: quando e' partito l'ultimo script (rf35h_run). Lo legge
+ * rf35h_sync_settings in menu_displaylist.c: lo script gira in background, e
+ * per qualche secondo il suo file di stato dice ancora il valore di prima. */
+retro_time_t rf35h_last_run = 0;
 #ifndef RF35H_STATE_DIR
 #define RF35H_STATE_DIR      "/storage/.config/rf35h"
 #endif
@@ -943,6 +1080,7 @@ static void rf35h_run(const char *fmt, ...)
    va_start(ap, fmt);
    vsnprintf(cmd, sizeof(cmd), fmt, ap);
    va_end(ap);
+   rf35h_last_run = cpu_features_get_time_usec();
    if (system(cmd)) { /* gli script scrivono gia' su stderr */ }
 }
 
@@ -1092,21 +1230,43 @@ static void rf35h_usb_mode_change_handler(rarch_setting_t *setting)
    rf35h_run("/usr/bin/rf35h-usb %s >/dev/null 2>&1 &", setting->value.target.string);
 }
 
-/* Indice ALSA della prima scheda USB in /proc/asound/cards, o -1.
- * Una riga tipo: " 1 [Headphones     ]: USB-Audio - USB-C Headphones" */
-static int rf35h_usb_audio_card(void)
+/* La prima scheda USB in /proc/asound/cards: l'indice ALSA, o -1, e in id
+ * il suo id ("" se non e' fatto solo di lettere, cifre, '_' e '-').
+ * Una riga tipo: " 1 [Headphones     ]: USB-Audio - USB-C Headphones"
+ * (la seconda riga di ogni scheda, il nome lungo, non ha le parentesi). */
+static int rf35h_usb_audio_card(char *id, size_t len)
 {
    char line[256];
    int found = -1;
    RFILE *f = filestream_open("/proc/asound/cards",
          RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
+   id[0] = '\0';
    if (!f)
       return -1;
    while (filestream_gets(f, line, sizeof(line)))
    {
-      if (strstr(line, "USB-Audio") || strstr(line, "USB Audio"))
+      const char *b = strchr(line, '[');
+      const char *e = b ? strstr(b, "]: ") : NULL;
+      if (!e)
+         continue;
+      if (strstr(e, "USB-Audio") || strstr(e, "USB Audio"))
       {
-         found = atoi(line);
+         const char *p = b + 1;
+         size_t n      = 0;
+         found         = atoi(line);
+         /* l'id finisce al primo spazio (allineamento) o alla ']' */
+         while (p + n < e && p[n] != ' ' && n + 1 < len)
+         {
+            char c = p[n];
+            if (!(   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                  || (c >= '0' && c <= '9') || c == '_' || c == '-'))
+               break;
+            id[n++] = c;
+         }
+         /* fermato prima della fine (carattere strano, troppo lungo): niente id */
+         if (p + n < e && p[n] != ' ')
+            n = 0;
+         id[n] = '\0';
          break;
       }
    }
@@ -1122,7 +1282,8 @@ static void rf35h_audio_out_change_handler(rarch_setting_t *setting)
    settings_t *settings = config_get_ptr();
    if (string_is_equal(setting->value.target.string, "usb"))
    {
-      int card = rf35h_usb_audio_card();
+      char id[32];
+      int card = rf35h_usb_audio_card(id, sizeof(id));
       if (card < 0)
       {
          const char *_msg = "No USB audio device found: keep the USB-C port in host mode and plug the headphones in first.";
@@ -1132,8 +1293,17 @@ static void rf35h_audio_out_change_handler(rarch_setting_t *setting)
                sizeof(settings->arrays.rf35h_audio_out));
          return;
       }
-      snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
-            "plughw:%d,0", card);
+      /* devaOS RF35H: la scheda per id, non per indice. L'indice dipende
+       * dall'ordine in cui le schede compaiono, e al riavvio dopo poteva
+       * essere un'altra scheda o nessuna; l'id resta lo stesso. Se all'avvio
+       * la scheda non c'e', rf35h_audio_device_check (configuration.c)
+       * torna al dispositivo predefinito. */
+      if (id[0])
+         snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
+               "plughw:CARD=%s,DEV=0", id);
+      else
+         snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
+               "plughw:%d,0", card);
    }
    else
       settings->arrays.audio_device[0] = '\0';

@@ -130,12 +130,17 @@ static void cpu_features_arm_model_name(char *s, int len)
                const char *comma = strchr(p, ',');
                if (comma && comma[1])
                {
-                  size_t i;
+                  size_t i, sl;
                   /* vendor con l'iniziale maiuscola, modello maiuscolo */
                   snprintf(soc, sizeof(soc), "%.*s %s",
                         (int)(comma - p), p, comma + 1);
                   soc[0] = (char)toupper((unsigned char)soc[0]);
-                  for (i = (size_t)(comma - p) + 1; soc[i]; i++)
+                  /* devaOS RF35H: snprintf tronca a 63 caratteri. Con un
+                   * vendor di 63 o piu' il modello non c'e', e il ciclo
+                   * partiva oltre la fine di soc[]: ci si ferma alla sua
+                   * lunghezza vera. */
+                  sl = strlen(soc);
+                  for (i = (size_t)(comma - p) + 1; i < sl; i++)
                      soc[i] = (char)toupper((unsigned char)soc[i]);
                }
                break;

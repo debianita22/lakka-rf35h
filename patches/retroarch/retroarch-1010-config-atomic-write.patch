@@ -8,22 +8,26 @@ si sostituisce, si controllano fflush, ferror, fsync e fclose, e solo allora
 lo si rinomina sopra l'originale. In caso di errore il file originale resta
 intero, la funzione restituisce false e la configurazione resta da salvare.
 Un collegamento simbolico resta tale: li' si scrive sul posto.
+Dopo la rinomina si fa fsync anche della directory, senza la quale la
+rinomina stessa poteva non arrivare su disco prima di un interruzione di
+corrente; se quel fsync non riesce il salvataggio resta riuscito.
 
 ---
 --- a/libretro-common/file/config_file.c
 +++ b/libretro-common/file/config_file.c
-@@ -25,6 +25,10 @@
+@@ -25,6 +25,11 @@
  #include <stdio.h>
  #include <ctype.h>
  #include <errno.h>
 +#if defined(__linux__)
 +#include <sys/stat.h>
++#include <fcntl.h>
 +#include <unistd.h>
 +#endif
  
  #include <retro_miscellaneous.h>
  #include <compat/strl.h>
-@@ -1409,6 +1413,54 @@
+@@ -1409,6 +1414,70 @@
           config_file_dump(conf, stdout, sort);
        else
        {
@@ -70,6 +74,22 @@ Un collegamento simbolico resta tale: li' si scrive sul posto.
 +               ok = false;
 +            if (!ok)
 +               unlink(tmp_path);
++            else
++            {
++               /* devaOS RF35H: la rename e' su disco solo quando lo e' la
++                * directory. Senza questo fsync, dopo un'interruzione di
++                * corrente si poteva ritrovare il file vecchio con il .tmp
++                * accanto. Se non riesce non e' un errore: il file nuovo e'
++                * gia' al suo posto. (tmp_path non serve piu': ospita la
++                * directory.) */
++               int dfd;
++               fill_pathname_basedir(tmp_path, path, sizeof(tmp_path));
++               if ((dfd = open(tmp_path, O_RDONLY | O_DIRECTORY)) >= 0)
++               {
++                  fsync(dfd);
++                  close(dfd);
++               }
++            }
 +         }
 +         /* il flag resta: un salvataggio successivo ci riprova */
 +         if (!ok)
@@ -78,7 +98,7 @@ Un collegamento simbolico resta tale: li' si scrive sul posto.
           void* buf  = NULL;
           FILE *file = (FILE*)fopen_utf8(path, "wb");
           if (!file)
-@@ -1423,6 +1475,7 @@
+@@ -1423,6 +1492,7 @@
              fclose(file);
           if (buf)
              free(buf);
