@@ -1,0 +1,21 @@
+Subject: autoremove: il sorgente del kernel resta (verify-kernel)
+
+Con AUTOREMOVE=yes la cartella di build di linux spariva prima della fine:
+verify-kernel non trovava il sorgente e le patch del kernel restavano senza
+controllo proprio nella CI. Costa ~2 GB di disco, sui 100 liberi del runner.
+
+---
+--- a/scripts/autoremove
++++ b/scripts/autoremove
+@@ -5,6 +5,11 @@
+ 
+ . config/options "${1}"
+ 
++# devaOS RF35H: il sorgente del kernel resta. LibreELEC applica le patch del
++# kernel senza guardarne l'esito: verify-kernel.sh le cerca nel sorgente a
++# fine build, e con AUTOREMOVE=yes (la CI) non lo trovava piu'.
++[ "${PKG_NAME}" = "linux" ] && exit 0
++
+ if [ -d "${PKG_BUILD}" ] && [ "${PKG_SECTION}" != "virtual" ]; then
+   print_color CLR_AUTOREMOVE "AUTOREMOVE ${PKG_BUILD}"
+   echo

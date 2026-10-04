@@ -141,6 +141,8 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/wlroots-no-
 KV="$(sed -n 's/^+ *PKG_VERSION="\([0-9][0-9.]*\)".*/\1/p' "$O/integration/linux-rf35h.patch")"
 [ -n "$KV" ] || { echo "apply: versione del kernel non trovata in integration/linux-rf35h.patch" >&2; exit 1; }
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/linux-rf35h.patch"
+# ...e il suo sorgente resta anche con AUTOREMOVE=yes, per verify-kernel
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/autoremove-keep-kernel-rf35h.patch"
 # perf usa da solo strumenti dell'host se li trova: rustc (carico di test in
 # Rust, per aarch64 fallisce) e shellcheck (ogni avviso ferma la build).
 # NO_RUST=1 e NO_SHELLCHECK=1 accanto agli altri NO_*.

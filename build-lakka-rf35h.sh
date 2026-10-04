@@ -992,7 +992,15 @@ da dove si e' fermata."
 fi
 
 # --- risultato ---------------------------------------------------------------
-check_kernel || warn "kernel incompleto: vedi sopra"
+# Una patch del kernel che manca (uscita 1) e' un kernel sbagliato: ferma.
+# Il sorgente che non c'e' (2: build non arrivata al kernel) solo un avviso.
+krc=0
+check_kernel || krc=$?
+case "${krc}" in
+	0) ;;
+	1) die "kernel incompleto: una o piu' patch non sono nel sorgente (vedi sopra)" ;;
+	*) warn "sorgente del kernel non trovato: le sue patch non sono state verificate" ;;
+esac
 
 say "Fatto"
 find_image

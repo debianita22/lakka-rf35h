@@ -183,7 +183,8 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              34 patch all'albero Lakka (kernel 7.2.7, perf,
+    integration/              35 patch all'albero Lakka (kernel 7.2.y, perf,
+                              sorgente del kernel tenuto per verify-kernel,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, ...)
@@ -5216,3 +5217,22 @@ finti (Lakka, apply.sh e le patch veri; tarball rifatto dal tag v7.2.9):
 --dry-run, il giro vero contro un origin locale (ramo, commit, patch
 aggiornata, build e issue chiesti), il secondo giro ("gia' proposto"), e
 l'avviso di Lakka con l'issue da aggiornare.
+
+**Le patch del kernel verificate anche in CI.** `check_kernel` a fine build
+(verify-kernel) in CI non poteva funzionare: con `AUTOREMOVE=yes`
+LibreELEC cancella la cartella di build di un pacchetto appena nessun job la
+usa piu' (`scripts/autoremove`), e quella del kernel spariva dopo i moduli
+esterni; verify-kernel usciva 2 ("sorgente non trovato") e il build script
+lo trattava come un avviso. Ora `integration/autoremove-keep-kernel-rf35h.patch`
+tiene il sorgente di `linux` (~2 GB sui 100 liberi del runner) e il build
+script ferma la build se verify-kernel esce 1 (una patch manca); con 2 resta
+un avviso. verify-kernel provato sul sorgente vero: tag v7.2.9 con le 8
+patch, 22 controlli ok; tolta r-024, esce 1 con i due MANCA; package.mk a
+7.2.10 su sorgente 7.2.9, esce 1 sul SUBLEVEL.
+
+**Le due build di prova** (4/10): `ci-test/v1.1` (core con `+lto`, kernel
+7.2.9) 340/340 in 77 minuti; `ci-test/mesa-lto` (Mesa con `+lto`) 340/340 in
+98 minuti (Mesa ricompilata da zero con l'LTO). In tutte e due 34 core,
+nessuno escluso: con i `-Werror` di LibreELEC nessuno dei 19 core e
+nemmeno Mesa si fermano.
+

@@ -208,6 +208,8 @@ KV="$(sed -n 's/^+ *PKG_VERSION="\([0-9][0-9.]*\)".*/\1/p' "${O}/integration/lin
 KS="$(sed -n 's/^+ *PKG_SHA256="\([^"]*\)".*/\1/p' "${O}/integration/linux-rf35h.patch")"
 chk "kernel ${KV:-?} con il suo SHA256"        "[ -n '${KV}' ] && echo '${KS}' | grep -qxE '[0-9a-f]{64}' && grep -q 'PKG_VERSION=\"${KV}\"' '$LPK' && grep -q '${KS}' '$LPK'"
 chk "kernel 7.2.y (ramo supportato)"           "case '${KV}' in 7.2.*) true ;; *) false ;; esac"
+chk "sorgente del kernel tenuto (AUTOREMOVE)"  "grep -q '\[ \"\${PKG_NAME}\" = \"linux\" \] && exit 0' '${W}/scripts/autoremove'"
+chk "patch del kernel mancante: build ferma"   "grep -q 'kernel incompleto: una o piu' '$O/build-lakka-rf35h.sh'"
 
 # LTO: "+lto", il flag che questa LibreELEC conosce (lto, lto-fat, lto-off),
 # sui core che apply.sh elenca, se l'LTO dei core e' acceso (il build script
