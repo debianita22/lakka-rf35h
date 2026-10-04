@@ -12,10 +12,28 @@ scansione riordinava la lista, la password andava a un'altra rete, e se la
 connessione falliva connect_ssid cancellava la configurazione salvata di
 quella. Ora la ritrova per id di connman.
 
+La password stessa finiva in wifi_network_info_t.passphrase, di 33 byte: WPA
+ammette fino a 63 caratteri, o una PSK di 64 cifre esadecimali, e quelle piu
+lunghe di 32 arrivavano a connman troncate, con la connessione che falliva
+anche con la password giusta. Ora il campo e di 65 byte.
+
 ---
 --- a/network/wifi_driver.h
 +++ b/network/wifi_driver.h
-@@ -108,6 +108,14 @@
+@@ -44,7 +44,11 @@
+ typedef struct wifi_network_info
+ {
+    char ssid[33];
+-   char passphrase[33];
++   /* devaOS RF35H: 33 byte bastavano solo per password fino a 32 caratteri.
++    * WPA ne ammette fino a 63, o una PSK di 64 cifre esadecimali: la finestra
++    * della password le copiava qui (strlcpy) e connman le riceveva troncate,
++    * e la connessione falliva con la password giusta. */
++   char passphrase[65];
+    bool connected;
+    bool saved_password;
+    char netid[160];   /* Do not use, internal */
+@@ -108,6 +112,14 @@
  
  wifi_network_scan_t* driver_wifi_get_ssids(void);
  
@@ -99,7 +117,7 @@ quella. Ora la ritrova per id di connman.
     RBUF_FREE(old_list);
  }
  
-@@ -306,30 +310,34 @@
+@@ -310,30 +314,34 @@
  static bool connmanctl_ssid_is_online(void *data, unsigned i)
  {
     connman_t *connman = (connman_t*)data;
@@ -143,7 +161,7 @@ quella. Ora la ritrova per id di connman.
  }
  
  static bool connmanctl_disconnect_ssid(void *data,
-@@ -519,6 +527,7 @@
+@@ -523,6 +531,7 @@
     connmanctl_refresh_services(connman);
  
     /* connman is a PITA, return code is not meaningful at all :( */
@@ -151,7 +169,7 @@ quella. Ora la ritrova per id di connman.
     for (i = 0; i < RBUF_LEN(connman->scan.net_list); i++)
     {
        if (!strcmp(netid, connman->scan.net_list[i].netid))
-@@ -531,6 +540,7 @@
+@@ -535,6 +544,7 @@
           }
        }
     }
@@ -161,7 +179,7 @@ quella. Ora la ritrova per id di connman.
     if (!widgets_active)
 --- a/menu/menu_displaylist.c
 +++ b/menu/menu_displaylist.c
-@@ -7905,6 +7905,9 @@
+@@ -7918,6 +7918,9 @@
              else
              {
                 unsigned i;
@@ -171,7 +189,7 @@ quella. Ora la ritrova per id di connman.
                 for (i = 0; i < RBUF_LEN(scan->net_list); i++)
                 {
                    const char *ssid = scan->net_list[i].ssid;
-@@ -7915,6 +7918,7 @@
+@@ -7928,6 +7931,7 @@
                             MENU_WIFI, 0, 0, NULL))
                       count++;
                 }

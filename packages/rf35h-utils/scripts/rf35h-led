@@ -25,8 +25,9 @@ rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "
 #   rf35h-led raw 0x15       manda un byte qualsiasi al microcontrollore
 #   rf35h-led --restore      rimette l'ultimo modo salvato (default: blue)
 #                            e riattiva l'indicatore di carica sul LED rosso
-#   rf35h-led --sleep        spegne gli stick e toglie corrente all'MCU
-#                            (chiamato da rf35h-suspend.service prima dello sleep)
+#   rf35h-led --sleep        spegne gli stick e toglie corrente all'MCU, senza
+#                            salvare (rf35h-suspend.service prima dello sleep,
+#                            rf35h-state.service allo spegnimento)
 #   rf35h-led --wake         ridà corrente e rimette il modo salvato
 #
 # Il modo scelto viene salvato e rimesso al boot da rf35h-state.service.
@@ -80,7 +81,10 @@ is_dynamic() { for d in ${DYNAMIC}; do [ "$1" = "${d}" ] && return 0; done; retu
 # Altrimenti script e demone si sovrappongono: il demone ha un frame gia'
 # calcolato e lo manda dopo il nostro byte, e l'effetto scelto non si vede o
 # "off" non spegne. Il link invocation: esiste solo mentre la unit e' attiva.
-ledd_running() { [ -e "${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}" ]; }
+# E' un symlink verso l'invocation id, un nome che come file non esiste
+# (src/core/unit.c, unit_export_invocation_id): [ -e ] lo segue e dice sempre
+# "no", quindi il controllo non scattava mai. Serve -L.
+ledd_running() { _f="${RF35H_LEDD_FLAG:-/run/systemd/units/invocation:rf35h-ledd.service}"; [ -L "${_f}" ] || [ -e "${_f}" ]; }
 
 # Il busybox di Lakka non ha stty ne' microcom, e senza termios in raw mode il
 # tty si mangia 0x11/0x13 (XON/XOFF) e traduce 0x0d. rf35h-tty e' un helper

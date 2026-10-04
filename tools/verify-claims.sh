@@ -97,6 +97,32 @@ chk "menu: le 7 tendine si rileggono (handle=true)"  "[ \"\$(grep -cE '^\+   SET
 chk "menu: chiave vuota -> stato reale del device"   "grep -q '^+static void rf35h_arrays_fill(settings_t \*settings)' '$M1003B' && grep -q '^+   rf35h_arrays_fill(settings);' '$M1003B'"
 chk "generatore: handle=true per le 7 tendine"       "[ \"\$(grep -cE 'SETTING_ARRAY\(\"rf35h_.*DEFAULT_RF35H_[A-Z_]+, true\);' '$O/tools/gen-retroarch-rf35h-menu.py')\" = 7 ]"
 
+# Revisione delle patch di RetroArch per la 1.1.0: Samba e il modo "transfer"
+# della USB-C (1007), toggle dei servizi senza gare ne' zombie (1007), stop di
+# scraper e aggiornamento senza bloccare il menu, valori del menu giusti subito
+# dopo un cambio, installazione dell'aggiornamento solo dopo "rf35h-update
+# install" (batteria), uscita audio USB per id con ripiego all'avvio (1003), e
+# gli irrobustimenti: password WPA lunghe (1009), tether_status (1008), fsync
+# della directory (1010), nome del SoC (1004), array RF35H nel ciclo (1003).
+M1004="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1004-arm64-neon-cpu-model.patch"
+M1007="${W}/packages/lakka/retroarch_base/retroarch/patches/retroarch-1007-service-toggle-keep-conf.patch"
+chk "Samba: il flag messo da parte conta come spento"    "grep -q '^+bool config_samba_enabled(void)' '$M1007' && [ \"\$(grep -c '^+         settings->bools.samba_enable, config_samba_enabled());' '$M1007')\" = 2 ]"
+chk "Samba: il salvataggio non tocca il flag da parte"   "grep -q '^+   if (!filestream_exists(RF35H_SAMBA_ASIDE_PATH))' '$M1007'"
+chk "Samba: acceso dal menu, via anche il flag da parte" "grep -q '^+      filestream_delete(RF35H_SAMBA_ASIDE_PATH);' '$M1007'"
+chk "Samba: stesso nome del flag in rf35h-usb"           "grep -q 'LAKKA_SAMBA_DISABLED_FILE_PATH \".rf35h-usb\"' '$M1007' && grep -q 'SMB_ASIDE=\"\${SMB_FLAG}.rf35h-usb\"' '$P/scripts/rf35h-usb'"
+chk "toggle servizi: file prima del fork, niente zombie" "grep -q '^+   config_set_service_state(path, enable);' '$M1007' && grep -q '^+      while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) { }' '$M1007' && grep -q '^+         _exit(127);' '$M1007' && [ \"\$(grep -c '^+   systemd_service_spawn(enable' '$M1007')\" = 2 ]"
+chk "toggle servizi: .conf creato senza troncare"        "grep -q '^+      if ((f = fopen(conf_path, \"a\")))' '$M1007'"
+chk "scraper e aggiornamento: stop senza bloccare"       "[ \"\$(grep -c 'systemctl --no-block stop rf35h-' '$M1003B')\" = 2 ] && ! grep -q 'systemctl stop rf35h-' '$M1003B' && grep -q 'systemctl --no-block stop rf35h-scrape.service' '$O/tools/gen-retroarch-rf35h-menu.py'"
+chk "menu: dopo un cambio 3 s senza rileggere gli stati" "grep -q '^+   rf35h_last_run = cpu_features_get_time_usec();' '$M1003B' && grep -q '^+         && cpu_features_get_time_usec() - rf35h_last_run < 3000000)' '$M1003B'"
+chk "aggiornamento: rf35h-update install, poi riavvio"   "grep -q 'popen(\"/usr/bin/rf35h-update install\", \"r\")' '$M1003B' && grep -q 'WEXITSTATUS(st) == 0' '$M1003B'"
+chk "rf35h-update ha il comando install del menu"        "grep -qE '^[[:space:]]*\"?([a-z-]+[|])*install([|][a-z-]+)*\"?[)]' '$P/scripts/rf35h-update'"
+chk "audio USB: scheda per id, ripiego all'avvio"        "grep -q 'plughw:CARD=%s,DEV=0' '$M1003B' && grep -q '^+   rf35h_audio_device_check(settings);' '$M1003B'"
+chk "array RF35H letti con la loro dimensione"           "grep -q '^+               rf35h_array_size(settings, array_settings\[i\].ptr));' '$M1003B'"
+chk "Wi-Fi: password WPA fino a 63 caratteri"           "grep -q '^+   char passphrase\[65\];' '$M1009'"
+chk "connmanctl: tether_status controlla fgets"         "grep -q '^+   if (!fgets(ln, sizeof(ln), command_file))' '$M1008'"
+chk "config: fsync della directory dopo la rename"      "grep -q 'open(tmp_path, O_RDONLY | O_DIRECTORY)' '$M1010'"
+chk "nome della CPU: niente overflow con vendor lunghi" "grep -q 'i < sl; i++)' '$M1004' && grep -q 'i < sl; i++)' '$O/tools/gen-retroarch-arm64-fixes.py'"
+
 echo "== Vulkan accanto a OpenGL ES, IKEMEN GO"
 OPT="${W}/projects/Rockchip/devices/RK3326/options"
 IK="${O}/packages/ikemen-go"
@@ -179,7 +205,7 @@ echo "== pacchetto rf35h-utils"
 chk "DAC: default 28% applicato sempre"      "grep -q '^DEFAULT=28' '$P/scripts/rf35h-dac-volume' && ! grep -q '^ConditionPathExists' '$P/system.d/rf35h-dacvol.service'"
 chk "headphone-sense non abilitato"          "! grep -q 'enable_service rf35h-audio.service' '$P/package.mk'"
 chk "servizi rk915-load, overrides, dacvol"  "grep -q 'enable_service rf35h-rk915-load.service' '$P/package.mk' && grep -q 'enable_service rf35h-overrides.service' '$P/package.mk' && grep -q 'enable_service rf35h-dacvol.service' '$P/package.mk'"
-chk "override: 10 .cfg e 1 .opt"             "[ \$(find '$P/overrides' -name '*.cfg' | wc -l) = 10 ] && [ \$(find '$P/overrides' -name '*.opt' | wc -l) = 1 ]"
+chk "override: 11 .cfg e 1 .opt"             "[ \$(find '$P/overrides' -name '*.cfg' | wc -l) = 11 ] && [ \$(find '$P/overrides' -name '*.opt' | wc -l) = 1 ]"
 chk "rf35h-i2c rifiuta scritture al codec"   "grep -q RF35H_I2C_FORCE '$P/sources/rf35h-i2c.c'"
 chk "timesyncd: nessun ordinamento"          "! grep -qE '^(After|Wants|Requires)=' '$P'/system.d/systemd-timesyncd.service.d/*.conf"
 
@@ -198,7 +224,12 @@ chk "led raw: validazione stretta"            "grep -q '(0-255 o 0x00-0xFF)' '$P
 chk "AP: nessuna password pubblica di default" "grep -q 'gen_pass()' '$P/scripts/rf35h-ap' && ! grep 'printf' '$P/scripts/rf35h-ap' | grep -q 'PASSWORD=RetroArch'"
 chk "AP: converte la password pubblica"       "grep -q \"grep -qx 'PASSWORD=RetroArch'\" '$P/scripts/rf35h-ap'"
 chk "AP: il menu mostra le credenziali"       "grep -q 'rf35h-ap prepare' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch' && grep -q 'password: %s' '${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
-chk "toggle servizi: non svuota la config"    "grep -q 'if (!filestream_exists(path))' '${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch'"
+# 1007: non basta il toggle del menu, anche il salvataggio della configurazione
+# (a ogni uscita, spegnimento o riavvio) svuotava sshd.conf
+R1007="${O}/patches/retroarch/retroarch-1007-service-toggle-keep-conf.patch"
+chk "servizi: il salvataggio non svuota sshd.conf" "grep -q '^+   config_set_service_state(LAKKA_SSH_PATH, settings->bools.ssh_enable);' '$R1007' && grep -q '^-      filestream_delete(LAKKA_SSH_PATH);' '$R1007'"
+chk "servizi: il toggle non svuota la config"  "grep -q '^+   config_set_service_state(path, enable);' '$R1007'"
+chk "servizi: spento = .disabled, come LibreELEC" "grep -q '^+      filestream_rename(conf_path, disabled_path);' '$R1007' && grep -q '^+            && filestream_rename(disabled_path, conf_path) == 0)' '$R1007'"
 
 # Kernel 7.2.y, pila snella: il ramo 7.0 e' fuori supporto dal 27/06/2026.
 # Versione e SHA256 stanno solo in integration/linux-rf35h.patch: l'albero
@@ -249,6 +280,63 @@ chk "crashlog: dichiara se l'orologio e' affidabile" "grep -q 'timesync/synchron
 chk "RetroArch: niente core dump"                    "grep -qx 'LimitCORE=0' '$P/retroarch.service.d/rf35h-crashlog.conf'"
 # systemctl enable a ogni boot faceva ricaricare systemd: ~5 s di boot fermo.
 chk "rf35h-ntp: niente ricaricamento di systemd"    "grep -q -- '--no-reload enable' '$P/scripts/rf35h-ntp' && ! grep -qE '^[[:space:]]*systemctl (enable|disable) ' '$P/scripts/rf35h-ntp'"
+
+# Revisione per la v1.1.0, parte console (script, tool C, unit): volume sulla
+# scheda rk817 per id ALSA, LED degli stick non salvati "off" a ogni
+# spegnimento (e rf35h-ledd visto davvero), config.ini di IKEMEN a disco pieno,
+# bootlog che non ferma RetroArch, sospensione rimandata durante update,
+# scraping e transfer, crash log con l'orologio tornato indietro, rf35h-i2c
+# sulla PMIC, scraper (db_name come cartella, scraper.conf 0600).
+dev_audio_card() {   # mai la scheda 0 per numero: con una cuffia USB all'avvio e' lei
+	grep -q 'CARD="${RF35H_CARD_ID:-rk817ext}"' "$P/scripts/rf35h-dac-volume" \
+		&& grep -q 'RF35H_CARD:-/proc/asound/rk817ext' "$P/scripts/rf35h-audio-wait" \
+		&& grep -q 'hw:CARD=${CARD},DEV=0' "$P/scripts/rf35h-audiotest" \
+		&& ! grep -rqE 'amixer[^|;]* -c 0|amixer -q cset|hw:0|asound/card0' "$P/scripts" "$P/system.d" \
+		&& grep -qx 'ExecStart=/usr/bin/rf35h-dac-volume --restore' "$P/system.d/rf35h-dacvol.service"
+}
+dev_led_shutdown() {   # "rf35h-led off" salvava "off" come scelta dell'utente
+	grep -qx 'ExecStop=-/usr/bin/rf35h-led --sleep' "$P/system.d/rf35h-state.service" \
+		&& ! grep -q '^ExecStop=.*rf35h-led off' "$P/system.d/rf35h-state.service"
+}
+dev_ledd_flag() {   # il link invocation: e' un symlink senza bersaglio: -L, non -e
+	grep -q '\[ -L "${_f}" \]' "$P/scripts/rf35h-led" && grep -q '\[ -L "${f}" \]' "$P/scripts/rf35h-statusled"
+}
+dev_ikemen_full() {   # niente "awk > tmp && mv": la busybox awk non segnala gli errori di scrittura
+	local f="${O}/packages/ikemen-go/scripts/rf35h-ikemen"
+	grep -q '^write_atomic()' "$f" && [ "$(grep -c 'write_atomic "' "$f")" -ge 2 ] \
+		&& ! grep -qF '> "${tmp}"' "$f" && ! grep -qF '> "${f}.rf35h.$$"' "$f"
+}
+dev_bootlog() {   # multi-user.target, e quindi RetroArch, non aspetta la diagnosi
+	local u="$P/system.d/rf35h-bootlog.service"
+	grep -qx 'DefaultDependencies=no' "$u" && grep -qx 'Conflicts=shutdown.target' "$u" \
+		&& grep -qx 'Before=shutdown.target' "$u" && grep -qE '^After=.*basic.target' "$u" \
+		&& grep -qx 'Type=oneshot' "$u" && grep -qE '^TimeoutStartSec=[0-9]+$' "$u"
+}
+dev_idle_busy() {
+	local c="$P/sources/rf35h-idle.c"
+	grep -q 'lstat(path, &st)' "$c" && grep -q '"rf35h-update.service", "rf35h-scrape.service"' "$c" \
+		&& grep -q 'usb_gadget/rf35h/UDC' "$c" && grep -q 'const char \*why = busy();' "$c"
+}
+dev_crash_clock() { grep -q '\[ "${age}" -ge 0 \] && \[ "${age}" -lt 60 \]' "$P/scripts/rf35h-crashlog"; }
+dev_i2c_pmic() {   # ogni scrittura all'rk817 (codec e PMIC) solo con RF35H_I2C_FORCE=1
+	local c="$P/sources/rf35h-i2c.c"
+	grep -q 'if (val >= 0 && bus == 0 && addr == 0x20) {' "$c" && grep -q 'strcmp(force, "1") != 0' "$c" \
+		&& ! grep -q 'reg >= 0x10 && reg <= 0x4f && !getenv' "$c"
+}
+dev_scrape() {
+	local c="$P/sources/rf35h-scrape.cpp"
+	grep -q 'if (!safeDirName(tdir))' "$c" && grep -q 'O_WRONLY | O_CREAT | O_EXCL, 0600' "$c" \
+		&& grep -qE '^[[:space:]]+tightenConf\(\);' "$c" && ! grep -q 'fopen(CONF, "w")' "$c"
+}
+chk "audio: scheda rk817 per id, ripristino fallito visibile" "dev_audio_card"
+chk "LED: allo spegnimento --sleep, il modo salvato resta"    "dev_led_shutdown"
+chk "LED: rf35h-ledd attivo visto (symlink invocation, -L)"   "dev_ledd_flag"
+chk "IKEMEN: config.ini e .lrtl intatti a disco pieno"        "dev_ikemen_full"
+chk "bootlog: RetroArch non lo aspetta, durata limitata"      "dev_bootlog"
+chk "idle: sospensione rimandata (update, scrape, transfer)"  "dev_idle_busy"
+chk "crashlog: sentinel nel futuro = scaduto"                 "dev_crash_clock"
+chk "rf35h-i2c: ogni scrittura all'rk817 rifiutata"           "dev_i2c_pmic"
+chk "scraper: db_name come cartella, scraper.conf 0600"       "dev_scrape"
 
 echo "== aggiornamento di sistema e release"
 U="${P}/scripts/rf35h-update"
@@ -324,6 +412,67 @@ chk "README: patch kernel"      "[ \"\$(readme_n 'patch kernel')\" = \"\$(ls '$O
 chk "README: patch integrazione" "[ \"\$(readme_n \"patch all'albero\")\" = \"\$(ls '$O/integration' | wc -l)\" ]"
 chk "README: patch RetroArch"   "[ \"\$(readme_n 'patch a RetroArch')\" = \"\$(ls '$O/patches/retroarch' | wc -l)\" ]"
 chk "README: script rf35h-utils" "[ \"\$(readme_n 'script e')\" = \"\$(ls '$P/scripts' | wc -l)\" ]"
+
+echo "== CI: build e release"
+# Quattro difetti della pipeline (prove in tools/test-ci-build.sh): il
+# controllo di re3 non scattava mai (unsquashfs -l | grep -q, con pipefail);
+# una build che aveva perso core per --keep-going diventava la release che
+# tutte le console scaricano; un link ucciso alla scadenza di una parte poteva
+# arrivare nell'immagine come un .so di 0 byte; "latest" lo decideva GitHub,
+# anche per una versione piu' bassa.
+CIB="$O/tools/ci-build.sh"; BYML="$O/.github/workflows/build.yml"
+chk "re3: elenco del SYSTEM in un file, mai in pipe" "grep -q '^check_system()' '$CIB' && ! grep -vE '^[[:space:]]*#' '$CIB' | grep -qE 'unsquashfs -l[^|]*[|]([^|]|\$)'"
+chk "core di 0 byte o non ELF: l'immagine si ferma" "grep -q '^elf_ok()' '$CIB' && grep -q 'core rotti nel SYSTEM' '$CIB'"
+chk "stato: i pacchetti interrotti si rifanno"     "sed -n '/^cmd_pack() {/,/^}/p' '$CIB' | grep -q drop_interrupted"
+chk "release: re3 e core anche sui file scaricati" "grep -qF 'ci-build.sh check-dist dist' '$BYML'"
+chk "release: core o giochi persi la fermano"      "grep -q '^completeness()' '$CIB' && grep -qF 'inputs.allow_incomplete' '$BYML'"
+chk "release: col trattino sempre pre-release"     "grep -qF 'in *-*) prerelease=true' '$CIB'"
+chk "release: tag solo dal ramo principale"        "grep -qF 'merge-base --is-ancestor' '$CIB' && grep -qF 'run: ./tools/ci-build.sh version' '$BYML'"
+chk "release: latest solo alla versione piu' alta" "grep -qF 'sort -V' '$CIB' && grep -qF -- '--latest=\"\${latest}\"' '$CIB' && grep -qF 'run: ./tools/ci-build.sh publish dist' '$BYML'"
+chk "release: una per versione alla volta"         "grep -qF 'inputs.version || github.ref }}' '$BYML'"
+
+echo "== aggiornamento e strumenti per la card: le correzioni dopo la v1.0.0"
+# rf35h-update: (1) la batteria si guardava solo scaricando, e il .tar
+# verificato, gia' in /storage/.update, lo installava qualunque avvio; (2)
+# un'installazione fallita tornava in silenzio a "installed: <la vecchia>"; (3)
+# si installava qualunque ultima release diversa, anche piu' vecchia.
+# Strumenti per il PC: (4) rf35h-reflash-system lasciava in extlinux.conf
+# l'UUID di /storage dell'immagine, e con un'altra build /storage non si
+# trovava; (5) nessun controllo sul disco; (6) nessun modo di rimettere solo il
+# loader; (7) rf35h-rescue cancellava l'autostart.sh dell'utente.
+CT="$O/tools"
+# in cmd_install la batteria viene prima dello spostamento in .update
+upd_install_ok() {
+	local body
+	body="$(sed -n '/^cmd_install() {/,/^}/p' "$U")"
+	[ -n "${body}" ] || return 1
+	printf '%s\n' "${body}" | awk '/battery_check/ && !b { b = NR } index($0, "mv -f \"${f}\" \"${final}\"") { m = NR } END { exit !(b && m && b < m) }'
+}
+chk "rf35h-update: il .tar verificato aspetta fuori dalla vista dell'init" "grep -q '^STAGE=\"\${UPDATE_DIR}/.rf35h-staged\"' '$U' && grep -q 'target=\"\${STAGE}/\${U_TAR}\"' '$U'"
+chk "rf35h-update install: batteria, poi il .tar in .update" "upd_install_ok && grep -q 'install) cmd_install' '$U'"
+chk "rf35h-update boot: un'installazione fallita nel menu" "grep -q 'status \"error: install of \${m_ver} failed' '$U'"
+chk "rf35h-update: dall'ultima release solo in avanti" "grep -q '^version_newer()' '$U' && grep -q 'if ! explicit_source; then' '$U'"
+chk "reflash: extlinux.conf con l'UUID di /storage della card" "grep -qF 's/disk=UUID=\${IMG_UUID}/disk=UUID=\${CARD_UUID}/g' '$CT/rf35h-reflash-system.sh'"
+chk "reflash e rescue: controlli sul disco, card Lakka" "grep -q 'card_check \"\${DEV}\"' '$CT/rf35h-reflash-system.sh' && grep -q 'card_check \"\$DEV\"' '$CT/rf35h-rescue.sh' && grep -q 'LAKKA_DISK' '$CT/rf35h-card.sh'"
+chk "reflash --loader: il known-good verificato, a 32 KiB" "grep -q -- '--loader' '$CT/rf35h-reflash-system.sh' && grep -q 'sha256sum -c --quiet known-good.sha256' '$CT/rf35h-reflash-system.sh' && grep -q 'bs=32768 seek=1' '$CT/rf35h-reflash-system.sh'"
+chk "rescue: l'autostart.sh dell'utente torna al suo posto" "grep -q 'cp -p \"\$AS\" \"\$ASB\"' '$CT/rf35h-rescue.sh' && grep -q 'mv -f /storage/.config/autostart.sh.rf35h-rescue /storage/.config/autostart.sh' '$CT/rf35h-rescue.sh'"
+
+echo "== menu: le unit attive si vedono"
+# /run/systemd/units/invocation:<unit> e' un link simbolico al suo invocation
+# ID, che come percorso non esiste: path_is_valid() (stat) lo dava sempre
+# assente. Lo scraper e System Update non si fermavano dalla loro voce, e
+# l'ora di rete risultava spenta.
+M1003C="${O}/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch"
+chk "menu: nessun path_is_valid sui link invocation:" "! grep -q 'path_is_valid(\"/run/systemd/units/invocation:' '$M1003C' && ! grep -q 'path_is_valid(\\\\\"/run/systemd/units/invocation:' '${O}/tools/gen-retroarch-rf35h-menu.py'"
+chk "menu: rf35h_unit_active con lstat, tre file" "[ \"\$(grep -c '^+static bool rf35h_unit_active(const char \*unit)' '$M1003C')\" = 3 ] && grep -q '^+   return lstat(p, &st) == 0;' '$M1003C'"
+
+echo "== Samba: niente condivisioni che danno root"
+# L'ospite senza password e' root: Configfiles (autostart.sh), Services (SSH,
+# password dell'AP) e Update (installato al riavvio) erano codice come root per
+# chiunque nella stessa Wi-Fi; un core o una playlist cambiati pure.
+SMB="${W}/distributions/Lakka/config/smb.conf"
+chk "Samba: via Configfiles, Services e Update" "[ -f '$SMB' ] && ! grep -qE '^\[(Configfiles|Services|Update)\]' '$SMB'"
+chk "Samba: Cores e Playlists in sola lettura"  "(for sh in Cores Playlists; do sed -n \"/^\\[\$sh\\]/,/^\$/p\" '$SMB' | grep -q '^  writeable = no\$' || exit 1; done)"
 
 echo
 if [ "$bad" -eq 0 ]; then

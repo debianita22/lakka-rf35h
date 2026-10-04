@@ -36,13 +36,17 @@ PKG_JOBS=""
 #   PC Engine       beetle_pce_fast, beetle_pce (fa anche SuperGrafx)
 #   Neo Geo, CPS1/2/3   fbneo, fbalpha2012; e mame2010 dal romset 0.139
 #   N64             mupen64plus_next, parallel_n64 (unico altro core N64)
+#   PlayStation     pcsx_rearmed (dynarec arm64, BIOS facoltativo). Nessuna
+#                   riserva: swanstation e beetle_psx sono piu' pesanti, con --cores
 #   Neo Geo Pocket  beetle_ngp, race
+#   WonderSwan      beetle_wswan (unico core WonderSwan)
+#   Atari Lynx      handy, beetle_lynx (vuole lynxboot.img; handy no)
 #   Atari 2600      stella2014, stella
 #   Nintendo DS     melonds (JIT arm64), melondsds (desmume e' un interprete: su un A35 non gira)
 #   Amstrad CPC     cap32, crocods
 #   Dreamcast       flycast (unico core Dreamcast)
 # --all-cores per i ~120 di Lakka; --cores "..." per un elenco proprio.
-CORES_DEFAULT="gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbneo fbalpha2012 mame2010 mame2015 mupen64plus_next parallel_n64 beetle_ngp race stella2014 stella melonds melondsds cap32 crocods flycast"
+CORES_DEFAULT="gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbneo fbalpha2012 mame2010 mame2015 mupen64plus_next parallel_n64 pcsx_rearmed beetle_ngp race beetle_wswan handy beetle_lynx stella2014 stella melonds melondsds cap32 crocods flycast"
 CORES="${CORES_DEFAULT}"
 SKIP_CORES=""
 KEEP_GOING="no"
@@ -735,9 +739,12 @@ if [ -n "${CORES}" ]; then
 	fi
 else
 	say "Core libretro"
+	# contati da CORES_DEFAULT, non scritti: il numero scritto era rimasto a 13
+	# quando il set e' passato a 30 (34 dal 4/10/2026)
+	n=0; for c in ${CORES_DEFAULT}; do n=$((n+1)); done
 	warn "tutti i ~120 di Lakka per RK3326, mame/ppsspp/scummvm compresi: sono ore,"
 	warn "e su questo SoC molti non sono giocabili. Il default (senza --all-cores)"
-	warn "e' un set curato di 13."
+	warn "e' un set curato di ${n}."
 fi
 
 # Ogni modifica dichiarata deve essere davvero nell'albero. Si verifica sia al

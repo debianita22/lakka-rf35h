@@ -19,12 +19,17 @@ mkdir -p "${DIR}" 2>/dev/null || exit 0
 # L'istante sta in un sentinel, non nell'mtime: la busybox di Lakka non ha
 # FEATURE_STAT_FORMAT e "stat -c %Y" fallirebbe, azzerando il limite proprio
 # nel restart loop in cui serve.
+# Un istante salvato nel FUTURO (l'orologio era avanti, poi l'NTP o un boot
+# senza RTC l'ha riportato indietro) rende la differenza negativa, cioe'
+# sempre "< 60": niente piu' crash log finche' l'orologio non lo raggiungeva,
+# anche per giorni. Una differenza negativa vale come sentinel scaduto.
 STAMP="${DIR}/.last-crash"
 if [ "${MODE}" = crash ]; then
 	now=$(date +%s); last=0
 	[ -r "${STAMP}" ] && read -r last < "${STAMP}"
 	case "${last}" in ''|*[!0-9]*) last=0 ;; esac
-	[ $((now - last)) -lt 60 ] && exit 0
+	age=$((now - last))
+	[ "${age}" -ge 0 ] && [ "${age}" -lt 60 ] && exit 0
 	printf '%s\n' "${now}" > "${STAMP}"
 fi
 

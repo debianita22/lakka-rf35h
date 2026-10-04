@@ -1,0 +1,90 @@
+Subject: samba: niente condivisioni che danno root a chi e nella stessa Wi-Fi
+
+In Lakka l ospite senza password e root (guest account = root, map to guest
+= Bad User, SAMBA_SECURE=false), Samba e acceso di default e non c e
+firewall; la console entra in qualunque Wi-Fi. Chiunque nella stessa rete
+poteva scrivere come root in /storage/.config (autostart.sh e le unit in
+system.d girano all avvio), in /storage/.cache (accende SSH, legge la
+password dell access point) e in /storage/.update (un .tar li si installa al
+riavvio), sostituire un core o far puntare una voce di playlist a un .so
+qualsiasi. Tolte Configfiles, Services e Update; Cores e Playlists in sola
+lettura. ROMs, BIOS, salvataggi e il resto restano come prima.
+
+---
+--- a/distributions/Lakka/config/smb.conf
++++ b/distributions/Lakka/config/smb.conf
+@@ -44,6 +44,13 @@
+   # Force this to "no" in case "yes" becomes the default in future
+   strict allocate = no
+ 
++# devaOS RF35H: l'ospite senza password e' root, e la console entra in
++# qualunque Wi-Fi. Niente Configfiles (/storage/.config: autostart.sh
++# gira come root all'avvio), Services (/storage/.cache: accende SSH, ha la
++# password dell'access point) e Update (un .tar li' si installa al riavvio);
++# Cores e Playlists in sola lettura. Per la configurazione e gli
++# aggiornamenti a mano: ssh.
++
+ # Using the following configurations as a template allows you to add
+ # writeable shares of disks and paths under /storage
+ 
+@@ -61,20 +68,13 @@
+   public = yes
+   writeable = yes
+ 
+-[Update]
+-  path = /storage/.update
+-  available = yes
+-  browseable = yes
+-  public = yes
+-  writeable = yes
+-  root preexec = mkdir -p /storage/.update
+-
+ [Cores]
+   path = /tmp/cores
+   available = yes
+   browseable = yes
+   public = yes
+-  writeable = yes
++  # devaOS RF35H: in sola lettura: un core cambiato da qui girerebbe come root
++  writeable = no
+ 
+ [ROMs]
+   path = /storage/roms
+@@ -89,7 +89,8 @@
+   available = yes
+   browseable = yes
+   public = yes
+-  writeable = yes
++  # devaOS RF35H: in sola lettura: una voce puo' indicare il core da caricare
++  writeable = no
+ 
+ [Savefiles]
+   path = /storage/savefiles
+@@ -112,13 +113,6 @@
+   public = yes
+   writeable = yes
+ 
+-[Configfiles]
+-  path = /storage/.config
+-  available = yes
+-  browseable = yes
+-  public = yes
+-  writeable = yes
+-
+ [Screenshots]
+   path = /storage/screenshots
+   available = yes
+@@ -166,13 +160,6 @@
+   available = yes
+   browseable = yes
+   public = yes
+-  writeable = yes
+-
+-[Services]
+-  path = /storage/.cache
+-  available = yes
+-  browseable = yes
+-  public = yes
+   writeable = yes
+ 
+ [Recordings]

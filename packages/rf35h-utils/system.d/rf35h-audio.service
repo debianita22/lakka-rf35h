@@ -7,10 +7,9 @@ StartLimitIntervalSec=0
 
 [Service]
 Environment=HOME=/storage
-# La scheda deve esserci: il modulo i2s lo carichiamo in sysinit
-# (modules-load.d), ma il probe resta asincrono. Senza questa attesa il
-# servizio partiva prima che card0 esistesse e headphone-sense non trovava il
-# device del jack. Bounded: dopo 20 s si parte comunque.
+# La scheda deve esserci: il probe e' asincrono. Senza questa attesa il
+# servizio partiva prima che la scheda esistesse e headphone-sense non trovava
+# il device del jack. Bounded: dopo 20 s si parte comunque.
 ExecStartPre=/usr/bin/rf35h-audio-wait
 # Volume digitale del DAC al livello del vendor (vedi rf35h-dac-volume). Dopo
 # l'attesa della scheda, prima di headphone-sense. "-": se amixer fallisce non
@@ -30,9 +29,12 @@ ExecStartPre=-/usr/bin/rf35h-dac-volume --restore
 # HPOL/HPOR e SPK spegne l'audio (e' anche il default del driver, enum
 # {HP, SPK} con indice 0). Lo speaker si accende e spegne con il pin switch
 # della simple-card, "Internal Speakers Switch".
+#
+# "-c rk817ext": senza, amixer usa la scheda 0, che con una cuffia USB
+# collegata all'avvio non e' la nostra (vedi rf35h-dac-volume).
 ExecStart=/usr/bin/headphone-sense 'rk817_ext Headphones' \
-  "amixer -q cset name='Playback Mux' HP; amixer -q cset name='Internal Speakers Switch' off" \
-  "amixer -q cset name='Playback Mux' HP; amixer -q cset name='Internal Speakers Switch' on"
+  "amixer -q -c rk817ext cset name='Playback Mux' HP; amixer -q -c rk817ext cset name='Internal Speakers Switch' off" \
+  "amixer -q -c rk817ext cset name='Playback Mux' HP; amixer -q -c rk817ext cset name='Internal Speakers Switch' on"
 Restart=on-failure
 RestartSec=10
 

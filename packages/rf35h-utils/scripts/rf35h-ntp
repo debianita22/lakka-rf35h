@@ -18,7 +18,9 @@ STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
 CONFD="${RF35H_TIMESYNCD_CONFD:-/storage/.config/timesyncd.conf.d}"
 CONF="${CONFD}/rf35h.conf"
 UNIT="systemd-timesyncd.service"
-DEFAULT_SERVER="it.pool.ntp.org"
+# pool.ntp.org sceglie da se' server vicini a chi chiede (fino al 4/10/2026 il
+# predefinito era it.pool.ntp.org)
+DEFAULT_SERVER="pool.ntp.org"
 
 rd() { _l=""; if [ -r "$1" ]; then IFS= read -r _l < "$1" || true; fi; if [ -n "${_l}" ]; then printf '%s' "${_l}"; else printf '%s' "${2:-}"; fi; }
 
@@ -28,7 +30,8 @@ write_conf() {   # $1 = server
 		echo "# scritto da rf35h-ntp"
 		echo "[Time]"
 		echo "NTP=$1"
-		# FallbackNTP: se il server scelto non risponde, non si resta senza ora
+		# FallbackNTP conta solo se NTP= e' vuoto (timesyncd.conf): se il server
+		# scelto non risponde, l'ora la rimette comunque connman
 		echo "FallbackNTP=pool.ntp.org time.cloudflare.com"
 	} > "${CONF}" 2>/dev/null || { echo "rf35h-ntp: non riesco a scrivere ${CONF}" >&2; return 1; }
 }
@@ -39,6 +42,10 @@ case "${1:-status}" in
 		write_conf "${s}" || exit 1
 		mkdir -p "${STATE}" 2>/dev/null || true
 		printf 'on\n' > "${STATE}/ntp" 2>/dev/null || true
+		# Il server in uso va nello stato anche quando e' il predefinito: il
+		# menu lo rilegge da li' quando si apre, invece di mostrare quello che
+		# retroarch.cfg aveva salvato con un predefinito diverso.
+		[ -s "${STATE}/ntp-server" ] || printf '%s\n' "${s}" > "${STATE}/ntp-server" 2>/dev/null || true
 		# Solo se serve, e senza --reload: "systemctl enable" fa ricaricare a
 		# systemd tutte le unit, e al boot (via "boot") il ricaricamento fermava
 		# ogni altro job per ~5 s, RetroArch compreso. L'abilitazione vale dal

@@ -14,15 +14,37 @@
 # La build sta in fino a quattro parti di 6 ore (build-stage.yml). La release
 # ha l'immagine (.img.gz, prima installazione), l'aggiornamento (.tar, quello
 # che scaricano le console da Device Settings > Aggiornamento di sistema),
-# update.txt (cosa scaricare: le console leggono quello dell'ultima release) e
-# SHA256SUMS. Una pre-release non e' "latest": le console non la vedono.
-# Mai re3 (GTA III): non ha licenza, e la build qui non lo ha.
+# update.txt (cosa scaricare: le console leggono quello della release
+# "latest") e SHA256SUMS. Mai re3 (GTA III): non ha licenza, e la build qui
+# non lo ha.
+#
+# Quale release arriva alle console (tools/ci-build.sh version e publish):
+#   - pre-release: con la casella "prerelease" o con un trattino nella
+#     versione (v1.1.0-rc1), da un tag come da Run workflow. Mai "latest":
+#     le console non la vedono. Da qualunque ramo.
+#   - le altre solo dal ramo principale: Run workflow da li', o un tag su un
+#     suo commit. Diventano "latest" solo se la versione e' piu' alta di
+#     quella "latest" di adesso (sort -V): una v1.0.1 dopo la v1.1.0, o il job
+#     Release di una versione vecchia rilanciato, non fa tornare indietro le
+#     console.
+#   - una pre-release provata diventa "latest" senza ricostruirla (cosi' la
+#     v1.1.0: Run workflow con version v1.1.0 e prerelease, prove, poi):
+#       gh release edit v1.1.0 --repo debianita22/lakka-rf35h --prerelease=false --latest
+#     Senza --latest GitHub sceglie da solo, per data e versione.
+#   - niente release se all'immagine manca un core di CORES_DEFAULT o un
+#     gioco: --keep-going lascia fuori cio' che non compila (basta un errore
+#     di rete) e le console che aggiornano lo perderebbero. Run workflow con
+#     allow_incomplete la pubblica lo stesso.
+#   - il job Release si puo' rilanciare: la bozza di un tentativo fallito si
+#     cancella e si rifa'. Un tag che c'e' gia' deve essere sul commit della
+#     build, e due run della stessa versione (tag e Run workflow) non girano
+#     insieme (concurrency per versione).
 name: Build
 # Il titolo del run dice cosa costruisce: gli input di "Run workflow" non si
 # vedono dall'API ne' dall'elenco dei run, e la versione e' quello che conta.
 run-name: >-
-  ${{ github.ref_type == 'tag' && format('Release {0}', github.ref_name)
-  || inputs.version != '' && format('Release {0}{1}', inputs.version, inputs.prerelease && ' (pre-release)' || '')
+  ${{ github.ref_type == 'tag' && format('Release {0}{1}', github.ref_name, contains(github.ref_name, '-') && ' (pre-release)' || '')
+  || inputs.version != '' && format('Release {0}{1}', inputs.version, (inputs.prerelease || contains(inputs.version, '-')) && ' (pre-release)' || '')
   || inputs.resume_run != '' && format('Build di prova, ripresa da {0}', inputs.resume_run)
   || format('Build di prova ({0})', github.ref_name) }}
 
@@ -44,13 +66,20 @@ on:
         description: "Solo build di prova: ID di un run fallito da cui riprendere (ricostruisce solo cio' che e' cambiato)"
         type: string
         default: ""
+      allow_incomplete:
+        description: "Pubblica anche se mancano core o giochi (non compilati): le console che aggiornano li perdono"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: read
 
+# Una release per versione alla volta: il push del tag v1.1.0 e un Run
+# workflow con version v1.1.0 stanno nello stesso gruppo (partono da ref
+# diversi). Le build di prova restano una per ref.
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref_type == 'tag' && github.ref_name || inputs.version || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -64,8 +93,14 @@ jobs:
       prerelease: ${{ steps.v.outputs.prerelease }}
       resume: ${{ steps.v.outputs.resume }}
     steps:
+      # la storia intera: un tag di una release non pre-release deve stare
+      # sul ramo principale (git merge-base --is-ancestor)
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
+      # versione, release o prova, pre-release (un trattino: sempre), ramo
+      # principale, tag e release che esistono gia': tools/ci-build.sh version
       - name: Versione
         id: v
         env:
@@ -73,56 +108,8 @@ jobs:
           IN_VERSION: ${{ inputs.version }}
           IN_PRERELEASE: ${{ inputs.prerelease }}
           IN_RESUME: ${{ inputs.resume_run }}
-        run: |
-          set -eu
-          # una release si costruisce sempre da zero: la ripresa riusa pacchetti
-          # fatti da un altro commit
-          case "${IN_RESUME:-}" in
-            '') ;;
-            *[!0-9]*) echo "::error::resume_run: un ID di run (numero)"; exit 1 ;;
-            *) if [ -n "${IN_VERSION:-}" ]; then echo "::error::resume_run solo per le build di prova, senza version"; exit 1; fi ;;
-          esac
-          short="$(git rev-parse --short=7 HEAD)"
-          prerelease=false
-          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE}" = tag ]; then
-            version="${GITHUB_REF_NAME}"; publish=true
-            case "${version}" in *-*) prerelease=true ;; esac   # v1.1.0-rc1
-          elif [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${IN_VERSION}" ]; then
-            version="${IN_VERSION}"; publish=true
-            prerelease="${IN_PRERELEASE:-false}"
-            # una release "latest" la scaricano tutte le console: solo dal ramo principale
-            if [ "${GITHUB_REF_NAME}" != "${{ github.event.repository.default_branch }}" ] && [ "${prerelease}" != true ]; then
-              echo "::error::da ${GITHUB_REF_NAME} solo pre-release: le console aggiornano all'ultima release"
-              exit 1
-            fi
-            if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
-              echo "::error::il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
-              exit 1
-            fi
-          else
-            version="ci-${GITHUB_RUN_NUMBER}-${short}"; publish=false
-          fi
-          case "${version}" in
-            ''|*[!A-Za-z0-9._+-]*) echo "::error::versione '${version}': solo lettere, cifre e . _ + -"; exit 1 ;;
-          esac
-          if [ "${publish}" = true ] && gh release view "${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "::error::la release ${version} esiste gia'"
-            exit 1
-          fi
-          {
-            echo "version=${version}"
-            echo "publish=${publish}"
-            echo "prerelease=${prerelease}"
-            echo "resume=${IN_RESUME:-}"
-          } >> "${GITHUB_OUTPUT}"
-          {
-            echo "### ${version}"
-            if [ "${publish}" = true ]; then
-              echo "Release $( [ "${prerelease}" = true ] && echo 'pre-release' || echo 'latest') a fine build."
-            else
-              echo "Build di prova: nessuna release, l'immagine negli artifact."
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: ./tools/ci-build.sh version
 
       # gli stessi controlli di check.yml: un errore qui costa un minuto,
       # dopo ore di build costerebbe la build
@@ -182,8 +169,11 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.setup.outputs.version }}
       PRERELEASE: ${{ needs.setup.outputs.prerelease }}
+      RF35H_ALLOW_INCOMPLETE: ${{ inputs.allow_incomplete }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      # la storia intera e i tag: le note elencano i commit dall'ultima release
+      # la storia intera e i tag: le note elencano i commit dall'ultima
+      # release, e publish riguarda che il commit sia sul ramo principale
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -204,21 +194,24 @@ jobs:
           [ "$(stat -c%s "${tar}")" = "$(sed -n 's/^size=//p' update.txt)" ]
           ls -la
 
+      # Di nuovo sui file scaricati, quelli che si pubblicano: re3 e core rotti
+      # nel SYSTEM, poi i core di CORES_DEFAULT e i giochi. Un'immagine a cui
+      # manca qualcosa (--keep-going) toglierebbe quel core a ogni console che
+      # aggiorna: si ferma qui, a meno di allow_incomplete.
+      - name: Strumenti
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq squashfs-tools >/dev/null
+      - name: re3, core rotti, core e giochi mancanti
+        run: ./tools/ci-build.sh check-dist dist
+
       - name: Note della release
         run: ./tools/ci-release-notes.sh dist > dist/RELEASE-NOTES.md
 
-      # bozza, file, poi pubblicata: una console che guarda proprio in quel
-      # momento non trova mai una release senza update.txt
+      # Bozza, file, poi pubblicata (una console che guarda proprio in quel
+      # momento non trova mai una release senza update.txt). Prima: commit sul
+      # ramo principale (se non e' pre-release), tag gia' esistente solo su
+      # questo commit, via le bozze di un tentativo fallito; "latest" solo se
+      # la versione e' la piu' alta. tools/ci-build.sh publish
       - name: Pubblica
-        run: |
-          set -eu
-          cd dist
-          flags=()
-          if [ "${PRERELEASE}" = true ]; then flags+=(--prerelease); fi
-          gh release create "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft \
-            --target "${GITHUB_SHA}" --title "Lakka RF35H ${VERSION}" \
-            --notes-file RELEASE-NOTES.md "${flags[@]}"
-          gh release upload "${VERSION}" --repo "${GITHUB_REPOSITORY}" \
-            ./*.img.gz ./*.tar update.txt SHA256SUMS
-          gh release edit "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false
-          echo "### Pubblicata: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${VERSION}" >> "${GITHUB_STEP_SUMMARY}"
+        run: ./tools/ci-build.sh publish dist

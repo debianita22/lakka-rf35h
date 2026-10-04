@@ -183,11 +183,12 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              35 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              36 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
-                              stamp di RetroArch, ...)
+                              stamp di RetroArch, Samba senza condivisioni
+                              da root, ...)
     tools/                    generatori delle patch RetroArch, checker (#if, @@),
                               verify-claims.sh (le modifiche dichiarate sono
                               presenti?), verify-image.sh, recupero e reflash,
@@ -3101,7 +3102,7 @@ peggio. Due righe arrivavano prima del logo:
 
 Non si e' abbassato `loglevel`: gli errori veri devono restare visibili.
 
-## Core: 30 di default, principale e riserva per ogni sistema
+## Core: 30 di default, principale e riserva per ogni sistema (34 dal 4/10)
 
 Ognuno verificato nel suo `package.mk` e nel suo Makefile: che esista per
 aarch64, come rileva l'architettura in cross, se ha dynarec.
@@ -4127,7 +4128,7 @@ lo scraper (credenziali ScreenScraper in HTTPS, mai nei log; ArcadeDB in chiaro
 riceve solo il nome del gioco, API pubblica); la rete USB (niente routing, e
 serve il cavo: accesso fisico).
 
-### 2. Il toggle dei servizi svuotava la configurazione - corretto
+### 2. Il toggle dei servizi svuotava la configurazione - corretto (solo in parte: vedi la correzione del 4/10)
 
 `systemd_service_toggle`, accendendo SSH, Samba o Bluetooth dal menu, apriva
 in scrittura il file che fa da interruttore del servizio, **svuotandolo**. Per
@@ -5236,3 +5237,175 @@ patch, 22 controlli ok; tolta r-024, esce 1 con i due MANCA; package.mk a
 nessuno escluso: con i `-Werror` di LibreELEC nessuno dei 19 core e
 nemmeno Mesa si fermano.
 
+## SSH: le opzioni sparivano anche salvando la configurazione (4/10/2026)
+
+Rivedendo la guida: `retroarch-1007` correggeva il toggle del menu, ma
+RetroArch tocca lo stesso file anche in `config_save_file()`. Con SSH acceso
+lo apre in scrittura, cioe' lo svuota, a ogni salvataggio della
+configurazione, e Lakka ha `config_save_on_exit = "true"`: ogni uscita,
+spegnimento o riavvio dal menu. Spegnendo SSH dal menu, poi, il file veniva
+cancellato. Quindi `SSH_ARGS="-o PasswordAuthentication=no"` durava fino al
+primo riavvio, e la correzione del punto 2 della revisione di sicurezza non
+bastava. Lo stesso per `bluez.conf`. Samba no: Lakka lo gestisce gia' con
+`samba.disabled` (`retroarch-1000`), e `samba.conf` non viene toccato.
+
+`retroarch-1007` ora fa come LibreELEC (`set_service` del suo add-on delle
+impostazioni, ed e' quello che si aspetta `bluetooth-defaults.service`):
+spento, `<servizio>.conf` diventa `<servizio>.disabled` con il suo
+contenuto; acceso, il `.disabled` torna `.conf`, e solo se non c'e' nessuno
+dei due se ne crea uno vuoto; un `.conf` che esiste non si riscrive. Una sola
+funzione, `config_set_service_state()` in `configuration.c`, usata dal
+salvataggio e dal toggle.
+
+Provato sul RetroArch di Lakka (`69a4f0e`): la serie completa si applica,
+1000-1010 senza fuzz, 99 e 999 con lo stesso fuzz di prima; `configuration.c`
+e `menu_setting.c` compilano con `HAVE_LAKKA` senza warning; la funzione, con
+il `filestream` vero di libretro-common, passa nove casi (acceso da zero,
+salvataggio con le opzioni, spento, rispento, riacceso, entrambi i file,
+nessun file, percorso senza `.conf`), e il controllo negativo sul codice
+originale svuota il file come previsto. Tre righe nuove in `verify-claims`,
+provate anche sulla vecchia patch (mancano tutte e tre). Sulle console con
+un'immagine precedente la riga `SSH_ARGS` e' gia' andata persa: va rimessa
+una volta dopo l'aggiornamento.
+
+## Core: PlayStation, WonderSwan e Lynx nel set di default (4/10/2026)
+
+Il set di default seguiva i sistemi della nostra collezione, ma le immagini
+delle release le usa anche chi ha altri giochi, e un core che manca
+nell'immagine si aggiunge solo ricompilando. Mancavano la PlayStation, uno
+dei sistemi piu' giocati su questi handheld, e WonderSwan e Lynx, che avevano
+gia' i loro override di scala intera (`Beetle WonderSwan`, `Handy`) senza
+avere il core. Entrano quattro core, da 30 a 34:
+
+| sistema | principale | riserva |
+|---|---|---|
+| PlayStation | `pcsx_rearmed` | nessuna nel default |
+| WonderSwan / Color | `beetle_wswan` | nessuna: unico core WonderSwan |
+| Atari Lynx | `handy` | `beetle_lynx` |
+
+Verificati sull'albero pinnato: i quattro `package.mk` esistono, e per
+Rockchip Lakka esclude solo `lr_moonlight` e `vitaquake3`, quindi li compila
+gia' nelle sue immagini RK3326. `pcsx_rearmed` su aarch64 va con
+`platform=unix DYNAREC=ari64`, e al commit pinnato (`3a7850f`) il dynarec ha
+il backend arm64 (`assem_arm64.c`, `linkage_arm64.o` con `ARCH` aarch64 da
+`-dumpmachine`). I `library_name` letti nei sorgenti ai commit pinnati:
+`PCSX-ReARMed`, `Beetle WonderSwan`, `Handy`, `Beetle Lynx`; per l'ultimo un
+override nuovo, uguale a quello di Handy (Lynx 4x), e `verify-claims` conta 11
+`.cfg`. BIOS dal core-info pinnato (`bd81a0b`): facoltativi per
+`pcsx_rearmed` (`scph5500/5501/5502.bin`, `psxonpsp660.bin`) e `handy`
+(`lynxboot.img`), obbligatorio per `beetle_lynx`.
+
+Fuori: `swanstation` (DuckStation) come riserva PlayStation: piu' pesante di
+`pcsx_rearmed`, e non provato qui; Lakka stessa lo toglie sul Pi Zero 2.
+`beetle_psx` lo e' ancora di piu'. Entrambi restano a un `--cores` di
+distanza. Niente LTO sui nuovi: la lista resta quella dei core provati.
+
+## Ora di rete: pool.ntp.org come predefinito (4/10/2026)
+
+Il server predefinito era `it.pool.ntp.org`. Ora e' `pool.ntp.org`, come i
+`FallbackTimeservers` di connman in LibreELEC: il pool risponde da se' con
+server vicini a chi chiede, quindi in Italia non cambia nulla, e fuori
+dall'Italia non si va piu' su server italiani. `it.pool.ntp.org` esce anche
+dalla tendina (restano `pool.ntp.org`, `time.cloudflare.com`,
+`time.google.com`); chi l'aveva scelto a mano lo tiene, perche' lo stato in
+`/storage/.config/rf35h/ntp-server` vince sul predefinito.
+
+Un dettaglio: `retroarch.cfg` conserva il valore della tendina, e una chiave
+non vuota vince sul predefinito. Sulle console gia' installate il menu
+avrebbe continuato a mostrare `it.pool.ntp.org` mentre `rf35h-ntp`, senza
+stato, usava gia' il nuovo. Ora `rf35h-ntp on` scrive nello stato anche il
+server predefinito, e il menu, che all'apertura rilegge lo stato, mostra
+quello vero. La 1003 rigenerata con i due generatori e' identica byte per
+byte a quella corretta a mano. Corretto anche un commento: `FallbackNTP` di
+timesyncd conta solo con `NTP=` vuoto, quindi non e' un ripiego per il
+server scelto; il ripiego e' connman.
+
+Provato `rf35h-ntp` con busybox sh e un `systemctl` finto: il predefinito
+finisce nello stato e in `NTP=`, `server time.google.com` lo sostituisce, una
+scelta `it.pool.ntp.org` gia' salvata resta.
+
+## Revisione prima della v1.1.0: cinque revisori, le correzioni (4/10/2026)
+
+Chiesto dall'utente: "prepara una release stabile, correggi i bug che
+stiamo sottovalutando". Cinque revisioni indipendenti, in parallelo e in
+sola lettura (aggiornamento e avvio, sicurezza di rete, patch di RetroArch,
+script e device tree, CI e release), poi quattro correzioni in parallelo su
+worktree separati, unite qui. Ogni difetto e' stato riprodotto prima di
+correggerlo, e ogni controllo nuovo di verify-claims fallisce sul codice
+vecchio.
+
+**Sicurezza.**
+- Samba: in Lakka l'ospite senza password e' root, Samba e' acceso e non c'e'
+  firewall. Chiunque nella stessa Wi-Fi scriveva in `/storage/.config`
+  (`autostart.sh` gira come root all'avvio), in `/storage/.cache` (accende
+  SSH, legge la password dell'AP) e in `/storage/.update` (un `.tar` li' si
+  installa al riavvio), e poteva sostituire un core o far puntare una
+  playlist a un `.so`. Scelta dell'utente: via Configfiles, Services e
+  Update, Cores e Playlists in sola lettura (`samba-shares-rf35h.patch`;
+  `testparm` sul file dopo le sostituzioni di `samba-config`).
+- Samba riacceso per sempre dopo il modo transfer della USB-C, se RetroArch
+  ripartiva con il flag messo da parte (1007).
+- 1007: i toggle toccano i file prima del fork, senza troncare, e systemctl
+  parte con un doppio fork (niente zombie, niente gare).
+- Scraper: `db_name` di una playlist usato come cartella senza controlli
+  (scriveva fuori da `thumbnails`); `scraper.conf` ora 0600.
+- `rf35h-i2c`: ogni scrittura all'RK817 (anche tensioni e carica) vuole
+  `RF35H_I2C_FORCE=1`, e gli argomenti sono controllati.
+
+**Aggiornamenti e card.**
+- La batteria si guardava solo scaricando: il `.tar` pronto stava gia' in
+  `.update` e qualunque riavvio lo installava. Ora aspetta in
+  `.update/.rf35h-staged` (l'init non lo vede e non lo cancella) e
+  `rf35h-update install`, chiamato dal menu, ricontrolla batteria e spazio
+  prima di metterlo in `.update`.
+- Un'installazione fallita ora si vede nel menu; dall'ultima release si va
+  solo avanti (con `TAG`/`URL` in `update.conf` resta possibile tornare
+  indietro).
+- `rf35h-reflash-system.sh` con un'immagine diversa da quella del primo
+  flash lasciava in `extlinux.conf` l'UUID di `/storage` dell'immagine:
+  console ferma. Ora prende quello vero della card, controlla il disco come
+  `flash-sd.sh` e ha `--loader` per rimettere solo il boot loader.
+  `rf35h-rescue.sh` rimette l'`autostart.sh` dell'utente.
+
+**Console.**
+- Volume dell'altoparlante sulla scheda sbagliata con un audio USB collegato
+  all'avvio (card0): ora per id, `rk817ext`.
+- Il colore dei LED salvato come "off" a ogni spegnimento.
+- `config.ini` di IKEMEN svuotato con `/storage` pieno (l'awk di busybox
+  esce 0 sugli errori di scrittura).
+- La diagnostica d'avvio rallentava RetroArch; la sospensione per
+  inattivita' interrompeva download, scraper e trasferimenti USB; i crash log
+  si fermavano dopo una correzione all'indietro dell'orologio.
+- Il link `invocation:` di systemd e' un symlink al suo ID, che come percorso
+  non esiste: `path_is_valid()` (stat) e `[ -e ]` lo davano sempre assente.
+  Scraper e System Update non si fermavano dalla loro voce, l'ora di rete
+  risultava spenta, gli script dei LED non vedevano rf35h-ledd. Ora lstat e
+  `-L`.
+
+**Menu.** Valori vecchi subito dopo un cambio a tendina; menu fermo fino a
+10-15 s fermando scraper o aggiornamento; uscita audio "usb" salvata per
+indice (ora per nome, e senza la scheda si torna agli altoparlanti);
+password Wi-Fi di 33-63 caratteri troncate; piu' quattro irrobustimenti
+(fgets, fsync della cartella, un buffer della CPU, gli array rf35h nel
+caricamento della config).
+
+**CI e release.**
+- Il controllo di re3 non poteva mai scattare: `unsquashfs -l | grep -q`
+  con pipefail, SIGPIPE.
+- Una build che aveva perso core per `--keep-going` diventava la release che
+  tutte le console scaricano: ora la release si ferma (salvo
+  `allow_incomplete`), con la mappa pacchetto -> core presa dall'albero.
+- Core di 0 byte o non ELF fermano l'immagine; i pacchetti interrotti a fine
+  parte si rifanno da zero nella parte dopo.
+- Un trattino vuol dire sempre pre-release; un tag non pre-release deve stare
+  sul ramo principale; "latest" solo alla versione piu' alta.
+
+Provato: `tools/ci-check.sh` (shellcheck su 51 script; test-ci-build 61,
+card-tools 34, ikemen 37, ra-guard 9, update 73, verify-tools 38); la serie
+di RetroArch dal sorgente pulito, nostre a fuzz 0, 99 e 999 come prima;
+1003 e 1004 rigenerate identiche; i file toccati compilano con `HAVE_LAKKA`
+senza warning nuovi. Restano aperti, da provare sul device: VBUS sempre
+accesa (anche in transfer e in sospensione, secondo il device tree); i task
+Wi-Fi di RetroArch (uscita durante una connessione fallita, salvataggi
+persi in quei 15 s, righe risolte per indice); "speakers" e' il device ALSA
+di default, cioe' card0, che con un audio USB all'avvio e' la USB.

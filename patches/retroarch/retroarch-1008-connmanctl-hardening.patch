@@ -12,7 +12,9 @@ liberava tmp se nessun servizio era attivo, e con ln vuoto strlen(ln) - 1
 andava in underflow scrivendo un byte prima dell'array; get_connected_ssid
 lasciava ssid non inizializzato se non c'era rete; tether_start_stop passava
 ap_name e pass_key non inizializzati a tether_toggle, e il controllo
-!ap_name || !pass_key era sempre falso.
+!ap_name || !pass_key era sempre falso. Lo stesso underflow era in
+tether_status, che non controllava fgets: con l output del comando vuoto
+leggeva, e poteva scrivere, il byte prima di ln.
 
 ---
 --- a/network/drivers_wifi/connmanctl.c
@@ -103,16 +105,31 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     /* Update the services, to ensure we properly show connection status */
     connmanctl_refresh_services(connman);
-@@ -160,6 +190,8 @@
+@@ -160,12 +190,18 @@
           wc -l");
  
     command_file = popen(connman->command, "r");
 +   if (!command_file)
 +      return false;
  
-    fgets(ln, sizeof(ln), command_file);
+-   fgets(ln, sizeof(ln), command_file);
+-
+-   ln_len = strlen(ln) - 1;
+-   if (ln[ln_len] == '\n')
+-       ln[ln_len] = '\0';
++   /* devaOS RF35H: fgets non era controllato. Con l'output vuoto (una pipe
++    * che non produce niente) ln restava "", strlen(ln) - 1 andava in
++    * underflow e si leggeva, e poteva scrivere, il byte prima di ln. */
++   if (!fgets(ln, sizeof(ln), command_file))
++      ln[0] = '\0';
++
++   ln_len = strlen(ln);
++   if (ln_len && ln[ln_len - 1] == '\n')
++       ln[ln_len - 1] = '\0';
  
-@@ -199,7 +231,7 @@
+    RARCH_LOG("[CONNMANCTL] Tether Status: command: \"%s\", output: \"%s\"\n",
+          connman->command, ln);
+@@ -199,7 +235,7 @@
     RARCH_LOG("[CONNMANCTL] Tether toggle: command: \"%s\"\n",
           connman->command);
  
@@ -121,7 +138,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
     {
        size_t output_len = strlen(output) - 1;
        if (output[output_len] == '\n')
-@@ -216,7 +248,8 @@
+@@ -216,7 +252,8 @@
                 MESSAGE_QUEUE_CATEGORY_INFO);
     }
  
@@ -131,7 +148,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     RARCH_LOG("[CONNMANCTL] Tether toggle: command finished\n");
  
-@@ -249,7 +282,7 @@
+@@ -249,7 +286,7 @@
        connmanctl_tether_toggle(connman, false, "", "");
     }
  
@@ -140,7 +157,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     {
        const char *_msg = msg_hash_to_str(MSG_WIFI_SCAN_COMPLETE);
-@@ -310,7 +343,7 @@
+@@ -310,7 +347,7 @@
           "connmanctl disconnect %s 2>&1",
           netinfo->netid);
  
@@ -149,7 +166,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     /* Refresh the state since it has definitely changed */
     connmanctl_refresh_services(connman);
-@@ -474,7 +507,7 @@
+@@ -474,7 +511,7 @@
     strlcpy(connman->command, "connmanctl connect ", sizeof(connman->command));
     strlcat(connman->command, netinfo->netid,        sizeof(connman->command));
  
@@ -158,7 +175,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     /* connmanctl connect torna appena la richiesta e' partita: associazione,
      * handshake e DHCP vengono dopo. Prima si guardava lo stato subito, e una
-@@ -550,11 +583,14 @@
+@@ -550,11 +587,14 @@
           "grep \"^..\\(R\\|O\\)\" | "
           "cut -d' ' -f 2");
  
@@ -177,7 +194,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     ssid_size = strlen(ssid) - 1;
  
-@@ -581,6 +617,8 @@
+@@ -581,6 +621,8 @@
        return 0;
  
     tmp = (char*)malloc(sizeof(char) * len);
@@ -186,7 +203,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
     /* Following command lists all stored services in
      * connman settings folder, which are then used in
-@@ -600,7 +638,7 @@
+@@ -600,7 +642,7 @@
     RARCH_LOG("[CONNMANCTL] Testing configured services for activity: command: \"%s\"\n",
           connman->command);
  
@@ -195,7 +212,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
     {
        size_t ln_len;
        size_t tmp_len = strlen(tmp) - 1;
-@@ -626,14 +664,18 @@
+@@ -626,14 +668,18 @@
              tmp);
  
        service_file = popen(connman->command, "r");
@@ -222,7 +239,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
  
        RARCH_LOG("[CONNMANCTL] Service: \"%s\", status: \"%s\"\n",
              tmp, ln);
-@@ -654,7 +696,10 @@
+@@ -654,7 +700,10 @@
        }
     }
  
@@ -234,7 +251,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
     return 0;
  }
  
-@@ -667,8 +712,10 @@
+@@ -667,8 +716,10 @@
      * tethering service is already running / not running
      * before performing the desired action
      */
@@ -247,7 +264,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
     FILE *command_file  = NULL;
     char ln[512]        = {0};
     char ssid[64]       = {0};
-@@ -744,7 +791,7 @@
+@@ -744,7 +795,7 @@
           RARCH_LOG("[CONNMANCTL] Tether start stop: parsing command: \"%s\"\n",
                 connman->command);
  
@@ -256,7 +273,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
           {
              size_t ln_len = strlen(ln) - 1;
  
-@@ -780,10 +827,12 @@
+@@ -780,10 +831,12 @@
              }
           }
  
@@ -271,7 +288,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
        {
           size_t _len;
           RARCH_ERR("[CONNMANCTL] Tether start stop: APNAME or PASSWORD missing\n");
-@@ -829,7 +878,7 @@
+@@ -829,7 +882,7 @@
              RARCH_LOG("[CONNMANCTL] Tether start stop: disconnecting from service \"%s\", command: \"%s\"\n",
                    service, connman->command);
  
@@ -280,7 +297,7 @@ ap_name e pass_key non inizializzati a tether_toggle, e il controllo
              {
                 size_t ln_len = strlen(ln) - 1;
                 if (ln[ln_len] == '\n')
-@@ -845,7 +894,8 @@
+@@ -845,7 +898,8 @@
                          MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
              }
  
