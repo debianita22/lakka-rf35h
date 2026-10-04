@@ -69,7 +69,7 @@
  #if defined(HAVE_MATERIALUI) || defined(HAVE_XMB) || defined(HAVE_OZONE)
     SETTING_UINT("menu_screensaver_animation",    &settings->uints.menu_screensaver_animation, true, DEFAULT_MENU_SCREENSAVER_ANIMATION, false);
  #endif
-@@ -3776,6 +3796,71 @@
+@@ -3776,6 +3796,119 @@
   * Loads a config file and reads all the values into memory.
   *
   */
@@ -116,6 +116,53 @@
 +      strlcpy(s, def, len);
 +}
 +
++/* devaOS RF35H: con "Audio Output = usb" audio_device nomina la scheda USB-C
++ * (plughw:CARD=<id>,DEV=0; prima plughw:<indice>,0). La USB-C e' anche la
++ * porta di ricarica: se all'avvio quella scheda non c'e', ALSA non apre il
++ * dispositivo e RetroArch resta senza audio finche' non si cambia
++ * l'impostazione. Si controlla qui, al caricamento, prima che l'audio parta:
++ * una scheda che non e' in /proc/asound vuol dire dispositivo predefinito
++ * (""), cioe' gli altoparlanti. Solo per i driver ALSA. */
++static void rf35h_audio_device_check(settings_t *settings)
++{
++   char path[64];
++   char *dev     = settings->arrays.audio_device;
++   const char *c = strstr(dev, "CARD=");
++   bool digits   = true;
++   size_t n, i;
++
++   if (!strstr(settings->arrays.audio_driver, "alsa"))
++      return;
++   if (c)
++      c += STRLEN_CONST("CARD=");
++   else if (!strncmp(dev, "hw:", 3) || !strncmp(dev, "plughw:", 7))
++      c = strchr(dev, ':') + 1;
++   else
++      return;
++   n = strcspn(c, ",");
++   if (!n || n > 32)
++      return;
++   for (i = 0; i < n; i++)
++   {
++      if (c[i] < '0' || c[i] > '9')
++         digits = false;
++      if (!(   (c[i] >= 'a' && c[i] <= 'z') || (c[i] >= 'A' && c[i] <= 'Z')
++            || (c[i] >= '0' && c[i] <= '9') || c[i] == '_' || c[i] == '-'))
++         return;
++   }
++   /* un numero e' l'indice (cardN); un nome e' l'id, e ALSA mette in
++    * /proc/asound un collegamento per ogni id */
++   snprintf(path, sizeof(path), "/proc/asound/%s%.*s",
++         digits ? "card" : "", (int)n, c);
++   if (path_is_valid(path))
++      return;
++   RARCH_WARN("[RF35H] audio_device \"%s\": scheda assente, uso il dispositivo predefinito.\n",
++         dev);
++   dev[0] = '\0';
++   strlcpy(settings->arrays.rf35h_audio_out, "speakers",
++         sizeof(settings->arrays.rf35h_audio_out));
++}
++
 +static void rf35h_arrays_fill(settings_t *settings)
 +{
 +   rf35h_array_fill(settings->arrays.rf35h_joyled,
@@ -130,6 +177,7 @@
 +         sizeof(settings->arrays.rf35h_usb_mode), "usb", DEFAULT_RF35H_USB_MODE);
 +   rf35h_array_fill(settings->arrays.rf35h_scrape_region,
 +         sizeof(settings->arrays.rf35h_scrape_region), NULL, DEFAULT_RF35H_SCRAPE_REGION);
++   rf35h_audio_device_check(settings);
 +   /* audio_out non ha file di stato: il suo gestore imposta audio_device */
 +   if (string_is_empty(settings->arrays.rf35h_audio_out))
 +      strlcpy(settings->arrays.rf35h_audio_out,
@@ -141,7 +189,7 @@
  static bool config_load_file(global_t *global,
        const char *path, settings_t *settings)
  {
-@@ -4058,6 +4143,9 @@
+@@ -4058,6 +4191,9 @@
           config_get_array(conf, array_settings[i].ident,
                 array_settings[i].ptr, PATH_MAX_LENGTH);
     }
@@ -703,7 +751,7 @@
        case ACTION_OK_DL_USER_SETTINGS_LIST:
        case ACTION_OK_DL_DIRECTORY_SETTINGS_LIST:
        case ACTION_OK_DL_PRIVACY_SETTINGS_LIST:
-@@ -6571,6 +6587,85 @@
+@@ -6571,6 +6587,123 @@
  #ifdef HAVE_LAKKA_SWITCH
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_lakka_switch_options, ACTION_OK_DL_LAKKA_SWITCH_OPTIONS_LIST)
  #endif
@@ -723,7 +771,9 @@
 +    * mentre la unit e' attiva. Il file di stato dopo un crash puo' mentire. */
 +   if (path_is_valid("/run/systemd/units/invocation:rf35h-scrape.service"))
 +   {
-+      if (system("systemctl stop rf35h-scrape.service >/dev/null 2>&1")) { }
++      /* devaOS RF35H: --no-block. Lo stop sincrono aspettava la fine del
++       * servizio, fino al suo TimeoutStopSec (10 s), col menu fermo. */
++      if (system("systemctl --no-block stop rf35h-scrape.service >/dev/null 2>&1")) { }
 +      msg = "Scraping stopped";
 +   }
 +   else if (!path_is_valid("/storage/.config/rf35h/scraper.conf"))
@@ -745,21 +795,27 @@
 +         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
 +   return 0;
 +}
++#include <sys/wait.h>
 +/* Aggiornamento di sistema: rf35h-update con la sua unit, come lo scraper.
 + * Se sta girando, la stessa voce lo ferma (il file a meta' resta, il giro
-+ * dopo riprende). Con un aggiornamento pronto in /storage/.update riavvia:
-+ * l'init lo installa all'avvio. */
++ * dopo riprende). Con un aggiornamento pronto, "rf35h-update install" lo
++ * mette in /storage/.update dopo aver ricontrollato la batteria, e si
++ * riavvia solo se esce 0: l'init lo installa all'avvio. */
 +static int action_ok_rf35h_update(const char *path,
 +      const char *label, unsigned type, size_t idx, size_t entry_idx)
 +{
-+   const char *msg = NULL;
++   const char *msg                   = NULL;
++   enum message_queue_category cat   = MESSAGE_QUEUE_CATEGORY_INFO;
 +   char ready[PATH_MAX_LENGTH];
++   char why[192];
 +   FILE *f;
 +   (void)path; (void)label; (void)type; (void)idx; (void)entry_idx;
 +   ready[0] = '\0';
 +   if (path_is_valid("/run/systemd/units/invocation:rf35h-update.service"))
 +   {
-+      if (system("systemctl stop rf35h-update.service >/dev/null 2>&1")) { }
++      /* devaOS RF35H: --no-block, come lo scraper: lo stop sincrono teneva
++       * fermo il menu fino al TimeoutStopSec del servizio (15 s). */
++      if (system("systemctl --no-block stop rf35h-update.service >/dev/null 2>&1")) { }
 +      msg = "System update stopped: select again to resume";
 +   }
 +   else
@@ -771,25 +827,55 @@
 +         fclose(f);
 +         ready[strcspn(ready, "\r\n")] = '\0';
 +      }
-+      /* pronto e ancora li': si riavvia (CMD_EVENT_REBOOT salva la
-+       * configurazione, come il riavvio del menu) */
++      /* devaOS RF35H: pronto e ancora li'. Prima si riavviava subito, e la
++       * batteria era stata controllata solo al download: un'installazione
++       * interrotta all'avvio lascia la card da riscrivere. Ora "rf35h-update
++       * install" ricontrolla la batteria e mette l'aggiornamento in
++       * /storage/.update (meno di un secondo): esce 0 se si deve riavviare,
++       * altrimenti stampa il motivo su una riga e si resta nel menu. */
 +      if (ready[0] && path_is_valid(ready))
 +      {
-+         command_event(CMD_EVENT_REBOOT, NULL);
-+         return 0;
++         char line[192];
++         int st = -1;
++         why[0] = '\0';
++         if ((f = popen("/usr/bin/rf35h-update install", "r")))
++         {
++            /* tutto l'output, per non lasciarlo a meta' (SIGPIPE): conta
++             * la prima riga */
++            while (fgets(line, sizeof(line), f))
++            {
++               if (!why[0])
++                  strlcpy(why, line, sizeof(why));
++            }
++            st = pclose(f);
++         }
++         if (st != -1 && WIFEXITED(st) && WEXITSTATUS(st) == 0)
++         {
++            /* CMD_EVENT_REBOOT salva la configurazione, come il riavvio
++             * del menu */
++            command_event(CMD_EVENT_REBOOT, NULL);
++            return 0;
++         }
++         why[strcspn(why, "\r\n")] = '\0';
++         msg = why[0] ? why : "System update not installed: rf35h-update install failed";
++         cat = MESSAGE_QUEUE_CATEGORY_WARNING;
 +      }
-+      if (system("systemctl start rf35h-update.service >/dev/null 2>&1")) { }
-+      msg = "Checking for updates, progress below the menu entry";
++      else
++      {
++         if (system("systemctl start rf35h-update.service >/dev/null 2>&1")) { }
++         msg = "Checking for updates, progress below the menu entry";
++      }
 +   }
-+   runloop_msg_queue_push(msg, strlen(msg), 1, 180, true, NULL,
-+         MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
++   runloop_msg_queue_push(msg, strlen(msg), 1,
++         cat == MESSAGE_QUEUE_CATEGORY_WARNING ? 300 : 180, true, NULL,
++         MESSAGE_QUEUE_ICON_DEFAULT, cat);
 +   return 0;
 +}
 +#endif
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_user_list, ACTION_OK_DL_USER_SETTINGS_LIST)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_netplay_sublist, ACTION_OK_DL_NETPLAY)
  STATIC_DEFAULT_ACTION_OK_FUNC(action_ok_directory_list, ACTION_OK_DL_DIRECTORY_SETTINGS_LIST)
-@@ -9366,6 +9461,14 @@
+@@ -9366,6 +9499,14 @@
  #ifdef HAVE_LAKKA_SWITCH
           {MENU_ENUM_LABEL_LAKKA_SWITCH_OPTIONS,                action_ok_lakka_switch_options},
  #endif
@@ -1031,7 +1117,7 @@
     ACTION_OK_DL_PRIVACY_SETTINGS_LIST,
 --- a/menu/menu_displaylist.c
 +++ b/menu/menu_displaylist.c
-@@ -7145,6 +7145,109 @@
+@@ -7145,6 +7145,122 @@
  }
  #endif
  
@@ -1065,12 +1151,25 @@
 +   return s[0] != '\0';
 +}
 +
++/* l'ora dell'ultimo script lanciato dal menu (rf35h_run, menu_setting.c) */
++extern retro_time_t rf35h_last_run;
++
 +/* Rilegge dal sistema quello che il menu mostra. L1+vol cambia la
 + * luminosita' senza passare da qui; rf35h-idle.conf si puo' editare a mano;
 + * i modi dei LED li salvano gli script. Il menu deve dire la verita'. */
 +static void rf35h_sync_settings(settings_t *settings)
 +{
 +   char buf[64];
++
++   /* devaOS RF35H: scelto un valore da una tendina, RetroArch ricostruisce
++    * subito la lista, ma il gestore ha appena lanciato lo script in
++    * background e il file di stato dice ancora il valore di prima: il menu
++    * mostrava quello (e al salvataggio lo scriveva in retroarch.cfg). Per
++    * 3 secondi dall'ultimo script valgono i valori in memoria, cioe' quelli
++    * appena scelti. */
++   if (rf35h_last_run
++         && cpu_features_get_time_usec() - rf35h_last_run < 3000000)
++      return;
 +
 +   if (rf35h_read_line(RF35H_STATE_DIR "/brightness", buf, sizeof(buf)))
 +   {
@@ -1141,7 +1240,7 @@
  unsigned menu_displaylist_build_list(
        file_list_t *list,
        settings_t *settings,
-@@ -10248,6 +10351,94 @@
+@@ -10248,6 +10364,94 @@
  
              for (i = 0; i < ARRAY_SIZE(build_list); i++)
              {
@@ -1236,7 +1335,7 @@
                 if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(list,
                          build_list[i].enum_idx,  build_list[i].parse_type,
                          false) == 0)
-@@ -11142,6 +11333,9 @@
+@@ -11142,6 +11346,9 @@
                 {MENU_ENUM_LABEL_ACCESSIBILITY_SETTINGS,      PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_POWER_MANAGEMENT_SETTINGS,   PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_BLUETOOTH_SETTINGS,          PARSE_ACTION, true},
@@ -1246,7 +1345,7 @@
  #ifdef HAVE_NETWORKING
                 {MENU_ENUM_LABEL_WIFI_SETTINGS,               PARSE_ACTION, true},
                 {MENU_ENUM_LABEL_NETWORK_SETTINGS,            PARSE_ACTION, true},
-@@ -11236,6 +11430,14 @@
+@@ -11236,6 +11443,14 @@
                       build_list[i].checked = settings->bools.settings_show_steam;
                       break;
  #endif
@@ -1261,7 +1360,7 @@
                       /* MISSING:
                        * MENU_ENUM_LABEL_BLUETOOTH_SETTINGS
                        * MENU_ENUM_LABEL_WIFI_SETTINGS
-@@ -14652,6 +14854,12 @@
+@@ -14652,6 +14867,12 @@
           case DISPLAYLIST_MENU_FILE_BROWSER_SETTINGS_LIST:
           case DISPLAYLIST_MENU_VIEWS_SETTINGS_LIST:
           case DISPLAYLIST_LAKKA_SERVICES_LIST:
@@ -1274,7 +1373,7 @@
  #ifdef HAVE_LAKKA_SWITCH
           case DISPLAYLIST_LAKKA_SWITCH_OPTIONS_LIST:
  #endif
-@@ -14855,7 +15063,10 @@
+@@ -14855,7 +15076,10 @@
                 video_context_driver_get_flags(&flags);
  #endif
  #ifdef HAVE_LAKKA
@@ -1313,7 +1412,7 @@
  #ifdef HAVE_LAKKA_SWITCH
     SETTINGS_LIST_LAKKA_SWITCH_OPTIONS,
  #endif
-@@ -9261,6 +9264,250 @@
+@@ -9261,6 +9264,288 @@
  }
  #endif
  
@@ -1329,6 +1428,11 @@
 +   "battery|charging|alert|rainbow|strobe"
 +#define RF35H_LED_SPEEDS "slow|normal|fast"
 +#include <retro_dirent.h>
++#include <features/features_cpu.h>
++/* devaOS RF35H: quando e' partito l'ultimo script (rf35h_run). Lo legge
++ * rf35h_sync_settings in menu_displaylist.c: lo script gira in background, e
++ * per qualche secondo il suo file di stato dice ancora il valore di prima. */
++retro_time_t rf35h_last_run = 0;
 +#ifndef RF35H_STATE_DIR
 +#define RF35H_STATE_DIR      "/storage/.config/rf35h"
 +#endif
@@ -1345,6 +1449,7 @@
 +   va_start(ap, fmt);
 +   vsnprintf(cmd, sizeof(cmd), fmt, ap);
 +   va_end(ap);
++   rf35h_last_run = cpu_features_get_time_usec();
 +   if (system(cmd)) { /* gli script scrivono gia' su stderr */ }
 +}
 +
@@ -1494,21 +1599,43 @@
 +   rf35h_run("/usr/bin/rf35h-usb %s >/dev/null 2>&1 &", setting->value.target.string);
 +}
 +
-+/* Indice ALSA della prima scheda USB in /proc/asound/cards, o -1.
-+ * Una riga tipo: " 1 [Headphones     ]: USB-Audio - USB-C Headphones" */
-+static int rf35h_usb_audio_card(void)
++/* La prima scheda USB in /proc/asound/cards: l'indice ALSA, o -1, e in id
++ * il suo id ("" se non e' fatto solo di lettere, cifre, '_' e '-').
++ * Una riga tipo: " 1 [Headphones     ]: USB-Audio - USB-C Headphones"
++ * (la seconda riga di ogni scheda, il nome lungo, non ha le parentesi). */
++static int rf35h_usb_audio_card(char *id, size_t len)
 +{
 +   char line[256];
 +   int found = -1;
 +   RFILE *f = filestream_open("/proc/asound/cards",
 +         RETRO_VFS_FILE_ACCESS_READ, RETRO_VFS_FILE_ACCESS_HINT_NONE);
++   id[0] = '\0';
 +   if (!f)
 +      return -1;
 +   while (filestream_gets(f, line, sizeof(line)))
 +   {
-+      if (strstr(line, "USB-Audio") || strstr(line, "USB Audio"))
++      const char *b = strchr(line, '[');
++      const char *e = b ? strstr(b, "]: ") : NULL;
++      if (!e)
++         continue;
++      if (strstr(e, "USB-Audio") || strstr(e, "USB Audio"))
 +      {
-+         found = atoi(line);
++         const char *p = b + 1;
++         size_t n      = 0;
++         found         = atoi(line);
++         /* l'id finisce al primo spazio (allineamento) o alla ']' */
++         while (p + n < e && p[n] != ' ' && n + 1 < len)
++         {
++            char c = p[n];
++            if (!(   (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
++                  || (c >= '0' && c <= '9') || c == '_' || c == '-'))
++               break;
++            id[n++] = c;
++         }
++         /* fermato prima della fine (carattere strano, troppo lungo): niente id */
++         if (p + n < e && p[n] != ' ')
++            n = 0;
++         id[n] = '\0';
 +         break;
 +      }
 +   }
@@ -1524,7 +1651,8 @@
 +   settings_t *settings = config_get_ptr();
 +   if (string_is_equal(setting->value.target.string, "usb"))
 +   {
-+      int card = rf35h_usb_audio_card();
++      char id[32];
++      int card = rf35h_usb_audio_card(id, sizeof(id));
 +      if (card < 0)
 +      {
 +         const char *_msg = "No USB audio device found: keep the USB-C port in host mode and plug the headphones in first.";
@@ -1534,8 +1662,17 @@
 +               sizeof(settings->arrays.rf35h_audio_out));
 +         return;
 +      }
-+      snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
-+            "plughw:%d,0", card);
++      /* devaOS RF35H: la scheda per id, non per indice. L'indice dipende
++       * dall'ordine in cui le schede compaiono, e al riavvio dopo poteva
++       * essere un'altra scheda o nessuna; l'id resta lo stesso. Se all'avvio
++       * la scheda non c'e', rf35h_audio_device_check (configuration.c)
++       * torna al dispositivo predefinito. */
++      if (id[0])
++         snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
++               "plughw:CARD=%s,DEV=0", id);
++      else
++         snprintf(settings->arrays.audio_device, sizeof(settings->arrays.audio_device),
++               "plughw:%d,0", card);
 +   }
 +   else
 +      settings->arrays.audio_device[0] = '\0';
@@ -1564,7 +1701,7 @@
  static void ssh_enable_toggle_change_handler(rarch_setting_t *setting)
  {
     systemd_service_toggle(LAKKA_SSH_PATH, (char*)"sshd.service",
-@@ -9286,6 +9533,43 @@
+@@ -9286,6 +9571,43 @@
  #ifdef HAVE_WIFI
  static void localap_enable_toggle_change_handler(rarch_setting_t *setting)
  {
@@ -1608,7 +1745,7 @@
     driver_wifi_tether_start_stop(*setting->value.target.boolean,
           LAKKA_LOCALAP_PATH);
  }
-@@ -10757,6 +11041,15 @@
+@@ -10757,6 +11079,15 @@
                 &subgroup_info,
                 parent_group);
  #endif
@@ -1624,7 +1761,7 @@
           CONFIG_ACTION(
                 list, list_info,
                 MENU_ENUM_LABEL_PLAYLIST_SETTINGS,
-@@ -23565,6 +23858,305 @@
+@@ -23565,6 +23896,305 @@
  #endif
           }
           break;
@@ -1930,7 +2067,7 @@
  #ifdef HAVE_LAKKA_SWITCH
        case SETTINGS_LIST_LAKKA_SWITCH_OPTIONS:
           {
-@@ -24908,6 +25500,9 @@
+@@ -24908,6 +25538,9 @@
        SETTINGS_LIST_CORE_UPDATER,
        SETTINGS_LIST_NETPLAY,
        SETTINGS_LIST_LAKKA_SERVICES,
