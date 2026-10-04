@@ -330,6 +330,24 @@ chk "README: patch integrazione" "[ \"\$(readme_n \"patch all'albero\")\" = \"\$
 chk "README: patch RetroArch"   "[ \"\$(readme_n 'patch a RetroArch')\" = \"\$(ls '$O/patches/retroarch' | wc -l)\" ]"
 chk "README: script rf35h-utils" "[ \"\$(readme_n 'script e')\" = \"\$(ls '$P/scripts' | wc -l)\" ]"
 
+echo "== CI: build e release"
+# Quattro difetti della pipeline (prove in tools/test-ci-build.sh): il
+# controllo di re3 non scattava mai (unsquashfs -l | grep -q, con pipefail);
+# una build che aveva perso core per --keep-going diventava la release che
+# tutte le console scaricano; un link ucciso alla scadenza di una parte poteva
+# arrivare nell'immagine come un .so di 0 byte; "latest" lo decideva GitHub,
+# anche per una versione piu' bassa.
+CIB="$O/tools/ci-build.sh"; BYML="$O/.github/workflows/build.yml"
+chk "re3: elenco del SYSTEM in un file, mai in pipe" "grep -q '^check_system()' '$CIB' && ! grep -vE '^[[:space:]]*#' '$CIB' | grep -qE 'unsquashfs -l[^|]*[|]([^|]|\$)'"
+chk "core di 0 byte o non ELF: l'immagine si ferma" "grep -q '^elf_ok()' '$CIB' && grep -q 'core rotti nel SYSTEM' '$CIB'"
+chk "stato: i pacchetti interrotti si rifanno"     "sed -n '/^cmd_pack() {/,/^}/p' '$CIB' | grep -q drop_interrupted"
+chk "release: re3 e core anche sui file scaricati" "grep -qF 'ci-build.sh check-dist dist' '$BYML'"
+chk "release: core o giochi persi la fermano"      "grep -q '^completeness()' '$CIB' && grep -qF 'inputs.allow_incomplete' '$BYML'"
+chk "release: col trattino sempre pre-release"     "grep -qF 'in *-*) prerelease=true' '$CIB'"
+chk "release: tag solo dal ramo principale"        "grep -qF 'merge-base --is-ancestor' '$CIB' && grep -qF 'run: ./tools/ci-build.sh version' '$BYML'"
+chk "release: latest solo alla versione piu' alta" "grep -qF 'sort -V' '$CIB' && grep -qF -- '--latest=\"\${latest}\"' '$CIB' && grep -qF 'run: ./tools/ci-build.sh publish dist' '$BYML'"
+chk "release: una per versione alla volta"         "grep -qF 'inputs.version || github.ref }}' '$BYML'"
+
 echo
 if [ "$bad" -eq 0 ]; then
 	echo "tutte le $n verifiche passano"
