@@ -685,10 +685,10 @@ printf '  %-34s ok\n' "porta USB-C: gadget, dhcp, blacklist"
 # mette gia' LibreELEC a ogni pacchetto (CFLAGS_OPTIM_DEFAULT).
 ! grep -qE '^[^#]*PROJECT_CFLAGS="[^"]*-O' "${RK}/options" || die "PROJECT_CFLAGS con -O nelle options: glibc non compilerebbe"
 grep -q 'SYSTEM_SIZE=3072' "${RK}/options" || die "manca SYSTEM_SIZE=3072 nelle options"
-# il flag della patch di Mesa c'e', ma questa LibreELEC non lo conosce: per ora
-# l'LTO non e' attivo (docs/diario.md, correzione del 3/10); si controlla solo la patch
+# LTO su Mesa: "+lto", il flag che questa LibreELEC conosce (fino al 4/10
+# c'era "+lto-parallel", che non faceva niente: docs/diario.md)
 grep -q 'PKG_BUILD_FLAGS="+lto"' "${WORKDIR}/packages/graphics/mesa/package.mk" || die "manca la patch LTO di Mesa"
-printf "  %-34s ok\n" "SYSTEM 3 GB, glibc ottimizzata, LTO Mesa inerte"
+printf "  %-34s ok\n" "SYSTEM 3 GB, glibc ottimizzata, LTO Mesa"
 grep -q 'WIRELESS_DAEMON="wpa_supplicant"' "${RK}/options" \
 	|| die "WIRELESS_DAEMON non impostato: con iwd la UI non vede reti"
 grep -q 'WIRELESS_DAEMON.*wpa_supplicant' "${WORKDIR}/packages/network/iwd/package.mk" \

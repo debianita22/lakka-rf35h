@@ -224,7 +224,8 @@ done
 if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 	chk "LTO (+lto) su ${nlto} core${nolto:+, manca a:${nolto}}" "[ ${nlto} -ge 19 ] && [ -z '${nolto}' ]"
 fi
-chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${O}/packages'"
+chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${W}/packages/graphics/mesa' '${O}/packages'"
+chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
 chk "pila snella: 6 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 6 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
@@ -262,7 +263,10 @@ chk "strace con i suoi header (kernel 7.2)"      "grep -q 'PKG_CONFIGURE_OPTS_TA
 chk "glibc: nessun -O in PROJECT_CFLAGS"          "! grep -qE '^[^#]*PROJECT_CFLAGS=\"[^\"]*-O' '${W}/projects/Rockchip/devices/RK3326/options'"
 chk "versione della release in os-release"      "grep -q 'CUSTOM_VERSION=\"\${RF35H_VERSION}\"' '$O/build-lakka-rf35h.sh'"
 chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '$O/tools/ci-build.sh'"
-chk "CI: un solo job con contents: write"       "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 1 ]"
+# Scrive solo il job release (build.yml) e il job kernel di upstream.yml (che
+# spinge soltanto un ramo ci-test/kernel-*): le parti della build e i
+# controlli no.
+chk "CI: contents: write solo in release e kernel" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 2 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ]"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
