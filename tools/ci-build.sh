@@ -177,9 +177,12 @@ cmd_build() {
 }
 
 # il log completo dell'ultima build (build-rf35h-AAAAMMGG-hhmmss.log, non i
-# *-fallito.log dei pacchetti)
+# *-fallito.log dei pacchetti). Niente "| head -1": con pipefail un lettore che
+# esce prima fa fallire chi scrive (vedi check_system).
 mainlog() {
-	ls -t "${W}/${TREE_NAME}"/build-rf35h-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log 2>/dev/null | head -1
+	local l
+	l="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9].log 2>/dev/null || true)"
+	printf '%s\n' "${l%%$'\n'*}"
 }
 
 # Quanti passi del piano sono fatti, dal log dell'ultima build
@@ -292,11 +295,75 @@ cmd_ccache_stats() {
 	note notice "ccache" "$(echo "${st}" | grep -iE 'hits|misses|cache size' | tr -s ' ' | awk '!seen[$0]++' | tr '\n' ';')"
 }
 
+# --- il SYSTEM di un'immagine (collect qui, check-dist nel job release) ------
+
+# Il SYSTEM di un .tar di aggiornamento, in <dir>/SYSTEM. L'elenco del tar va in
+# un file: niente pipe con un lettore che esce prima (vedi check_system).
+system_of() {
+	local tarf="$1" dir="$2" sys
+	tar -tf "${tarf}" > "${dir}/tar.list"
+	sys="$(grep -m1 '/target/SYSTEM$' "${dir}/tar.list" || true)"
+	[ -n "${sys}" ] || die "SYSTEM non trovato in $(basename "${tarf}")"
+	tar -xOf "${tarf}" "${sys}" > "${dir}/SYSTEM"
+}
+
+# un numero little-endian dai byte in esadecimale ("e803" -> 1000)
+le() {
+	local x="$1" r=""
+	while [ -n "${x}" ]; do r="${x:0:2}${r}"; x="${x:2}"; done
+	echo "$(( 16#${r:-0} ))"
+}
+
+# Una libreria ELF a 64 bit little-endian per aarch64 (ET_DYN, EM_AARCH64),
+# intera: la tabella delle sezioni (e_shoff + e_shnum * e_shentsize), che il
+# linker scrive in fondo, sta dentro il file. Provata sui 34 core della v1.0.0.
+elf_ok() {
+	local so="$1" h size
+	size="$(stat -c%s "${so}")"
+	[ "${size}" -ge 64 ] || return 1
+	h="$(od -An -v -tx1 -N64 "${so}" | tr -d ' \n')"
+	[ "${h:0:12}" = 7f454c460201 ] && [ "${h:32:8}" = 0300b700 ] || return 1
+	[ "$(( $(le "${h:80:16}") + $(le "${h:120:4}") * $(le "${h:116:4}") ))" -le "${size}" ]
+}
+
+# Il SYSTEM prima di darlo alle console. Scrive <dir>/cores.txt (i nomi dei
+# core: mednafen_pce_fast per mednafen_pce_fast_libretro.so).
+#  - re3 (GTA III) non ha licenza: mai in un'immagine pubblica. La build non lo
+#    ha (niente --re3), ma lo si guarda nel SYSTEM, non nelle opzioni.
+#  - In usr/lib/libretro nessun file vuoto e ogni .so un ELF aarch64 intero: un
+#    link ucciso alla scadenza di una parte lascia un .so di 0 byte (o a meta')
+#    piu' nuovo dei suoi oggetti, e nella parte dopo make lo prende per buono e
+#    LibreELEC lo installa.
+# Un solo elenco, in un file, per re3 e per i core: "unsquashfs -l | grep -q"
+# sotto pipefail perdeva re3 proprio quando c'era (grep esce alla prima riga,
+# unsquashfs muore di SIGPIPE, la condizione risulta falsa).
+check_system() {
+	local sys="$1" dir="$2" lst="$2/system.list" lr="$2/libretro" so bad=""
+	unsquashfs -l "${sys}" > "${lst}" || die "SYSTEM illeggibile (unsquashfs)"
+	grep -q '^squashfs-root/usr/lib/libretro$' "${lst}" || die "SYSTEM senza usr/lib/libretro"
+	if grep -qiE 're3_libretro|/re3([/.]|$)' "${lst}"; then
+		die "re3 nel SYSTEM: questa immagine non si pubblica ($(grep -ciE 're3_libretro|/re3([/.]|$)' "${lst}") file)"
+	fi
+	sed -n 's|.*usr/lib/libretro/\([^/]*\)_libretro\.so$|\1|p' "${lst}" | sort > "${dir}/cores.txt"
+	rm -rf "${lr}"
+	unsquashfs -n -no-xattrs -d "${lr}" "${sys}" usr/lib/libretro > /dev/null \
+		|| die "usr/lib/libretro non si estrae dal SYSTEM"
+	while IFS= read -r -d '' so; do
+		if [ ! -s "${so}" ]; then
+			bad="${bad} ${so##*/} (0 byte)"
+		elif [ "${so%.so}" != "${so}" ] && ! elf_ok "${so}"; then
+			bad="${bad} ${so##*/} ($(stat -c%s "${so}") byte, non un ELF aarch64 intero)"
+		fi
+	done < <(find "${lr}" -type f -print0)
+	rm -rf "${lr}"
+	[ -z "${bad}" ] || die "core rotti nel SYSTEM, l'immagine non si pubblica:${bad}"
+}
+
 cmd_collect() {
 	: "${W:?}" "${RF35H_VERSION:?}"
-	local t="${W}/${TREE_NAME}/target" dist="${W}/dist" img tarf sys
+	local t="${W}/${TREE_NAME}/target" dist="${W}/dist" chk="${W}/check" img tarf
 	[ -d "${t}" ] || die "manca ${t}: la build non ha prodotto immagini"
-	img="$(find "${t}" -maxdepth 1 -name '*rf35h*.img.gz' -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-)"
+	img="$(find "${t}" -maxdepth 1 -name '*rf35h*.img.gz' -printf '%T@ %p\n' | sort -rn | sed -n '1s/^[^ ]* //p')"
 	[ -n "${img}" ] || die "nessuna immagine in ${t}"
 	tarf="${img%.img.gz}.tar"
 	[ -f "${tarf}" ] || die "manca $(basename "${tarf}")"
@@ -305,23 +372,17 @@ cmd_collect() {
 		*) die "$(basename "${img}") non porta la versione ${RF35H_VERSION}" ;;
 	esac
 
-	# re3 (GTA III) non ha licenza: mai in un'immagine pubblica. La build non
-	# lo ha (niente --re3), ma lo si guarda nel SYSTEM, non nelle opzioni.
-	say "re3 assente dal SYSTEM"
-	sys="$(tar -tf "${tarf}" | grep '/target/SYSTEM$' | head -1)"
-	[ -n "${sys}" ] || die "SYSTEM non trovato in $(basename "${tarf}")"
-	tar -xOf "${tarf}" "${sys}" > "${W}/SYSTEM.check"
-	if unsquashfs -l "${W}/SYSTEM.check" | grep -qiE 're3_libretro|/re3([/.]|$)'; then
-		rm -f "${W}/SYSTEM.check"
-		die "re3 nel SYSTEM: questa immagine non si pubblica"
-	fi
-	unsquashfs -l "${W}/SYSTEM.check" | sed -n 's|.*usr/lib/libretro/\([^/]*\)_libretro\.so$|\1|p' | sort > "${W}/cores.txt"
-	rm -f "${W}/SYSTEM.check"
-	echo "  ok, $(wc -l < "${W}/cores.txt") core libretro nell'immagine"
+	say "SYSTEM: re3 assente, core interi"
+	rm -rf "${chk}"; mkdir -p "${chk}"
+	system_of "${tarf}" "${chk}"
+	check_system "${chk}/SYSTEM" "${chk}"
+	echo "  ok, $(wc -l < "${chk}/cores.txt") core libretro nell'immagine, nessuno vuoto o troncato"
 
 	say "File della release in ${dist}"
 	rm -rf "${dist}"; mkdir -p "${dist}"
 	mv "${img}" "${tarf}" "${dist}/"
+	mv "${chk}/cores.txt" "${dist}/cores.txt"
+	rm -rf "${chk}"
 	cd "${dist}"
 	local tb ts size
 	tb="$(basename "${tarf}")"
@@ -337,9 +398,8 @@ cmd_collect() {
 		echo "sha256=${ts}"
 		echo "size=${size}"
 	} > update.txt
-	# quello che la build ha lasciato fuori (--keep-going) e i core che ci sono
+	# quello che la build ha lasciato fuori (--keep-going)
 	cat "${W}/${TREE_NAME}"/build-rf35h-*-core-saltati.txt > dropped.txt 2>/dev/null || : > dropped.txt
-	mv "${W}/cores.txt" cores.txt
 	ls -la
 	cat update.txt
 	summ "- immagine: $(basename "${img}") ($(du -h "$(basename "${img}")" | cut -f1)), aggiornamento: ${tb} ($(du -h "${tb}" | cut -f1))"
