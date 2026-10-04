@@ -5,8 +5,8 @@
 #
 # Fa quattro cose, tutte dal PC:
 #   1. copia qui i log che rf35h-bootlog ha gia' scritto in /storage/rf35h-logs
-#   2. semina la rete Wi-Fi in connman (stesso formato che scrive RetroArch),
-#      cosi' al prossimo boot il device si collega da solo e ssh e' raggiungibile
+#   2. semina la rete Wi-Fi in connman con un file di provisioning, cosi' al
+#      prossimo boot il device si collega da solo e ssh e' raggiungibile
 #   3. si assicura che ssh sia acceso (flag che il menu di Lakka legge)
 #   4. installa un autostart.sh usa-e-getta che, 45 s dopo il boot, scarica in
 #      /storage/rescue/ il journal, lo stato di retroarch e un tentativo di
@@ -25,10 +25,8 @@ DEV="$1"; SSID="$2"; PASS="$3"
 if [ -b "${DEV}p2" ]; then P2="${DEV}p2"; else P2="${DEV}2"; fi
 [ -b "$P2" ] || { echo "partizione 2 non trovata ($P2): card giusta?"; exit 1; }
 
-# il MAC del Wi-Fi dell RF35H e stabile fra i boot: 02:74:49:CA:6A:F6
-MAC="${RF35H_WIFI_MAC:-027449ca6af6}"
+# L'SSID in esadecimale: connman lo accetta cosi' con qualunque carattere.
 HEX="$(printf '%s' "$SSID" | od -An -tx1 | tr -d ' \n')"
-NETID="wifi_${MAC}_${HEX}_managed_psk"
 
 for p in "${DEV}"*; do [ "$p" = "$DEV" ] || umount "$p" 2>/dev/null; done
 M="$(mktemp -d)"
@@ -62,18 +60,31 @@ fi
 [ -d "$M/rescue" ] && cp -a "$M/rescue" "$OUT/" && echo "[log] c'era gia' una raccolta rescue precedente: copiata"
 
 # --- 2. Wi-Fi in connman
-mkdir -p "$M/.cache/connman/$NETID"
+# Un file di provisioning (connman-service.config), non la cartella
+# wifi_<MAC>_<SSID>_managed_psk che scrive il menu: quella porta nel nome il
+# MAC dell'interfaccia, e il MAC dell'RF35H e' diverso su ogni console (il
+# driver rk915 lo ricava dall'ID della CPU nell'OTP del PX30, 02:xx:...).
+# Senza "MAC =" connman lo usa per l'interfaccia Wi-Fi che trova, qualunque
+# sia. Nome del file solo lettere e cifre (le versioni vecchie di connman
+# non accettano altro). Una rete data cosi' e' "immutable": dal menu non si
+# dimentica; per toglierla, via ssh: rm /storage/.cache/connman/rf35hrescue.config
+# Nella password "\" va raddoppiato e gli spazi in testa e in coda scritti
+# "\s": GKeyFile li toglierebbe.
+PASS_KF="$(printf '%s' "$PASS" | sed 's/\\/\\\\/g; s/^ /\\s/; s/ $/\\s/')"
+CFG="$M/.cache/connman/rf35hrescue.config"
+mkdir -p "$M/.cache/connman"
 {
-	echo "[$NETID]"
-	echo "Name=$SSID"
-	echo "SSID=$HEX"
-	echo "Favorite=true"
-	echo "AutoConnect=true"
-	echo "Passphrase=$PASS"
-	echo "IPv4.method=dhcp"
-} > "$M/.cache/connman/$NETID/settings"
-chmod 600 "$M/.cache/connman/$NETID/settings"
-echo "[wifi] seminata: $NETID"
+	echo "[global]"
+	echo "Description = rete seminata da rf35h-rescue.sh"
+	echo
+	echo "[service_rf35h_rescue]"
+	echo "Type = wifi"
+	echo "SSID = $HEX"
+	# printf, non echo: l'echo di dash interpreta le "\"
+	printf 'Passphrase = %s\n' "$PASS_KF"
+} > "$CFG"
+chmod 600 "$CFG"
+echo "[wifi] seminata: $SSID (provisioning connman, per qualunque MAC)"
 
 # --- 3. ssh acceso
 mkdir -p "$M/.cache/services" && touch "$M/.cache/services/sshd.conf" && echo "[ssh] flag presente"

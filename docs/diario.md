@@ -5119,3 +5119,30 @@ fino al 18/10.
 Quindi una build quasi da zero sta in un job: le parti restano come
 margine (cache vuota, runner piu' lenti). La prossima, con la cache calda
 anche per l'host, dovrebbe metterci meno.
+
+## rf35h-rescue: Wi-Fi senza MAC fisso (4/10/2026)
+
+Segnalato dall'utente: `tools/rf35h-rescue.sh` seminava la rete in connman
+come la scrive il menu, `wifi_<MAC>_<SSID>_managed_psk/settings`, con il MAC
+della nostra console (`02:74:49:ca:6a:f6`) come predefinito. Su un'altra
+RF35H il MAC e' diverso e la rete seminata non vale. Il driver rk915
+(AveyondFly, `init_mac_addr()`) prende il MAC, nell'ordine, dal parametro
+del modulo, da un hash dell'ID della CPU nell'OTP del PX30 (`02:` + 5 byte
+di hash: unico per console e stabile fra i boot), dal numero di serie, dalla
+funzione del BSP Rockchip, a caso. Quindi ogni console ha il suo, e non lo
+si puo' indovinare dal PC.
+
+Ora lo script scrive un file di provisioning di connman,
+`/storage/.cache/connman/rf35hrescue.config` (`Type = wifi`, `SSID` in
+esadecimale, `Passphrase`), senza la chiave `MAC`: connman lo applica
+all'interfaccia Wi-Fi che trova, qualunque MAC abbia. Niente piu'
+`RF35H_WIFI_MAC`. Una rete data cosi' e' "immutable" (dal menu non si
+dimentica): per toglierla `rm /storage/.cache/connman/rf35hrescue.config`.
+Nel file la password e' scritta con le regole di GKeyFile (`\` raddoppiato,
+spazi in testa e in coda come `\s`) e con `printf`, non `echo` (quello di dash
+interpreta le `\`). Provato con il parser vero (GLib 2.80): sette password
+difficili (backslash, spazi in testa e in coda, `#`, `;`, `=`, virgolette, uno
+spazio solo) tornano identiche, generate con dash, bash e busybox.
+
+Il Wi-Fi configurato dal menu di RetroArch non aveva il problema: lo crea
+connman sulla console, con il MAC vero.
