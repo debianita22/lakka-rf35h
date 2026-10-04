@@ -271,6 +271,37 @@ reset; mkdir -p "${SD}"; printf 'v1.0.0\n%s\n' "${UD}/Lakka-vecchio.tar" > "${SD
 u boot
 ok "update.install di un giro vecchio: ignorato, nessun errore" '[ "$(u status)" = "installed: v1.0.0" ] && [ ! -e "${SD}/update.install" ]'
 
+echo "-- solo in avanti"
+reset; info v1.1.0 "${TAR}" "${SHA}" 300000; installed v1.2.0
+u run; rc=$?
+ok "installata v1.2.0, ultima release v1.1.0: niente, niente download" '[ ${rc} = 0 ] && [ "$(st)" = "up to date (v1.2.0)" ] && ! grep -q "\.tar" "${T}/curl.log" && [ ! -e "${SD}/update.ready" ]'
+u check >/dev/null; rc=$?
+ok "  ...check esce 1" '[ ${rc} = 1 ]'
+installed v1.1.0-rc1; u check >/dev/null; rc=$?
+ok "installata v1.1.0-rc1, ultima v1.1.0: proposta (la pre-release viene prima)" '[ ${rc} = 0 ]'
+installed v1.0.9; u check >/dev/null; rc=$?
+ok "installata v1.0.9, ultima v1.1.0: proposta" '[ ${rc} = 0 ]'
+installed v1.10.0; u check >/dev/null; rc=$?
+ok "installata v1.10.0, ultima v1.1.0: no (numeri, non lettere)" '[ ${rc} = 1 ]'
+installed devel-20261004120000-e2cf2e5; u check >/dev/null; rc=$?
+ok "build personale (VERSION devel-...): l'ultima release, come prima" '[ ${rc} = 0 ]'
+installed v1.0.0; info v1.1.0-rc2 "${TAR}" "${SHA}" 300000; u check >/dev/null; rc=$?
+ok "installata v1.0.0, ultima v1.1.0-rc2: proposta" '[ ${rc} = 0 ]'
+installed v1.1.0; u check >/dev/null; rc=$?
+ok "installata v1.1.0, ultima v1.1.0-rc2: no" '[ ${rc} = 1 ]'
+installed v1.0.0; info prova1 "${TAR}" "${SHA}" 300000; u check >/dev/null; rc=$?
+ok "ultima release senza vX.Y.Z (prova1): no" '[ ${rc} = 1 ] && [ "$(st)" = "up to date (v1.0.0)" ]'
+
+reset; installed v1.2.0; mkdir -p "${SD}"; echo "TAG=v1.1.0" > "${SD}/update.conf"
+printf 'version=v1.1.0\ntar=%s\nurl=https://github.com/o/r/releases/download/v1.1.0/%s\nsha256=%s\nsize=300000\n' \
+	"${TAR}" "${TAR}" "${SHA}" > "${T}/web/o/r/releases/download/v1.1.0/update.txt"
+u run
+ok "TAG=v1.1.0 in update.conf, installata v1.2.0: la vecchia, chiesta, si scarica" '[ "$(st)" = "ready: v1.1.0, select to restart and install" ] && cmp -s "${STG}/${TAR}" "${WTAR}"'
+reset; installed v1.2.0; mkdir -p "${SD}"
+echo "URL=https://github.com/o/r/releases/download/v1.1.0/update.txt" > "${SD}/update.conf"
+u check >/dev/null; rc=$?
+ok "URL= in update.conf: anche piu' vecchia" '[ ${rc} = 0 ]'
+
 echo "-- dalla v1.0.0: .tar gia' in .update con update.ready"
 v100() {   # quello che lascia la v1.0.0 dopo "run": update.ready di una riga
 	reset; info v1.1.0 "${TAR}" "${SHA}" 300000

@@ -1,7 +1,7 @@
 #!/bin/sh
 # rf35h-update - aggiornamento di sistema dalle release di GitHub.
 #
-#   rf35h-update run      se l'ultima release e' diversa da quella installata,
+#   rf35h-update run      se c'e' una release piu' nuova di quella installata,
 #                         ne scarica il .tar e ne verifica dimensione e sha256,
 #                         poi lo tiene da parte in /storage/.update/.rf35h-staged:
 #                         pronto, ma l'init non lo vede
@@ -54,6 +54,14 @@
 #                             vecchia per tornare indietro)
 #   URL=https://.../update.txt
 # update.txt (lo scrive la CI): version, tar, url, sha256, size.
+#
+# Solo in avanti: dall'ultima release si prende una versione solo se e' piu'
+# nuova di quella installata (vX.Y.Z; una pre-release viene prima della sua
+# release, v1.2.0-rc1 < v1.2.0). Se l'ultima release e' piu' vecchia (una
+# correzione per una serie vecchia, o uno sbaglio) le console restano dove
+# sono. Con TAG o URL in update.conf si prende quella e basta, anche piu'
+# vecchia: l'ha chiesta l'utente. Una build personale (VERSION non vX.Y.Z,
+# come devel-...) prende l'ultima release, come prima.
 #
 # GTA III (re3) non e' mai in una release. Se la console lo ha da una build
 # personale, prima di finire lo copia in /storage (cores e system), dove
@@ -124,6 +132,56 @@ source_url() {
 	else
 		echo "https://github.com/${_repo}/releases/latest/download/update.txt"
 	fi
+}
+
+# update.conf nomina una release precisa (TAG o URL): l'ha scelta l'utente
+explicit_source() {
+	[ -n "$(kv TAG "${STATE}/update.conf")" ] || [ -n "$(kv URL "${STATE}/update.conf")" ]
+}
+
+# Esce 0 se la versione $1 e' piu' nuova di $2, 1 se no, 2 se $1 non e'
+# vX.Y.Z[-pre-release][+build], 3 se non lo e' $2. Le tre cifre come numeri;
+# senza pre-release viene dopo che con (v1.2.0-rc1 < v1.2.0); due
+# pre-release pezzo per pezzo fra i ".", i numeri come numeri e "rc10" come
+# "rc" e poi 10 (rc2 < rc10); +build non conta. Non "sort -V": la busybox
+# della console lo ha, ma mette v1.2.0 prima di v1.2.0-rc1.
+version_newer() {
+	awk -v a="$1" -v b="$2" '
+	function parse(v, R,   p, n) {
+		sub(/^[vV]/, "", v); sub(/[+].*$/, "", v)
+		if (v !~ /^[0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?$/) return 0
+		p = index(v, "-")
+		R["pre"] = ""
+		if (p) { R["pre"] = substr(v, p + 1); v = substr(v, 1, p - 1) }
+		split(v, n, ".")
+		R[1] = n[1] + 0; R[2] = n[2] + 0; R[3] = n[3] + 0
+		return 1
+	}
+	function cmpid(x, y,   xa, ya, xn, yn) {
+		if (x ~ /^[0-9]+$/ && y ~ /^[0-9]+$/) return (x + 0 < y + 0) ? -1 : (x + 0 > y + 0)
+		if (x ~ /^[0-9]+$/) return -1
+		if (y ~ /^[0-9]+$/) return 1
+		xa = x; ya = y; xn = -1; yn = -1
+		if (match(x, /[0-9]+$/)) { xa = substr(x, 1, RSTART - 1); xn = substr(x, RSTART) + 0 }
+		if (match(y, /[0-9]+$/)) { ya = substr(y, 1, RSTART - 1); yn = substr(y, RSTART) + 0 }
+		if (xa != ya) return (xa < ya) ? -1 : 1
+		return (xn < yn) ? -1 : (xn > yn)
+	}
+	function cmppre(x, y,   nx, ny, px, py, i, c) {
+		if (x == y) return 0
+		if (x == "") return 1
+		if (y == "") return -1
+		nx = split(x, px, "."); ny = split(y, py, ".")
+		for (i = 1; i <= nx && i <= ny; i++) if ((c = cmpid(px[i], py[i])) != 0) return c
+		return (nx < ny) ? -1 : (nx > ny)
+	}
+	BEGIN {
+		if (!parse(b, B)) exit 3
+		if (!parse(a, A)) exit 2
+		for (i = 1; i <= 3; i++) if (A[i] != B[i]) { r = (A[i] > B[i]) ? 0 : 1; exit r }
+		r = (cmppre(A["pre"], B["pre"]) > 0) ? 0 : 1
+		exit r
+	}'
 }
 
 # KB liberi sulla partizione di un percorso
@@ -378,6 +436,22 @@ cmd_check() {
 	if [ "${U_VERSION}" = "${cur}" ]; then
 		status "up to date (${cur})"
 		return 1
+	fi
+	# solo in avanti, salvo una release chiesta con TAG o URL (vedi sopra).
+	# (nv e non rc: rc e' di chi chiama)
+	if ! explicit_source; then
+		nv=0; version_newer "${U_VERSION}" "${cur}" || nv=$?
+		case "${nv}" in
+			0|3) ;;
+			1)
+				status "up to date (${cur})"
+				say "l'ultima release, ${U_VERSION}, non e' piu' nuova di ${cur}: per installarla TAG=${U_VERSION} in update.conf"
+				return 1 ;;
+			*)
+				status "up to date (${cur})"
+				say "l'ultima release, ${U_VERSION}, non e' una versione vX.Y.Z: si installa solo con TAG= o URL= in update.conf"
+				return 1 ;;
+		esac
 	fi
 	say "installata ${cur:-?}, disponibile ${U_VERSION}"
 	return 0
