@@ -11,8 +11,9 @@
  *
  *   rf35h-idle [minuti]        default: RF35H_IDLE_MINUTES o 10; 0 = disattivo
  *
- * Per i test: RF35H_IDLE_CMD sostituisce "systemctl suspend" e
- * RF35H_IDLE_DIR sostituisce /dev/input.
+ * Per i test: RF35H_IDLE_CMD sostituisce "systemctl suspend",
+ * RF35H_IDLE_DIR sostituisce /dev/input, RF35H_UNITS_DIR /run/systemd/units
+ * e RF35H_GADGET_UDC il file UDC del gadget di rf35h-usb.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -21,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <linux/input.h>
@@ -58,6 +60,39 @@ static long now_s(void)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ts.tv_sec;
+}
+
+/* Lavori che non danno input ma non vanno interrotti: System Update che
+ * scarica, lo scraper delle copertine, la porta USB-C in "transfer" (il PC
+ * legge e scrive via rete). Sospendere li' rompeva il download, lo scraping o
+ * la copia. Se uno e' in corso la sospensione si rimanda; quella a mano (tasto
+ * power, via logind) non passa di qui.
+ *
+ * Una unit e' attiva finche' esiste il suo link "invocation:" in
+ * /run/systemd/units. E' un symlink verso l'invocation id, che come file non
+ * esiste: lstat, non stat o access. "transfer" e' il gadget di rf35h-usb legato
+ * a un UDC, cioe' il suo file UDC non vuoto. */
+static const char *busy(void)
+{
+	static const char *const units[] = { "rf35h-update.service", "rf35h-scrape.service" };
+	const char *dir = getenv("RF35H_UNITS_DIR");
+	const char *udc = getenv("RF35H_GADGET_UDC");
+	char path[512];
+	struct stat st;
+
+	if (!dir) dir = "/run/systemd/units";
+	if (!udc) udc = "/sys/kernel/config/usb_gadget/rf35h/UDC";
+	for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+		snprintf(path, sizeof(path), "%s/invocation:%s", dir, units[i]);
+		if (lstat(path, &st) == 0) return units[i];
+	}
+	FILE *f = fopen(udc, "r");
+	if (f) {
+		int c = fgetc(f);
+		fclose(f);
+		if (c != EOF && c != '\n') return "porta USB-C in transfer";
+	}
+	return NULL;
 }
 
 int main(int argc, char **argv)
@@ -118,12 +153,19 @@ int main(int argc, char **argv)
 		}
 
 		if (now - last_input >= idle_s) {
-			fprintf(stderr, "rf35h-idle: %ld min senza input, sospendo\n", minutes);
-			if (system(cmd)) { /* ignore */ }
-			/* al risveglio ripartiamo da zero: il tasto power stesso e' un evento,
-			 * ma per sicurezza il conto ricomincia adesso */
-			last_input = now_s();
-			last_scan = 0;   /* i device possono essere cambiati */
+			const char *why = busy();
+			if (why) {
+				/* rimandata di un intervallo intero, come se ci fosse stato input */
+				fprintf(stderr, "rf35h-idle: %ld min senza input, sospensione rimandata (%s)\n", minutes, why);
+				last_input = now;
+			} else {
+				fprintf(stderr, "rf35h-idle: %ld min senza input, sospendo\n", minutes);
+				if (system(cmd)) { /* ignore */ }
+				/* al risveglio ripartiamo da zero: il tasto power stesso e' un evento,
+				 * ma per sicurezza il conto ricomincia adesso */
+				last_input = now_s();
+				last_scan = 0;   /* i device possono essere cambiati */
+			}
 		}
 
 		if (now - last_scan >= RESCAN_S) {
