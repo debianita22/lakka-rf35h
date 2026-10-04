@@ -12,23 +12,31 @@
 #      /storage/rescue/ il journal, lo stato di retroarch e un tentativo di
 #      retroarch --verbose: se ssh non dovesse comunque funzionare, basta
 #      rimettere la card nel PC per leggere perche' RetroArch non parte.
+#      L'autostart.sh che c'era (il firstboot di Lakka ci scrive anche la rete
+#      di wifi-config.txt) va in autostart.sh.rf35h-rescue, e quello
+#      usa-e-getta lo rimette al suo posto quando ha finito.
 # Se la partizione e' ancora da espandere (marcatore presente), la espande
 # prima: altrimenti fs-resize al boot rifarebbe il filesystem cancellando tutto.
+# Sul disco gli stessi controlli di rf35h-reflash-system.sh (rf35h-card.sh):
+# disco intero, rimovibile (FORCE=yes per forzare), card Lakka.
 set -u
 if [ $# -ne 3 ]; then
 	echo "uso: sudo $0 /dev/sdX NomeRete password" >&2
 	exit 1
 fi
 DEV="$1"; SSID="$2"; PASS="$3"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+[ -f "${HERE}/rf35h-card.sh" ] || { echo "manca ${HERE}/rf35h-card.sh" >&2; exit 1; }
+# shellcheck source=tools/rf35h-card.sh
+. "${HERE}/rf35h-card.sh"
 [ "$(id -u)" = 0 ] || { echo "serve root (sudo)"; exit 1; }
-[ -b "$DEV" ] || { echo "$DEV non risulta un device a blocchi"; exit 1; }
-if [ -b "${DEV}p2" ]; then P2="${DEV}p2"; else P2="${DEV}2"; fi
-[ -b "$P2" ] || { echo "partizione 2 non trovata ($P2): card giusta?"; exit 1; }
+card_check "$DEV"
+P2="$CP2"
 
 # L'SSID in esadecimale: connman lo accetta cosi' con qualunque carattere.
 HEX="$(printf '%s' "$SSID" | od -An -tx1 | tr -d ' \n')"
 
-for p in "${DEV}"*; do [ "$p" = "$DEV" ] || umount "$p" 2>/dev/null; done
+card_umount "$DEV"
 M="$(mktemp -d)"
 mount -t ext4 "$P2" "$M" || { echo "non riesco a montare $P2"; exit 1; }
 echo "[storage] $(df -h "$M" | tail -1 | awk '{print $2" totali, "$4" liberi"}')"
@@ -89,11 +97,20 @@ echo "[wifi] seminata: $SSID (provisioning connman, per qualunque MAC)"
 # --- 3. ssh acceso
 mkdir -p "$M/.cache/services" && touch "$M/.cache/services/sshd.conf" && echo "[ssh] flag presente"
 
-# --- 4. autostart usa-e-getta che raccoglie la diagnosi al prossimo boot
+# --- 4. autostart usa-e-getta che raccoglie la diagnosi al prossimo boot.
+# Quello che c'era va da parte, e torna quando la raccolta e' finita. Se e'
+# gia' il nostro (lanciato due volte prima che la console ripartisse), la
+# copia buona e' gia' da parte: non va coperta.
 mkdir -p "$M/.config"
-cat > "$M/.config/autostart.sh" <<'EOF'
+AS="$M/.config/autostart.sh"; ASB="$M/.config/autostart.sh.rf35h-rescue"
+if [ -f "$AS" ] && ! grep -q '^# rf35h rescue:' "$AS"; then
+	cp -p "$AS" "$ASB" || { echo "non riesco a mettere da parte $AS: mi fermo"; umount "$M"; exit 1; }
+	echo "[autostart] il tuo autostart.sh resta in .config/autostart.sh.rf35h-rescue fino a fine raccolta"
+fi
+cat > "$AS" <<'EOF'
 #!/bin/sh
-# rf35h rescue: raccoglie perche' RetroArch non parte, poi si toglie da solo.
+# rf35h rescue: raccoglie perche' RetroArch non parte, poi si toglie da solo
+# e rimette l'autostart.sh che c'era (autostart.sh.rf35h-rescue).
 # Gira PRIMA di retroarch.service; si stacca in background e aspetta.
 (
 	sleep 45
@@ -114,12 +131,22 @@ cat > "$M/.config/autostart.sh" <<'EOF'
 	fi
 	cp /storage/.config/retroarch/retroarch-core-options.cfg "$R/" 2>/dev/null
 	sync
-	rm -f /storage/.config/autostart.sh   # usa-e-getta
+	# usa-e-getta: al suo posto quello che c'era, se c'era
+	if [ -f /storage/.config/autostart.sh.rf35h-rescue ]; then
+		mv -f /storage/.config/autostart.sh.rf35h-rescue /storage/.config/autostart.sh
+	else
+		rm -f /storage/.config/autostart.sh
+	fi
+	sync
 ) >/dev/null 2>&1 &
 exit 0
 EOF
-chmod +x "$M/.config/autostart.sh"
-echo "[autostart] installato: al prossimo boot scrive /storage/rescue/ e si rimuove"
+chmod +x "$AS"
+if [ -f "$ASB" ]; then
+	echo "[autostart] installato: al prossimo boot scrive /storage/rescue/ e rimette il tuo"
+else
+	echo "[autostart] installato: al prossimo boot scrive /storage/rescue/ e si rimuove"
+fi
 
 sync; umount "$M"; rmdir "$M"
 echo

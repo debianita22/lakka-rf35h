@@ -1,6 +1,6 @@
 #!/bin/bash
 # test-rf35h-card-tools.sh - prove degli strumenti per la card sul PC:
-# rf35h-card.sh (i controlli comuni) e rf35h-reflash-system.sh.
+# rf35h-card.sh (i controlli comuni), rf35h-reflash-system.sh, rf35h-rescue.sh.
 #
 #   ./tools/test-rf35h-card-tools.sh
 #   sudo RF35H_TEST_DEVICES=1 ./tools/test-rf35h-card-tools.sh
@@ -17,6 +17,7 @@ set -u
 O="$(cd "$(dirname "$0")/.." && pwd)"
 CARD="${O}/tools/rf35h-card.sh"
 REFLASH="${O}/tools/rf35h-reflash-system.sh"
+RESCUE="${O}/tools/rf35h-rescue.sh"
 T="$(mktemp -d)"
 pass=0; fail=0
 ok() { if eval "$2"; then pass=$((pass + 1)); echo "  ok    $1"; else fail=$((fail + 1)); echo "  FALLITO $1"; fi; }
@@ -250,6 +251,28 @@ attach "${T}/early.img" 2048
 FORCE=yes reflash --loader "${DEV}"; rc=$?
 detach
 ok "--loader con la partizione 1 dentro i 16 MiB: no, niente scritto" '[ ${rc} != 0 ] && grep -q "prima della fine del loader" "${T}/out" && [ "$(regsum "${T}/early.img" 0 32768)" = "${S2}" ]'
+
+echo "-- rf35h-rescue.sh"
+mkcard "${T}/card.img" "${CU}"; attach "${T}/card.img"
+(cd "${T}" && FORCE=yes sh "${RESCUE}" "${DEV}" "Rete" "pw") > "${T}/out" 2>&1; rc=$?
+(cd "${T}" && FORCE=yes sh "${RESCUE}" "${DEV}" "Rete" "pw") > "${T}/out2" 2>&1; rc2=$?
+detach
+p2look "${T}/card.img"
+ok "rescue: esce 0, autostart.sh e' quello di raccolta" '[ ${rc} = 0 ] && [ ${rc2} = 0 ] && grep -q "^# rf35h rescue:" "${T}/m/.config/autostart.sh"'
+ok "  ...il tuo da parte, anche dopo un secondo giro" 'grep -q "il mio" "${T}/m/.config/autostart.sh.rf35h-rescue"'
+# la fine dello script di raccolta, su questa /storage, con systemctl & C. finti
+cp -a "${T}/m" "${T}/st"; p2done
+mkdir -p "${T}/stub"; for c in sleep journalctl systemctl dmesg retroarch; do printf '#!/bin/sh\nexit 0\n' > "${T}/stub/${c}"; chmod +x "${T}/stub/${c}"; done
+sed "s|/storage|${T}/st|g" "${T}/st/.config/autostart.sh" > "${T}/as.sh"
+PATH="${T}/stub:${PATH}" sh "${T}/as.sh"; for _ in 1 2 3 4 5; do [ -e "${T}/st/.config/autostart.sh.rf35h-rescue" ] || break; sleep 1; done
+ok "  ...finita la raccolta torna il tuo autostart.sh" 'grep -q "il mio" "${T}/st/.config/autostart.sh" && [ ! -e "${T}/st/.config/autostart.sh.rf35h-rescue" ]'
+rm -f "${T}/st/.config/autostart.sh"; cp "${T}/as.sh" "${T}/st/.config/autostart.sh"
+PATH="${T}/stub:${PATH}" sh "${T}/st/.config/autostart.sh"; for _ in 1 2 3 4 5; do [ -e "${T}/st/.config/autostart.sh" ] || break; sleep 1; done
+ok "  ...senza un autostart.sh prima: si toglie e basta" '[ ! -e "${T}/st/.config/autostart.sh" ]'
+mkcard "${T}/card.img" "${CU}"; attach "${T}/card.img"
+(cd "${T}" && sh "${RESCUE}" "${DEV}" "Rete" "pw") > "${T}/out" 2>&1; rc=$?
+detach
+ok "rescue senza FORCE=yes su un disco non rimovibile: no" '[ ${rc} != 0 ] && grep -q "FORCE=yes" "${T}/out"'
 
 echo "--- ${pass} ok, ${fail} falliti"
 [ "${fail}" = 0 ]
