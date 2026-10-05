@@ -50,6 +50,14 @@ case "${1:-}" in
 		o="${D}/$1"; mkdir -p "${o}" || exit 1
 		dump 0xff2b0000 0x400 > "${o}/cru.txt"
 		dump 0xff2bc000 0x100 > "${o}/pmucru.txt"
+		# PMU (modalita' di sospensione, stato del PMIC_SLEEP), GRF e PMUGRF
+		dump 0xff000000 0x100 > "${o}/pmu.txt"
+		dump 0xff140000 0x200 > "${o}/grf.txt"
+		dump 0xff010000 0x100 > "${o}/pmugrf.txt"
+		# il PMIC rk817 (bus 0, 0x20): registri DCDC/LDO e stato, in sola lettura
+		if [ -x /usr/bin/rf35h-i2c ]; then
+			for reg in $(seq 0 255); do printf '%02x %s\n' "${reg}" "$(/usr/bin/rf35h-i2c 0 0x20 "$(printf '0x%02x' "${reg}")" 2>/dev/null)"; done > "${o}/rk817.txt"
+		fi
 		{
 			echo "== $(date)  uptime $(cut -d' ' -f1 /proc/uptime)  $(grep -m1 VERSION= /etc/os-release)"
 			echo "mem_sleep: $(cat /sys/power/mem_sleep 2>/dev/null)"
@@ -67,6 +75,13 @@ case "${1:-}" in
 				[ -e "${t}/temp" ] && echo "thermal $(cat "${t}/type"): $(cat "${t}/temp")"
 			done
 			echo "loadavg: $(cat /proc/loadavg)"
+			# i regolatori come li vede il kernel (tensioni nominali, stato)
+			for r in /sys/class/regulator/regulator.*; do
+				[ -r "${r}/name" ] && echo "regulator $(cat "${r}/name"): $(cat "${r}/microvolts" 2>/dev/null)uV $(cat "${r}/state" 2>/dev/null) $(cat "${r}/opmode" 2>/dev/null)"
+			done
+			echo "suspend_stats: success=$(cat /sys/power/suspend_stats/success 2>/dev/null) fail=$(cat /sys/power/suspend_stats/fail 2>/dev/null) last_failed_dev=$(cat /sys/power/suspend_stats/last_failed_dev 2>/dev/null)"
+			echo "panel/drm: $(for c in /sys/class/drm/card*-*; do [ -r "${c}/status" ] && echo "$(basename "${c}")=$(cat "${c}/status")/$(cat "${c}/enabled" 2>/dev/null) mode=$(head -1 "${c}/modes" 2>/dev/null)"; done)"
+			echo "backlight: $(cat /sys/class/backlight/*/actual_brightness 2>/dev/null) / $(cat /sys/class/backlight/*/max_brightness 2>/dev/null)"
 			s1="$(head -1 /proc/stat)"; ps -o pid,stat,time,comm > "${o}/ps1.txt" 2>&1
 			cat /proc/interrupts > "${o}/irq1.txt"; sleep 5
 			s2="$(head -1 /proc/stat)"; ps -o pid,stat,time,comm > "${o}/ps2.txt" 2>&1
@@ -85,14 +100,15 @@ ${s2}" | awk '{ t = 0; for (i = 2; i <= NF; i++) t += $i; tot[NR] = t; idle[NR] 
 	confronta)
 		for x in prima dopo; do [ -s "${D}/${x}/cru.txt" ] || { echo "manca ${D}/${x}: lancia prima 'sh $0 ${x}'"; exit 1; }; done
 		for x in prima dopo; do echo "PLL, ${x}:"; pll_table "${D}/${x}"; done
-		for f in cru pmucru; do
+		for f in cru pmucru pmu grf pmugrf rk817; do
+			[ -f "${D}/prima/${f}.txt" ] && [ -f "${D}/dopo/${f}.txt" ] || continue
 			echo "registri ${f} cambiati (indirizzo, prima, dopo):"
 			awk 'NR == FNR { a[$1] = $2; next } a[$1] != $2 { print "  " $1, a[$1], $2 }' \
 				"${D}/prima/${f}.txt" "${D}/dopo/${f}.txt"
 		done
 		for x in prima dopo; do
 			echo "cpu, gpu, termica, ${x}:"
-			grep -E "^(mem_sleep|cpu0 scaling_(governor|cur)|cpu0 cpuinfo_cur|devfreq|cpu occupata|cooling|loadavg)" "${D}/${x}/stato.txt" | sed 's/^/  /'
+			grep -E "^(mem_sleep|cpu0 scaling_(governor|cur)|cpu0 cpuinfo_cur|devfreq|cpu occupata|cooling|thermal|loadavg|regulator|suspend_stats|panel|backlight)" "${D}/${x}/stato.txt" | sed 's/^/  /'
 		done
 		;;
 	ripristina)
