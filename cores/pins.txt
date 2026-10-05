@@ -1,0 +1,47 @@
+# I core libretro dell'immagine e il commit da cui si costruiscono.
+#
+#   <pacchetto Lakka>  <repository>  <commit>  <ramo>
+#
+# Li legge apply.sh: PKG_SITE, PKG_URL e PKG_VERSION nel package.mk del core
+# (il package di Lakka resta, con le sue patch, salvo i fork sotto). Li
+# aggiorna cores.yml, ogni settimana, alla punta del ramo ("-": quello di
+# default del repository), uno per uno: solo se il core compila. Un core con
+# patch Lakka punta a un fork https://github.com/debianita22/<core>, ramo
+# rf35h (l'upstream piu' le patch): per quelli apply.sh toglie le patch del
+# package di Lakka, gia' dentro il fork.
+# Gli stessi finiscono nell'immagine in /usr/share/rf35h/cores.txt: la console
+# li confronta con l'indice delle release dei core (rf35h-update cores).
+gambatte          https://github.com/libretro/gambatte-libretro        9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2 -
+sameboy           https://github.com/LIJI32/SameBoy                    8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
+tgbdual           https://github.com/libretro/tgbdual-libretro         933707c0ba8f12360f6d79712f735a917713709a -
+fceumm            https://github.com/libretro/libretro-fceumm          5cd4a43e16a7f3cd35628d481c347a0a98cfdfa2 -
+nestopia          https://github.com/libretro/nestopia                 473d3072be67fa2542ca833c274ef6682cf0f0bc -
+genesis_plus_gx   https://github.com/ekeeke/Genesis-Plus-GX            751d6ddc06469389ea8f65c42a01839141d69734 -
+picodrive         https://github.com/irixxxx/picodrive                 2779ac9bf182649d5b21465f86b190cf0a7b68bd -
+gearsystem        https://github.com/drhelius/Gearsystem               5133ca740b701e12d4b00d715627248f8a545b47 -
+snes9x2010        https://github.com/libretro/snes9x2010               f9ae8fd28b13070a945a829ccf41cbf90a21d0f7 -
+snes9x            https://github.com/libretro/snes9x                   5a40cd5514e63e691e39141d64267798357a1424 -
+snes9x2005        https://github.com/libretro/snes9x2005               74d871db9b4dba6dbe6c5ecebc88cbf255be5349 -
+mgba              https://github.com/mgba-emu/mgba                     26b7884bc25a5933960f3cdcd98bac1ae14d42e2 -
+gpsp              https://github.com/libretro/gpsp                     6250979f01db3f9ee5ebca179316e1319f017b48 -
+beetle_pce_fast   https://github.com/libretro/beetle-pce-fast-libretro 52675734da114a19b3705f03906b1455f3d76644 -
+beetle_pce        https://github.com/libretro/beetle-pce-libretro      9a301c0773c53702a882bbaa42ee9cbc6d523787 -
+fbneo             https://github.com/libretro/fbneo                    af33e4d8f11336d6902bff0874309066a405cadf -
+fbalpha2012       https://github.com/libretro/fbalpha2012              c547d8cf3f7748f4094cee658a5d31ec1b79ece4 -
+mame2010          https://github.com/libretro/mame2010-libretro        c5b413b71e0a290c57fc351562cd47ba75bac105 -
+mame2015          https://github.com/libretro/mame2015-libretro        316cd06349f2b34b4719f04f7c0d07569a74c764 -
+mupen64plus_next  https://github.com/libretro/mupen64plus-libretro-nx  bc43bcedc276861254b48526f56799d63a30723b develop
+parallel_n64      https://github.com/libretro/parallel-n64             1da824e13e725a7144f3245324f43d59623974f8 -
+pcsx_rearmed      https://github.com/libretro/pcsx_rearmed             3a7850fdc6ac4ed0c323ade851b462504a3cbb79 -
+beetle_ngp        https://github.com/libretro/beetle-ngp-libretro      139fe34c8dfc5585d6ee1793a7902bca79d544de -
+race              https://github.com/libretro/RACE                     171950ea64c96ead503340ed60fa7ba18f56325c -
+beetle_wswan      https://github.com/libretro/beetle-wswan-libretro    2aeb47d3a58bf0360c686f842d9bb5bd201306fe -
+handy             https://github.com/libretro/libretro-handy           fca239207e9c111da3e85d2faf0b1b9d7524e498 -
+beetle_lynx       https://github.com/libretro/beetle-lynx-libretro     efd1797c7aa5a83c354507b1b61ac24222ebaa58 -
+stella2014        https://github.com/libretro/stella2014-libretro      3cc89f0d316d6c924a5e3f4011d17421df58e615 -
+stella            https://github.com/stella-emu/stella                 6efad98f0058e803ac675ead6dbe33c054db1492 -
+melonds           https://github.com/libretro/melonds                  7a3c11ff970cd36ca806961fae6db94b30dd5401 -
+melondsds         https://github.com/JesseTG/melonds-ds                bac0256dc6a8736c5a228f57c562257e45fd49f3 -
+cap32             https://github.com/libretro/libretro-cap32           54eabbb210a6149496b1d023bebddb3f0120bc33 -
+crocods           https://github.com/libretro/libretro-crocods         a320f6e38af49af84a63f81329a1bdb9322022b4 -
+flycast           https://github.com/flyinghead/flycast                22e28c0a7cde962f2e45863435b16334185a3a50 -

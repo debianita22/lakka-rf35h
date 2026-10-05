@@ -81,6 +81,7 @@ SKIP_DEPS="no"
 PIN="yes"
 DRY_RUN="no"
 VERIFY_ONLY="no"
+BUILD_PACKAGES=""
 
 usage() {
 	cat <<'EOF'
@@ -141,6 +142,11 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      immagine in target/ (verify-image) e il sorgente del
                      kernel (verify-kernel). Per un'immagine gia' fatta
   --no-pin           usa la punta di devel invece del commit pinnato
+  --build-packages "a b"  compila solo questi pacchetti (e le loro dipendenze
+                     che mancano), niente immagine: i core, per le release
+                     dei core (cores.yml). I .so finiscono in
+                     target/cores/<pacchetto>/; chi non compila non ferma
+                     gli altri, e il resoconto e' in build-rf35h-*-pacchetti.txt
   -h, --help         questo messaggio
 EOF
 }
@@ -177,6 +183,7 @@ while [ $# -gt 0 ]; do
 		--dry-run) DRY_RUN="yes"; SKIP_DEPS="yes"; shift ;;
 		--verify-only) VERIFY_ONLY="yes"; shift ;;
 		--no-pin)  PIN="no"; shift ;;
+		--build-packages) BUILD_PACKAGES="$2"; shift 2 ;;
 		-h|--help) usage; exit 0 ;;
 		*) echo "opzione sconosciuta: $1" >&2; usage; exit 1 ;;
 	esac
@@ -442,7 +449,7 @@ fi
 # albero giusto. Fuori README, docs/, tools/ e gli altri script, che nell'albero non
 # finiscono; dentro apply.sh, che prima restava fuori con tutti gli .sh pur
 # decidendo cosa entra nell'albero.
-OVERLAY_TREE_PATHS="apply.sh autoconfig integration optional packages patches"
+OVERLAY_TREE_PATHS="apply.sh autoconfig cores integration optional packages patches"
 overlay_sig() {
 	local p list=""
 	for p in ${OVERLAY_TREE_PATHS}; do
@@ -842,6 +849,69 @@ if [ -z "${PKG_JOBS}" ]; then
 	[ "${_byram}" -lt 1 ] && _byram=1
 	if [ "${_byram}" -lt "${_cores}" ]; then PKG_JOBS="${_byram}"; else PKG_JOBS="${_cores}"; fi
 	PKG_JOBS_WHY="$( [ "${_byram}" -lt "${_cores}" ] && echo "limitato dalla RAM (${_ramgb} GB)" || echo "pari ai core (${_cores})" )"
+fi
+
+# --- solo alcuni pacchetti (--build-packages) ---------------------------------
+# scripts/build <pacchetto> costruisce il pacchetto e, in sequenza, le
+# dipendenze che non hanno ancora lo stamp: su un albero gia' costruito
+# (toolchain e sistema fatti) resta il solo pacchetto. Un pacchetto che non
+# compila non ferma gli altri; esito per pacchetto nel resoconto.
+if [ -n "${BUILD_PACKAGES}" ]; then
+	if [ -z "${JOBS}" ]; then JOBS="$(nproc 2>/dev/null || echo 2)"; fi
+	PKG_JOBS=1
+	STAMP_TS="$(date +%Y%m%d-%H%M%S)"
+	LOG="${WORKDIR}/build-rf35h-${STAMP_TS}.log"
+	REPORT="${WORKDIR}/build-rf35h-${STAMP_TS}-pacchetti.txt"
+	say "Build dei soli pacchetti: ${BUILD_PACKAGES}"
+	echo "  make -j per pacchetto: ${JOBS}; log: ${LOG}"
+	cd "${WORKDIR}"
+	build_env
+	rm -rf "${WORKDIR}/target/cores"
+	: > "${REPORT}"
+	PK_FAILED=""
+	for p in ${BUILD_PACKAGES}; do
+		[ -f "${WORKDIR}/packages/lakka/libretro_cores/${p}/package.mk" ] \
+			|| [ -n "$(find "${WORKDIR}/packages" "${WORKDIR}/projects/Rockchip" -path "*/${p}/package.mk" -print -quit 2>/dev/null)" ] \
+			|| { echo "${p} assente: nessun package.mk" >> "${REPORT}"; PK_FAILED="${PK_FAILED} ${p}"; continue; }
+		say "scripts/build ${p}"
+		set +e
+		env "${BENV[@]}" ./scripts/build "${p}" 2>&1 | tee -a "${LOG}"
+		RC=${PIPESTATUS[0]}
+		set -e
+		if [ "${RC}" -ne 0 ]; then
+			TLOG="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${LOG}" | tail -1)"
+			if [ -n "${TLOG}" ] && [ -r "${TLOG}" ]; then cp -f "${TLOG}" "${LOG%.log}-${p}-fallito.log"; else tail -400 "${LOG}" > "${LOG%.log}-${p}-fallito.log" 2>/dev/null || true; fi
+			echo "${p} fallito (uscita ${RC})    log: $(hp "${LOG%.log}-${p}-fallito.log")" >> "${REPORT}"
+			PK_FAILED="${PK_FAILED} ${p}"
+			# lo stamp parziale e la cartella a meta' non devono passare per buoni
+			rm -f "${WORKDIR}"/build.*/.stamps/"${p}"/build_target
+			continue
+		fi
+		# i .so che il pacchetto ha installato (install_pkg/<pkg>-<versione>),
+		# col nome del pacchetto letto da .libreelec-package
+		n=0
+		for i in "${WORKDIR}"/build.*/install_pkg/*/; do
+			[ -f "${i}.libreelec-package" ] || continue
+			[ "$(sed -n 's/^INFO_PKG_NAME="\(.*\)"$/\1/p' "${i}.libreelec-package")" = "${p}" ] || continue
+			for so in "${i}usr/lib/libretro/"*_libretro.so; do
+				[ -f "${so}" ] || continue
+				mkdir -p "${WORKDIR}/target/cores/${p}"
+				cp -f "${so}" "${WORKDIR}/target/cores/${p}/"
+				n=$((n + 1))
+			done
+		done
+		if [ "${n}" -eq 0 ]; then
+			echo "${p} compilato ma nessun *_libretro.so installato" >> "${REPORT}"
+			PK_FAILED="${PK_FAILED} ${p}"
+		else
+			echo "${p} ok: $(ls "${WORKDIR}/target/cores/${p}" | tr '\n' ' ')" >> "${REPORT}"
+		fi
+	done
+	say "Resoconto"
+	sed 's/^/  /' "${REPORT}"
+	echo "  resoconto: $(hp "${REPORT}")"
+	[ -z "${PK_FAILED}" ] || die "pacchetti non riusciti:${PK_FAILED}"
+	exit 0
 fi
 
 LOG="${WORKDIR}/build-rf35h-$(date +%Y%m%d-%H%M%S).log"

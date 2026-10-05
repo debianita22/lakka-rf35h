@@ -283,6 +283,7 @@ cat > "${FB}/git" <<'EOF'
 #!/bin/bash
 echo "git $*" >> "${CALLS}"
 [ "$1" = -C ] && shift 2
+while [ "${1:-}" = -c ]; do shift 2; done   # -c user.name=... (pins-merge)
 case "$1 ${2:-}" in
 	"rev-parse --short=7") echo "${FAKE_SHA:0:7}" ;;
 	"rev-parse --is-shallow-repository") echo false ;;
@@ -306,9 +307,20 @@ case "$*" in
 			*) echo "${FAKE_LATEST}" ;;
 		esac ;;
 	"api -X DELETE "*|"release create "*|"release upload "*|"release edit "*) ;;
+	# la release "cores" (publish-cores): id, l'indice che c'e', gli asset
+	"api repos/"*"/releases/tags/cores "*)
+		if [ -n "${FAKE_CORES_ID:-}" ]; then echo "${FAKE_CORES_ID}"
+		elif grep -q "^gh release create cores " "${CALLS}"; then echo 78   # appena creata
+		else echo "gh: release not found (HTTP 404)" >&2; exit 1; fi ;;
+	"release download cores "*) [ -n "${FAKE_CORES_INDEX:-}" ] || exit 1; a="$*"; o="${a##*--output }"; printf '%b\n' "${FAKE_CORES_INDEX}" > "${o}" ;;
+	"api --paginate repos/"*"/releases/"*"/assets?per_page=100 "*) [ -z "${FAKE_CORES_ASSETS:-}" ] || printf '%b\n' "${FAKE_CORES_ASSETS}" ;;
 	*) echo "gh finto: $*" >&2; exit 2 ;;
 esac
 EOF
+cat >> "${FB}/git" <<'EOF'
+EOF
+# commit e push dei pin (pins-merge): solo registrati
+sed -i 's|^\t"ls-remote --tags")|\t"commit "*\|"push "*) ;;\n\t"ls-remote --tags")|' "${FB}/git"
 chmod +x "${FB}/git" "${FB}/gh"
 SHA=0123456789abcdef0123456789abcdef01234567
 export CALLS="${T}/calls.log"
@@ -454,6 +466,42 @@ apt_run "ok errore ok"; rc=$?
 ok "ci-apt: install fallito, si riparte da update" '[ "${rc}" = 0 ] && [ "$(cat "${FA}/n")" = 4 ]'
 apt_run "errore"; rc=$?
 ok "ci-apt: tre tentativi falliti, esce 1 con ::error" '[ "${rc}" = 1 ] && [ "$(cat "${FA}/n")" = 3 ] && grep -q "^::error title=apt::zstd squashfs-tools non installati" "${FA}/out"'
+
+echo "publish-cores e pins-merge (job cores)"
+CD="${T}/coresdist"; rm -rf "${CD}"; mkdir -p "${CD}" "${REPO}/cores"
+printf 'x' | gzip -n > "${CD}/fceumm_libretro-aaaaaaa.so.gz"; printf 'y' | gzip -n > "${CD}/mgba_libretro-bbbbbbb.so.gz"
+cat > "${CD}/built.txt" <<EOF
+core=fceumm so=fceumm commit=aaaaaaa0000000000000000000000000000000000 site=https://github.com/libretro/libretro-fceumm file=fceumm_libretro-aaaaaaa.so.gz sha256=11 size=1 lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
+core=mgba so=mgba commit=bbbbbbb0000000000000000000000000000000000 site=https://github.com/mgba-emu/mgba file=mgba_libretro-bbbbbbb.so.gz sha256=22 size=1 lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
+EOF
+: > "${CD}/failed.txt"
+OLDIDX="core=fceumm so=fceumm commit=0000000111111111111111111111111111111111 site=https://github.com/libretro/libretro-fceumm file=fceumm_libretro-0000000.so.gz url=https://github.com/o/r/releases/download/cores/fceumm_libretro-0000000.so.gz sha256=00 size=1 lakka=e2cf2e5c sysroot=v1.1.0 date=20261001\ncore=snes9x so=snes9x commit=cccccccc111111111111111111111111111111111 site=https://github.com/libretro/snes9x file=snes9x_libretro-ccccccc.so.gz url=https://github.com/o/r/releases/download/cores/snes9x_libretro-ccccccc.so.gz sha256=33 size=1 lakka=e2cf2e5c sysroot=v1.1.0 date=20261001"
+ASSETS="1 fceumm_libretro-0000000.so.gz 2026-10-01T00:00:00Z\n2 fceumm_libretro-aaaaaaa.so.gz 2026-10-05T00:00:00Z\n3 fceumm_libretro-9999999.so.gz 2026-09-01T00:00:00Z\n4 snes9x_libretro-ccccccc.so.gz 2026-10-01T00:00:00Z\n5 mgba_libretro-bbbbbbb.so.gz 2026-10-05T00:00:00Z\n6 index.txt 2026-10-05T00:00:00Z"
+FAKE_CORES_ID=77 FAKE_CORES_INDEX="${OLDIDX}" FAKE_CORES_ASSETS="${ASSETS}" fake publish-cores "${CD}"; rc=$?
+ok "publish-cores: release esistente, upload dei .so.gz e dell'indice" '[ "${rc}" = 0 ] && ! called "release create" && called "release upload cores --repo o/r --clobber ./fceumm_libretro-aaaaaaa.so.gz ./mgba_libretro-bbbbbbb.so.gz index.txt"'
+ok "  ...indice: 3 core, fceumm al commit nuovo, snes9x tenuto, ordine stabile" '[ "$(grep -c "^core=" "${CD}/index.txt")" = 3 ] && [ "$(sed -n 1p "${CD}/index.txt" | cut -d" " -f1,3)" = "core=fceumm commit=aaaaaaa0000000000000000000000000000000000" ] && [ "$(sed -n 2p "${CD}/index.txt" | cut -d" " -f1)" = "core=snes9x" ] && [ "$(sed -n 3p "${CD}/index.txt" | cut -d" " -f1)" = "core=mgba" ]'
+ok "  ...ogni riga un solo url, con il nome del file" '[ "$(grep -c " url=https://github.com/o/r/releases/download/cores/" "${CD}/index.txt")" = 3 ] && ! grep -q "url=.*url=" "${CD}/index.txt" && grep -q "file=mgba_libretro-bbbbbbb.so.gz url=https://github.com/o/r/releases/download/cores/mgba_libretro-bbbbbbb.so.gz" "${CD}/index.txt"'
+ok "  ...asset vecchi: resta il terzo fceumm (9999999) da togliere, gli altri no" 'called "api -X DELETE repos/o/r/releases/assets/3" && ! called "assets/1$" && ! called "assets/2$" && ! called "assets/4$" && ! called "assets/5$" && ! called "assets/6$"'
+FAKE_CORES_ID="" FAKE_CORES_INDEX="" FAKE_CORES_ASSETS="" fake publish-cores "${CD}"; rc=$?
+ok "publish-cores: release assente, creata pre-release; indice solo dai nuovi" '[ "${rc}" = 0 ] && called "release create cores --repo o/r --prerelease" && [ "$(grep -c "^core=" "${CD}/index.txt")" = 2 ]'
+# pins-merge: solo i core riusciti cambiano, commit e push
+cat > "${REPO}/cores/pins.txt" <<EOF
+# commento
+fceumm            https://github.com/libretro/libretro-fceumm          0000000111111111111111111111111111111111 -
+mgba              https://github.com/mgba-emu/mgba                     bbbbbbb0000000000000000000000000000000000 -
+snes9x            https://github.com/libretro/snes9x                   cccccccc111111111111111111111111111111111 -
+EOF
+cat > "${T}/pins-new.txt" <<EOF
+# commento
+fceumm            https://github.com/libretro/libretro-fceumm          aaaaaaa0000000000000000000000000000000000 -
+mgba              https://github.com/mgba-emu/mgba                     bbbbbbb0000000000000000000000000000000000 -
+snes9x            https://github.com/libretro/snes9x                   dddddddd111111111111111111111111111111111 -
+EOF
+fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
+ok "pins-merge: fceumm al nuovo, snes9x (non compilato) resta, mgba uguale" '[ "${rc}" = 0 ] && grep -q "^fceumm .* aaaaaaa0000000000000000000000000000000000 -" "${REPO}/cores/pins.txt" && grep -q "^snes9x .* cccccccc111111111111111111111111111111111 -" "${REPO}/cores/pins.txt" && grep -q "^# commento" "${REPO}/cores/pins.txt"'
+ok "  ...commit e push sul ramo, changed=true" 'called "commit -q -m cores: 1 core all.upstream" && called "push -q origin HEAD:main" && [ "$(outv changed)" = true ]'
+fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
+ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && ! called "commit" && [ "$(outv changed)" = false ]'
 
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

@@ -201,6 +201,22 @@ jobs:
           retention-days: 14
           compression-level: 0
 
+      # L'albero costruito, senza sorgenti, kernel e ccache: le build dei soli
+      # core (cores.yml) partono da qui invece che da zero. 90 giorni, il
+      # massimo: cores.yml prende il piu' recente, e ogni release ne lascia uno.
+      - name: Sysroot per i core
+        if: steps.build.outputs.result == 'done'
+        run: ./tools/ci-build.sh pack-sysroot
+
+      - uses: actions/upload-artifact@v7
+        if: steps.build.outputs.result == 'done'
+        with:
+          name: sysroot-${{ inputs.version }}
+          path: ${{ env.W }}/sysroot.tar.zst
+          archive: false
+          retention-days: 90
+          compression-level: 0
+
       # La ccache alla fine di ogni parte, anche fallita: una build nuova (o
       # una ripresa dopo un errore) riparte dall'ultima, non da zero. Le
       # chiavi sono uniche (le cache non si sovrascrivono); quando si supera

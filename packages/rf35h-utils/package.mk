@@ -72,6 +72,11 @@ makeinstall_target() {
   esac
   mkdir -p ${INSTALL}/usr/share/rf35h
     echo "${RF35H_UPDATE_REPO}" > ${INSTALL}/usr/share/rf35h/update-repo
+  # I core dell'immagine al loro commit, e il commit di Lakka (lo scrive
+  # apply.sh da cores/pins.txt): rf35h-update cores li confronta con l'indice
+  # delle release dei core
+  [ -f ${PKG_DIR}/cores.txt ] || die "rf35h-utils: manca cores.txt (apply.sh non lo ha scritto)"
+    cp ${PKG_DIR}/cores.txt ${INSTALL}/usr/share/rf35h/cores.txt
 
   # Override per-core di RetroArch: i default stanno nell'immagine e
   # rf35h-overrides.service li copia in /storage solo se mancano. cp -r

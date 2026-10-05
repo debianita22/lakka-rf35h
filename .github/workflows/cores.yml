@@ -1,0 +1,252 @@
+# I core libretro da soli: alla punta del loro upstream, compilati sull'albero
+# dell'ultima release (sysroot) e pubblicati uno per uno nella release "cores"
+# (index.txt + <core>-<commit>.so.gz), da cui la console li aggiorna
+# singolarmente (Device Settings > Core Updates, rf35h-update cores).
+#
+#   ogni lunedi'      cores-bump.sh: quali core hanno commit nuovi upstream;
+#                     quelli si compilano; i riusciti vanno nella release e
+#                     il loro pin in cores/pins.txt (commit sul ramo
+#                     principale: la prossima immagine li ha); i falliti in
+#                     un issue, al commit vecchio.
+#   Run workflow      "cores": solo questi (vuoto: tutti quelli cambiati);
+#                     "rebuild": anche se il pin non e' cambiato (per
+#                     ripubblicare un core dopo una correzione dell'overlay);
+#                     "dry_run": compila e basta, niente release ne' pin.
+#
+# Il sysroot: l'artifact sysroot-<versione> della release piu' recente
+# (build-stage.yml lo salva per 90 giorni). I core devono essere compilati
+# sullo stesso Lakka dell'immagine: la console lo controlla (lakka= nell'indice
+# contro /usr/share/rf35h/cores.txt), e "prepare" si ferma se il sysroot non e'
+# al commit pinnato.
+name: Cores
+run-name: >-
+  ${{ github.event_name == 'schedule' && 'Core: upstream della settimana'
+  || inputs.dry_run && format('Core (prova): {0}', inputs.cores || 'tutti i cambiati')
+  || format('Core: {0}', inputs.cores || 'tutti i cambiati') }}
+
+on:
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      cores:
+        description: "Core da compilare (pacchetti Lakka, es. fceumm mgba); vuoto: tutti quelli con un upstream nuovo"
+        type: string
+        default: ""
+      rebuild:
+        description: "Anche i core il cui pin non e' cambiato"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Solo compilare: niente release, pin ne' issue"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cores
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: Upstream e sysroot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      cores: ${{ steps.bump.outputs.cores }}
+      sysroot_run: ${{ steps.sysroot.outputs.run }}
+      sysroot_name: ${{ steps.sysroot.outputs.name }}
+      sysroot_version: ${{ steps.sysroot.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Commit upstream dei core
+        id: bump
+        env:
+          IN_CORES: ${{ inputs.cores }}
+          IN_REBUILD: ${{ inputs.rebuild }}
+        run: |
+          args=()
+          if [ -n "${IN_CORES:-}" ]; then args+=(--cores "${IN_CORES}"); fi
+          ./tools/cores-bump.sh "${args[@]}" --out pins-new.txt > changed.txt
+          cores="$(cut -d' ' -f1 changed.txt | tr '\n' ' ')"
+          if [ "${IN_REBUILD:-false}" = true ] && [ -n "${IN_CORES:-}" ]; then
+            cores="${IN_CORES}"
+          fi
+          cores="$(tr -s ' ' <<< "${cores}" | sed 's/^ //; s/ $//')"
+          echo "cores=${cores}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### Core da compilare: ${cores:-nessuno}"
+            if [ -s changed.txt ]; then
+              echo; echo "| core | da | a |"; echo "|---|---|---|"
+              awk '{ printf "| %s | %s | %s |\n", $1, substr($2, 1, 7), substr($3, 1, 7) }' changed.txt
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+          if [ -z "${cores}" ]; then echo "::notice title=Core::nessun core con un upstream nuovo"; fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pins-new
+          path: pins-new.txt
+          retention-days: 7
+
+      # il sysroot piu' recente fra i run di build.yml (release e prove)
+      - name: Sysroot
+        id: sysroot
+        if: steps.bump.outputs.cores != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          art="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select((.expired | not) and (.name | startswith("sysroot-")))]
+                  | sort_by(.created_at) | last // empty | "\(.workflow_run.id) \(.name)"')"
+          if [ -z "${art}" ]; then
+            echo "::error title=Sysroot::nessun artifact sysroot-*: serve una build finita (build.yml) dopo il 5/10/2026"
+            exit 1
+          fi
+          read -r run name <<< "${art}"
+          { echo "run=${run}"; echo "name=${name}"; echo "version=${name#sysroot-}"; } >> "${GITHUB_OUTPUT}"
+          echo "- sysroot: ${name} (run ${run})" >> "${GITHUB_STEP_SUMMARY}"
+
+  build:
+    name: Compila
+    needs: setup
+    if: needs.setup.outputs.cores != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RF35H_UPDATE_REPO: ${{ github.repository }}
+      RF35H_CONTAINER: rf35h-cores
+      RF35H_SYSROOT_VERSION: ${{ needs.setup.outputs.sysroot_version }}
+      AUTOREMOVE: "yes"
+      CCACHE_COMPILERCHECK: content
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: pins-new
+          path: pins-new
+
+      - name: Pin nuovi nell'overlay
+        run: |
+          cp pins-new/pins-new.txt cores/pins.txt
+          git diff --stat -- cores/pins.txt
+
+      - name: Spazio su disco
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd squashfs-tools >/dev/null
+          ./tools/ci-build.sh disk
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.setup.outputs.sysroot_name }}
+          run-id: ${{ needs.setup.outputs.sysroot_run }}
+          github-token: ${{ github.token }}
+          path: ${{ env.W }}/dl
+
+      # l'albero della release, riportato a Lakka pulito con i pacchetti fatti;
+      # "prepare" riapplica l'overlay di questo commit (con i pin nuovi)
+      - name: Albero della release
+        run: |
+          ./tools/ci-build.sh unpack sysroot
+          ./tools/ci-build.sh reset
+          ./tools/ci-build.sh prepare
+
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ env.W }}/lakka-rf35h-build/build.*/.ccache
+            ${{ env.W }}/lakka-rf35h-build/build.*/.ccache-local
+          key: ccache-rf35h-cores-${{ github.run_id }}
+          restore-keys: ccache-rf35h-
+
+      - name: Core
+        env:
+          CORES: ${{ needs.setup.outputs.cores }}
+        run: ./tools/ci-build.sh cores "${CORES}"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: cores-${{ github.run_number }}
+          path: ${{ env.W }}/cores/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Log
+        if: always()
+        run: ./tools/ci-build.sh logs cores
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          path: ${{ env.W }}/log-cores.tar.zst
+          archive: false
+          retention-days: 14
+          if-no-files-found: ignore
+
+  publish:
+    name: Release cores e pin
+    needs: [setup, build]
+    if: needs.setup.outputs.cores != '' && !inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write   # la release "cores" e il commit dei pin
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: cores-${{ github.run_number }}
+          path: cores-out
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: pins-new
+          path: pins-new
+
+      - name: Release cores
+        run: ./tools/ci-build.sh publish-cores cores-out
+
+      - name: Pin dei core riusciti
+        id: pins
+        run: ./tools/ci-build.sh pins-merge cores-out pins-new/pins-new.txt
+
+      # i falliti: un issue solo, aggiornato, chiuso quando non ne restano
+      - name: Issue per i core falliti
+        env:
+          CORES: ${{ needs.setup.outputs.cores }}
+        run: |
+          num="$(gh issue list --state open --search 'Core che non compilano in:title' --json number,title \
+            --jq '[.[] | select(.title | startswith("Core che non compilano"))][0].number // empty')"
+          if [ ! -s cores-out/failed.txt ]; then
+            if [ -n "${num}" ]; then gh issue close "${num}" --comment "Tutti i core compilano (run ${GITHUB_RUN_ID})."; fi
+            exit 0
+          fi
+          n="$(grep -c '^==' cores-out/failed.txt)"
+          title="Core che non compilano all'upstream: ${n}"
+          # shellcheck disable=SC2016
+          body="$(printf '%s\n\n```\n%s\n```\n\n%s\n' \
+            "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}: questi core, alla punta del loro upstream, non compilano. Restano al commit vecchio in cores/pins.txt." \
+            "$(cat cores-out/failed.txt)" \
+            "Il log completo e' fra gli artifact del run (log-cores.tar.zst). Quando l'upstream li sistema, il lunedi' dopo riprovano da soli; a mano: Run workflow con il nome del core.")"
+          if [ -n "${num}" ]; then
+            gh issue edit "${num}" --title "${title}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi

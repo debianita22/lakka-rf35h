@@ -173,6 +173,40 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/logind-powe
 
 echo "[6/8] userspace: audio, tasti volume"
 cp -r "$O"/packages/rf35h-utils "$RK/packages/"
+
+# I core al commit di cores/pins.txt (vedi il file). PKG_SITE, PKG_URL e
+# PKG_VERSION del package di Lakka: il resto (flag, makeinstall, patch) resta
+# suo. Per un fork debianita22/<core> (upstream piu' le patch di Lakka, ramo
+# rf35h) le patch del package si tolgono: sono gia' nel sorgente, e
+# scripts/unpack le applicherebbe di nuovo senza fermarsi.
+# L'elenco va anche nell'immagine (rf35h-utils, /usr/share/rf35h/cores.txt) con
+# il commit di Lakka: la console cosi' sa che versione ha di ogni core, e
+# accetta dall'indice delle release solo core compilati su questo stesso Lakka.
+echo "  core pinnati (cores/pins.txt)"
+{
+	echo "lakka=$(git -C "$L" rev-parse HEAD 2>/dev/null || echo unknown)"
+	grep -E '^[a-z0-9_]+ +https?://' "$O/cores/pins.txt" | while read -r c site sha _; do
+		case "$sha" in *[!0-9a-f]*|'') echo "apply: pins.txt: $c: commit '$sha' non e' uno sha" >&2; exit 1 ;; esac
+		[ "${#sha}" -eq 40 ] || { echo "apply: pins.txt: $c: commit $sha non e' di 40 caratteri (get_git vuole lo sha intero)" >&2; exit 1; }
+		pm="$L/packages/lakka/libretro_cores/$c/package.mk"
+		[ -f "$pm" ] || { echo "apply: pins.txt: core $c non in Lakka" >&2; exit 1; }
+		grep -q '^PKG_URL="${PKG_SITE}.git"$' "$pm" || { echo "apply: $c: PKG_URL non e' \${PKG_SITE}.git, pin non applicabile" >&2; exit 1; }
+		sed -i -e "s|^PKG_SITE=\".*\"|PKG_SITE=\"$site\"|" -e "s|^PKG_VERSION=\".*\"|PKG_VERSION=\"$sha\"|" "$pm"
+		grep -q "^PKG_VERSION=\"$sha\"" "$pm" && grep -q "^PKG_SITE=\"$site\"" "$pm" || { echo "apply: $c: pin non scritto" >&2; exit 1; }
+		case "$site" in
+			https://github.com/debianita22/*)
+				if [ -d "$L/packages/lakka/libretro_cores/$c/patches" ]; then
+					rm -rf "$L/packages/lakka/libretro_cores/$c/patches"
+					echo "    $c: fork ${site##*/}, patch di Lakka tolte (sono nel fork)"
+				fi ;;
+		esac
+		echo "$c $site $sha"
+	done
+} > "$RK/packages/rf35h-utils/cores.txt"
+npin=$(grep -c ' https\?://' "$RK/packages/rf35h-utils/cores.txt")
+[ "$npin" -ge 1 ] || { echo "apply: cores/pins.txt senza core" >&2; exit 1; }
+[ "$npin" -eq "$(grep -cE '^[a-z0-9_]+ +https?://' "$O/cores/pins.txt")" ] || { echo "apply: cores.txt incompleto: un pin non e' passato" >&2; exit 1; }
+echo "    $npin core pinnati, elenco in rf35h-utils/cores.txt"
 cp -r "$O"/packages/wpa_supplicant "$RK/packages/"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/odroidgo2-utils-rf35h.patch"
 # lakka-update (da ssh) installerebbe l'immagine di Lakka per un RK3326

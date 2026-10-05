@@ -375,7 +375,13 @@ chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '
 # Scrive solo il job release (build.yml) e il job kernel di upstream.yml (che
 # spinge soltanto un ramo ci-test/kernel-*): le parti della build e i
 # controlli no.
-chk "CI: contents: write solo in release e kernel" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 2 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ]"
+chk "CI: contents: write solo in release, kernel e cores/publish" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 3 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/cores.yml') = 1 ]"
+# I core: pins.txt copre CORES_DEFAULT (ogni core dell'immagine ha il suo
+# commit), apply.sh li scrive e li porta nell'immagine, il sysroot si salva.
+chk "core: ogni core di CORES_DEFAULT ha un pin"  "( for c in \$(sed -n 's/^CORES_DEFAULT=\"\(.*\)\"$/\1/p' '$O/build-lakka-rf35h.sh'); do grep -qE \"^\${c} +https?://[^ ]+ +[0-9a-f]{40} \" '$O/cores/pins.txt' || exit 1; done )"
+chk "core: pin applicati nell'albero"            "( for c in \$(sed -n 's/^CORES_DEFAULT=\"\(.*\)\"$/\1/p' '$O/build-lakka-rf35h.sh'); do sha=\$(awk -v c=\"\${c}\" '\$1 == c { print \$3 }' '$O/cores/pins.txt'); grep -q \"^PKG_VERSION=\\\"\${sha}\\\"\" \"${W}/packages/lakka/libretro_cores/\${c}/package.mk\" || exit 1; done )"
+chk "core: elenco nell'immagine (cores.txt)"     "grep -q '^lakka=[0-9a-f]\{40\}$' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt' && [ \$(grep -c ' https' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt') -ge 34 ] && grep -q 'cores.txt' '$P/package.mk'"
+chk "core: sysroot salvato a fine build"         "grep -q 'pack-sysroot' '$O/.github/workflows/build-stage.yml' && grep -q 'sysroot-' '$O/.github/workflows/cores.yml'"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir

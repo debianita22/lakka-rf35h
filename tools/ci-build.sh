@@ -18,6 +18,15 @@
 #   ci-build.sh version         job setup: versione, release o prova, pre-release
 #   ci-build.sh publish D       job release: la release dai file in D, "latest"
 #                               solo se e' la versione piu' alta
+#   ci-build.sh pack-sysroot    a build finita: l'albero costruito senza sorgenti,
+#                               kernel e ccache (W/sysroot.tar.zst), per
+#                               compilare i soli core (cores.yml)
+#   ci-build.sh cores "a b"     compila i core dati sull'albero ripreso dal
+#                               sysroot; i file della release dei core in W/cores
+#   ci-build.sh publish-cores D job cores: i core di D nella release "cores"
+#                               (uno per asset) e il suo index.txt
+#   ci-build.sh pins-merge D NP job cores: i pin nuovi (NP) dei core riusciti
+#                               in cores/pins.txt, commit e push
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 162 core) ne chiede di
@@ -826,6 +835,169 @@ cmd_publish() {
 	note notice "Release" "${VERSION} pubblicata, ${cur}"
 }
 
+# --- i core da soli (cores.yml) ---------------------------------------------------
+# Un core nuovo si compila sull'albero di una release (toolchain e sistema
+# fatti), non da zero: lo stato della build finita, senza quello che si
+# riscarica o non serve. Fuori: sources (si riscaricano, solo per i core da
+# fare), target, log, .threads, image, le ccache (nella cache delle actions),
+# il sorgente del kernel (build/linux-*, tenuto da AUTOREMOVE solo per
+# verify-kernel). Restano toolchain, install_pkg e gli stamp: scripts/build di
+# un core trova le dipendenze fatte e compila solo lui.
+cmd_pack_sysroot() {
+	: "${W:?}"
+	cd "${W}"
+	say "Sysroot per le build dei core"
+	drop_interrupted
+	tar -C "${W}" \
+		--exclude="${TREE_NAME}/sources" \
+		--exclude="${TREE_NAME}/target" \
+		--exclude="${TREE_NAME}/build-rf35h-*" \
+		--exclude="${TREE_NAME}/build.*/.threads" \
+		--exclude="${TREE_NAME}/build.*/image" \
+		--exclude="${TREE_NAME}/build.*/.ccache" \
+		--exclude="${TREE_NAME}/build.*/.ccache-local" \
+		--exclude="${TREE_NAME}/build.*/build/linux-[0-9]*" \
+		-I 'zstd -T0 -3' -cf "${W}/sysroot.tar.zst" "${TREE_NAME}"
+	ls -la "${W}/sysroot.tar.zst"
+	summ "- sysroot per i core: $(du -h "${W}/sysroot.tar.zst" | cut -f1) (artifact, 90 giorni)"
+	note notice "Sysroot" "sysroot.tar.zst $(du -h "${W}/sysroot.tar.zst" | cut -f1): le build dei core (cores.yml) partono da qui"
+}
+
+# Il repository e il commit di un core in cores/pins.txt
+pin_of() { awk -v c="$1" '$1 == c && $2 ~ /^https?:/ { print $2, $3 }' "${O}/cores/pins.txt"; }
+
+# I core dati, con lo script di build in --build-packages (stesso overlay,
+# stesse verifiche, stessi flag della release). Ogni core riuscito finisce in
+# W/cores: <so>-<commit7>.so.gz, e una riga in built.txt (quelle di index.txt);
+# i falliti in failed.txt con la coda del loro log. Esce 0 anche con qualche
+# fallito (il job decide: pubblica i riusciti, apre un issue per gli altri),
+# diverso da 0 se nessuno e' riuscito.
+cmd_cores() {
+	local pkgs="${1:?core da compilare}" out="${W}/cores" rc=0 rep p so sha site size ck lakka c7 f
+	: "${W:?}" "${RF35H_CONTAINER:?}" "${RF35H_SYSROOT_VERSION:?}"
+	cd "${W}"
+	rm -rf "${out}"; mkdir -p "${out}"
+	: > "${out}/built.txt"; : > "${out}/failed.txt"
+	say "Core: ${pkgs}"
+	set +e
+	./lakka-rf35h/build-in-docker.sh --build-packages "${pkgs}" --jobs 4 2>&1 \
+		| grep --line-buffered -aE '^\[[0-9]+/[0-9]+\] \[(INIT|DONE|FAIL|ACTV|IDLE)|==>|\[!\]|\[x\]|FAILURE|ERROR|^  [a-z0-9_]+ (ok|fallito|assente|compilato)'
+	rc=${PIPESTATUS[0]}
+	set -e
+	docker rm -f "${RF35H_CONTAINER}" >/dev/null 2>&1 || true
+	rep="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-pacchetti.txt 2>/dev/null | head -1)"
+	[ -n "${rep}" ] || { note error "Core" "nessun resoconto: la build e' fallita prima dei pacchetti (uscita ${rc})"; die "nessun resoconto dei pacchetti"; }
+	lakka="$(git -C "${W}/${TREE_NAME}" rev-parse HEAD)"
+	for p in ${pkgs}; do
+		if ! grep -q "^${p} ok:" "${rep}"; then
+			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1)"
+			{
+				echo "== ${p}: $(grep "^${p} " "${rep}" || echo 'non compilato')"
+				[ -n "${f}" ] && grep -aE 'error|Error|FAILED|fatal:|Cannot get|undefined reference' "${f}" | grep -av 'Werror\|error\.o\|_error\.' | tail -8 | cut -c1-180
+			} >> "${out}/failed.txt"
+			continue
+		fi
+		read -r site sha <<< "$(pin_of "${p}")"
+		[ -n "${sha}" ] || { echo "== ${p}: non in cores/pins.txt" >> "${out}/failed.txt"; continue; }
+		c7="${sha:0:7}"
+		for so in "${W}/${TREE_NAME}/target/cores/${p}/"*_libretro.so; do
+			[ -f "${so}" ] || continue
+			elf_ok "${so}" || { echo "== ${p}: $(basename "${so}") non e' un ELF aarch64 intero" >> "${out}/failed.txt"; continue 2; }
+			f="${out}/$(basename "${so}" .so)-${c7}.so.gz"
+			gzip -9 -n -c "${so}" > "${f}"
+			size="$(stat -c%s "${f}")"
+			ck="$(sha256sum "${f}" | cut -d' ' -f1)"
+			echo "core=${p} so=$(basename "${so}" _libretro.so) commit=${sha} site=${site} file=$(basename "${f}") sha256=${ck} size=${size} lakka=${lakka} sysroot=${RF35H_SYSROOT_VERSION} date=$(date -u +%Y%m%d)" >> "${out}/built.txt"
+		done
+	done
+	echo; echo "riusciti:"; cut -d' ' -f1,2 "${out}/built.txt" | sed 's/^/  /'
+	echo "falliti:"; grep '^==' "${out}/failed.txt" | sed 's/^/  /' || true
+	summ "- core riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' ')"
+	[ ! -s "${out}/failed.txt" ] || summ "- core falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
+	note notice "Core" "riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' '); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
+	[ -s "${out}/built.txt" ] || { note error "Core" "nessun core compilato"; die "nessun core compilato"; }
+}
+
+# L'indice dei core: una riga per core (chiave=valore), quella piu' recente
+# vince. $1 l'indice che c'e' (puo' mancare), $2 built.txt: in uscita l'indice
+# nuovo.
+merge_index() {
+	local old="$1" new="$2"
+	{ [ -f "${old}" ] && grep '^core=' "${old}"; grep '^core=' "${new}"; } \
+		| awk '{ k = $1; line[k] = $0; if (!(k in seen)) { order[++n] = k; seen[k] = 1 } } END { for (i = 1; i <= n; i++) print line[order[i]] }'
+}
+
+# Job cores: i core di <d> (built.txt e i .so.gz) nella release "cores" del
+# repository, rolling: pre-release (mai "latest", le console la leggono per
+# nome), un asset per core e versione (<so>-<commit7>.so.gz), index.txt
+# riscritto. Degli asset di uno stesso core restano gli ultimi 2 (il
+# precedente serve a tornare indietro dalla console).
+cmd_publish_cores() {
+	local d="${1:?cartella con built.txt}" tag="cores" id assets name so keep k old="${RUNNER_TEMP:-/tmp}/index-old.txt"
+	: "${GITHUB_REPOSITORY:?}"
+	[ -s "${d}/built.txt" ] || die "manca ${d}/built.txt o e' vuoto"
+	id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id 2>/dev/null || true)"
+	if [ -z "${id}" ]; then
+		echo "  release ${tag} assente: la creo"
+		gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --prerelease \
+			--title "Core libretro (aggiornamenti singoli)" \
+			--notes "$(printf '%s\n' "Core libretro compilati per l'RF35H, uno per file, aggiornabili dalla console (Device Settings > Core Updates) o con rf35h-update cores." "Questa release si aggiorna da sola (cores.yml): index.txt elenca il core piu' recente di ciascuno." "Non e' un'immagine: non va scritta su una card ne' in /storage/.update.")"
+		id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id)"
+	fi
+	# l'indice di adesso, se c'e'
+	rm -f "${old}"
+	gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --pattern index.txt --output "${old}" 2>/dev/null || true
+	merge_index "${old}" "${d}/built.txt" > "${d}/index.txt"
+	# gli URL degli asset: fissi, dal nome
+	sed -i "/ url=/!s|^\(core=[^ ]* so=[^ ]* commit=[^ ]* site=[^ ]* file=\([^ ]*\)\)|\1 url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/\2|" "${d}/index.txt"
+	cd "${d}"
+	gh release upload "${tag}" --repo "${GITHUB_REPOSITORY}" --clobber ./*.so.gz index.txt
+	# asset vecchi: per ogni core restano i 2 piu' recenti
+	assets="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases/${id}/assets?per_page=100" --jq '.[] | "\(.id) \(.name) \(.created_at)"')"
+	for so in $(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^so=/) print substr($i, 4) }' index.txt | sort -u); do
+		keep=0
+		while read -r k name _; do
+			[ -n "${k}" ] || continue
+			keep=$((keep + 1))
+			[ "${keep}" -le 2 ] || { echo "  tolgo ${name}"; gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${k}" > /dev/null; }
+		done <<< "$(grep " ${so}_libretro-[0-9a-f]*\.so\.gz " <<< "${assets}" | sort -k3 -r)"
+	done
+	echo "  pubblicati: $(cut -d' ' -f1 built.txt | sed 's/core=//' | tr '\n' ' ')"
+	summ "### Core pubblicati: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag} ($(cut -d' ' -f1 built.txt | sed 's/core=//' | tr '\n' ' '))"
+	note notice "Core" "pubblicati nella release ${tag}: $(cut -d' ' -f1 built.txt | sed 's/core=//' | tr '\n' ' ')"
+}
+
+# Job cores, dopo publish-cores: in cores/pins.txt entrano i pin nuovi
+# (<newpins>, da cores-bump.sh) dei soli core riusciti (built.txt in <d>); gli
+# altri restano al commit vecchio. Poi il commit sul ramo, se e' cambiato
+# qualcosa: un push del GITHUB_TOKEN non avvia altri workflow.
+cmd_pins_merge() {
+	local d="${1:?cartella con built.txt}" np="${2:?pins nuovi}" c line n=0
+	[ -f "${np}" ] || die "manca ${np}"
+	for c in $(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u); do
+		line="$(awk -v c="${c}" '$1 == c && $2 ~ /^https?:/' "${np}")"
+		[ -n "${line}" ] || { echo "  ${c}: non nei pin nuovi, resta"; continue; }
+		if grep -qxF "${line}" "${O}/cores/pins.txt"; then continue; fi
+		awk -v c="${c}" -v l="${line}" '$1 == c && $2 ~ /^https?:/ { print l; next } { print }' "${O}/cores/pins.txt" > "${O}/cores/pins.txt.new"
+		mv "${O}/cores/pins.txt.new" "${O}/cores/pins.txt"
+		n=$((n + 1))
+		echo "  ${c}: $(awk '{ print substr($3, 1, 7) }' <<< "${line}")"
+	done
+	if [ "${n}" -eq 0 ]; then
+		echo "  nessun pin da cambiare"
+		out "changed=false"
+		return 0
+	fi
+	out "changed=true"
+	git -C "${O}" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+		commit -q -m "cores: ${n} core all'upstream" \
+		-m "$(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u | tr '\n' ' ')" \
+		-m "Compilati e pubblicati nella release cores da cores.yml (run ${GITHUB_RUN_ID:-?})." -- cores/pins.txt
+	git -C "${O}" push -q origin "HEAD:${DEFAULT_BRANCH:?}"
+	echo "  ${n} pin aggiornati e pushati su ${DEFAULT_BRANCH}"
+	note notice "Pin" "${n} core aggiornati in cores/pins.txt: la prossima immagine li avra'"
+}
+
 case "${1:-}" in
 	disk)         cmd_disk ;;
 	prepare)      cmd_prepare ;;
@@ -839,5 +1011,9 @@ case "${1:-}" in
 	publish)      cmd_publish "${2:-}" ;;
 	logs)         cmd_logs "${2:-}" ;;
 	ccache-stats) cmd_ccache_stats ;;
+	pack-sysroot) cmd_pack_sysroot ;;
+	cores)        cmd_cores "${2:-}" ;;
+	publish-cores) cmd_publish_cores "${2:-}" ;;
+	pins-merge)   cmd_pins_merge "${2:-}" "${3:-}" ;;
 	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac
