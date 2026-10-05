@@ -5558,3 +5558,33 @@ da qui:
 Da provare sulla console: standby e risveglio, piu' volte. Se va, la si
 promuove senza ricostruirla:
 `gh release edit v1.2.0 --repo debianita22/lakka-rf35h --prerelease=false --latest`.
+
+### Standby: non sono i clock, e' il pannello (5/10/2026, sera)
+
+`rf35h-resume-diag.sh` sulla v1.2.0, prima e dopo lo standby: i cinque PLL
+identici (APLL 1296, DPLL 664, CPLL 1584, NPLL 1188, GPLL 1200 MHz, tutti
+normal e agganciati), CPU a 1296 MHz in entrambi i casi (governor
+performance), GPU 200 MHz, regolatori e PMIC uguali, CPU occupata 12% prima e
+dopo. Cambiano solo registri del PMU riscritti dal firmware (contatori del
+deep sleep), un gruppo di gate in CLKGATE_CON6 (clock accesi in piu') e il
+dominio mmc_nand rimasto acceso. Il modo DRM e' 640x480 @60 con dclk 31,08
+MHz anche dopo, nessun errore DRM/DSI nel dmesg. r-034/z-034 non servivano a
+questo (restano: innocue e corrette), la pista dei clock e' chiusa.
+
+Poi: `systemctl restart retroarch` una volta ha rimesso tutto a posto, la
+volta dopo no, e con lo schermo *spostato*; il riavvio di sway nemmeno; solo
+il reboot. Un'immagine spostata che sopravvive al restart di compositor e
+RetroArch e' il pannello: il suo stato dopo un init incompleto.
+
+Cosa fa il risveglio e l'avvio no: `generic_panel_unprepare` spegne vdd e
+iovcc, che sono lo stesso regolatore fisso `vcc18_lcd0` (GPIO0_B5), con anche
+`regulator-off-in-suspend`; `prepare` lo riaccende, 20 ms, reset 20 ms, 20 ms
+e manda l'init. All'avvio il pannello e' acceso da sempre (loader) e il
+regolatore non viene mai spento: reset + init su un pannello caldo. Al
+risveglio il pannello e' appena stato alimentato e 20 ms prima dei comandi
+non gli bastano: init a meta', da cui sfarfallio, fotogrammi persi (RetroArch
+col vsync sembra lento) o immagine spostata. Prova (ramo `ci-test/standby`):
+`vcc18_lcd0` `regulator-always-on` (resta alimentato anche in standby, in
+sleep-in: pochi mA) e `delays=20,20,120,120,20` (120 ms fra il reset e
+l'init). Il DTS compila (cpp + dtc sul 7.2.9 con la 0012). Se funziona, poi
+si puo' provare a togliere l'always-on tenendo i 120 ms.

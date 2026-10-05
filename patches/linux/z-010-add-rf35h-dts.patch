@@ -404,10 +404,10 @@ quelle dopo. DTB verificato identico al risultato della catena.
 +		pinctrl-0 = <&vcc18_lcd_n>;
 +		pinctrl-names = "default";
 +		regulator-boot-on;
-+
-+		regulator-state-mem {
-+			regulator-off-in-suspend;
-+		};
++		/* devaOS RF35H: sempre acceso, anche in standby. Spento e riacceso al
++		 * risveglio il pannello usciva sfarfallante, lento o spostato (fino alla
++		 * v1.2.0): cosi' al risveglio riceve solo reset e init, come all'avvio. */
++		regulator-always-on;
 +	};
 +
 +	vcc_host: vcc_host {
@@ -516,7 +516,7 @@ quelle dopo. DTB verificato identico al risultato della catena.
 +		pinctrl-names = "default";
 +		pinctrl-0 = <&lcd_rst>;
 +		panel_description =
-+		"G size=52,70 delays=20,20,20,120,20 format=rgb888 lanes=4 flags=0xe03",
++		"G size=52,70 delays=20,20,120,120,20 format=rgb888 lanes=4 flags=0xe03",
 +
 +		"M clock=30000 horizontal=640,150,50,150 vertical=480,20,6,12",
 +		"M clock=30000 horizontal=640,150,61,150 vertical=480,20,88,12",
