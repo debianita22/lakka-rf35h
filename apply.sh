@@ -244,6 +244,9 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/samba-share
 # avuto l'LTO. Se un core con LTO si comporta male: RF35H_CORE_LTO=no, oppure
 # PKG_BUILD_FLAGS="+lto-off" nel suo package.mk.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/mesa-lto-rf35h.patch"
+# SameBoy: il target "libretro" del suo Makefile butta via i CFLAGS di
+# LibreELEC (niente -O2 nostro, -mtune, LTO): si costruisce libretro/ diretto
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/sameboy-cflags-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/sdl-host-flags-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/applewin-xxd-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/uae4arm-numbers-rf35h.patch"

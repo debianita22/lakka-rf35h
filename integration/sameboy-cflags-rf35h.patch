@@ -1,0 +1,22 @@
+devaOS RF35H: SameBoy con i CFLAGS di LibreELEC. Il target "libretro" del Makefile passa CFLAGS="$(WARNINGS)" al sotto-make e perde -O2, -mtune=cortex-a35 e l'LTO: nella v1.1.0 e' l'unico core del set LTO uscito identico alla v1.0.0. Si costruisce libretro/ direttamente, con BOOTROMS_DIR e BIN come li passa quel target (provato sull'host: i CFLAGS arrivano, 25 export retro_*).
+
+--- a/packages/lakka/libretro_cores/sameboy/package.mk
++++ b/packages/lakka/libretro_cores/sameboy/package.mk
+@@ -8,11 +8,15 @@
+ PKG_LONGDESC="Gameboy and Gameboy Color emulator written in C"
+ PKG_TOOLCHAIN="make"
+ 
+-PKG_MAKE_OPTS_TARGET="libretro"
++# devaOS RF35H: il target "libretro" del Makefile in cima chiama il sotto-make
++# con CFLAGS="$(WARNINGS)", e butta via i CFLAGS di LibreELEC (-O2,
++# -mtune=cortex-a35, l'LTO di +lto): il core usciva compilato con il solo -O2
++# del suo Makefile. Si costruisce direttamente libretro/, con BOOTROMS_DIR e
++# BIN come li passa quel target: cosi' i CFLAGS dell'ambiente arrivano.
+ PKG_BUILD_FLAGS="-parallel"
+ 
+ pre_make_target() {
+-  export BOOTROMS_DIR="${PKG_BUILD}/BootROMs/prebuilt"
++  PKG_MAKE_OPTS_TARGET="-C libretro platform=unix BOOTROMS_DIR=${PKG_BUILD}/BootROMs/prebuilt BIN=${PKG_BUILD}/build/bin"
+ }
+ 
+ makeinstall_target() {

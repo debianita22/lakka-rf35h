@@ -261,6 +261,8 @@ chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*
 chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
 chk "RetroArch con LTO (+lto)"                 "[ \"\$(grep -c '^PKG_BUILD_FLAGS=' '${W}/packages/lakka/retroarch_base/retroarch/package.mk')\" = 1 ] && grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/lakka/retroarch_base/retroarch/package.mk'"
 chk "pila snella: 10 patch per RK3326"         "[ \$(ls '$RKP'/*.patch | wc -l) -eq 10 ]"
+# SameBoy: make -C libretro diretto, cosi' i CFLAGS di LibreELEC (e l'LTO) arrivano
+chk "SameBoy con i CFLAGS di LibreELEC"         "grep -q 'PKG_MAKE_OPTS_TARGET=\"-C libretro platform=unix BOOTROMS_DIR=' '${W}/packages/lakka/libretro_cores/sameboy/package.mk' && ! grep -q '^PKG_MAKE_OPTS_TARGET=\"libretro\"' '${W}/packages/lakka/libretro_cores/sameboy/package.mk'"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
 chk "z-001 e 0002-input-polldev fuori"         "[ ! -e '$RKP/z-001-st7703-xifan-xf35h-panel.patch' ] && [ ! -e '$RKP/0002-add-input-polldev.patch' ]"

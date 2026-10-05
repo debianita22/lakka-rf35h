@@ -189,7 +189,7 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              39 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              40 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sorgenti da mirrors.kernel.org e
                               tarballs.nixos.org, linker di cargo,
@@ -6151,3 +6151,17 @@ Nota del 5/10, 14:45: l'utente riferisce che anche la v1.2.0 ha flicker e
 lentezza al risveglio: r-034/z-034 non bastano. `rf35h-resume-diag.sh` ora
 legge anche PMU, GRF, PMUGRF, i registri del rk817 e i regolatori; si
 aspettano i dump prima/dopo dalla console.
+
+### SameBoy con i CFLAGS di LibreELEC (5/10/2026)
+
+Il target `libretro` del Makefile di SameBoy chiama `make -C libretro` con
+`CFLAGS="$(WARNINGS)"`: l'LTO e `-mtune=cortex-a35` di LibreELEC non
+arrivavano (nella v1.1.0 e' l'unico core del set LTO uscito identico alla
+v1.0.0). `integration/sameboy-cflags-rf35h.patch`: `pre_make_target` imposta
+`PKG_MAKE_OPTS_TARGET="-C libretro platform=unix BOOTROMS_DIR=... BIN=..."`
+(gli stessi valori che quel target passava; pre_make gira nella stessa shell
+di `make ${PKG_MAKE_OPTS_TARGET}`, scripts/build 384 e 411), e `libretro/Makefile`
+fa `CFLAGS := -Wall $(CFLAGS)` dall'ambiente. Provato sull'host al commit
+pinnato: il core si costruisce in `build/bin/`, 25 export `retro_*`, i CFLAGS
+dell'ambiente arrivano. Nella prossima build il `.so` deve cambiare di
+dimensione rispetto alla v1.2.0.
