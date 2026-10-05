@@ -140,10 +140,12 @@ Prima build: alcune ore, ~100 GB di disco.
 
 ## Cosa contiene
 
-    patches/linux/            7 patch kernel, tutte a fuzz 0 sulla 7.2.9:
+    patches/linux/            8 patch kernel, tutte a fuzz 0 sulla 7.2.9:
                               r-024/r-025 (rk915 SDIO, MIPI), r-034 (CRU
                               rimesso al risveglio: di ROCKNIX), z-034 (GPLL
-                              al risveglio), z-002 (pannello), z-010 (i due
+                              al risveglio), z-002 (pannello, init dopo
+                              l'accensione del DSI), z-036 (accensione del
+                              DSI nel log), z-010 (i due
                               device tree xf35h/rf35h, GPU fino a 600 MHz),
                               0000 (batteria rinominata: di Lakka,
                               rigenerata). Nessuna al codec.
