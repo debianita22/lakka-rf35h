@@ -5,9 +5,11 @@
 # dropped into drivers/gpu/drm/panel/ and obj-y in its Makefile (built-in).
 devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimossa in 7.2: devm_drm_panel_alloc().
 
+devaOS RF35H (5/10/2026): prepare_prev_first (il DSI si accende prima dell'init del pannello; panel_generic_dsi.prev_first=0 per il comportamento vecchio), unprepare senza uscite anticipate come ROCKNIX 052e117, una riga nel log a ogni accensione e spegnimento.
+
 --- /dev/null
 +++ b/drivers/gpu/drm/panel/panel-generic-dsi.c
-@@ -0,0 +1,769 @@
+@@ -0,0 +1,786 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Generic MIPI-DSI panel driver
@@ -47,6 +49,19 @@ devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimoss
 +static char *descfile = "";
 +module_param(descfile,charp,0660);
 +MODULE_PARM_DESC(descfile, "Panel description filename in firmware dir");
++
++/* devaOS RF35H: il pannello manda l'init in prepare(), cioe' comandi DSI.
++ * Nella catena dei ponti i pre_enable vanno dall'ultimo (il pannello) al
++ * primo (il DSI), e dw-mipi-dsi accende il controller nel suo pre_enable:
++ * senza prepare_prev_first l'init partiva con il DSI ancora spento e i
++ * comandi andavano persi senza errori. All'avvio non si vedeva; al
++ * risveglio, con il pannello appena rialimentato, si' (sfarfallio, immagine
++ * spostata). Con prepare_prev_first il DSI si accende prima di prepare() e
++ * si spegne dopo unprepare(). panel_generic_dsi.prev_first=0 sulla riga di
++ * comando del kernel rimette il comportamento vecchio, per confronto. */
++static bool prev_first = true;
++module_param(prev_first, bool, 0444);
++MODULE_PARM_DESC(prev_first, "Power up the DSI host before panel prepare (default: on)");
 +
 +struct generic_panel_delays {
 +    int prepare;
@@ -422,11 +437,13 @@ devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimoss
 +    if (ret < 0)
 +        dev_err(ctx->dev, "failed to set display off: %d\n", ret);
 +
++    /* devaOS RF35H (come ROCKNIX 052e117): i due comandi DCS sono "best
++     * effort". Prima un errore qui usciva senza spegnere e lasciava prepared
++     * a true: il prepare() successivo non faceva niente e il pannello restava
++     * com'era fino al riavvio. */
 +    ret = mipi_dsi_dcs_enter_sleep_mode(dsi);
-+    if (ret < 0) {
++    if (ret < 0)
 +        dev_err(ctx->dev, "failed to enter sleep mode: %d\n", ret);
-+        return ret;
-+    }
 +
 +    if (ctx->enable_gpio) { gpiod_set_value_cansleep(ctx->enable_gpio, 0); }
 +    gpiod_set_value_cansleep(ctx->reset_gpio, 1);
@@ -434,9 +451,8 @@ devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimoss
 +    regulator_disable(ctx->iovcc);
 +    regulator_disable(ctx->vdd);
 +
-+    gpiod_set_value_cansleep(ctx->reset_gpio, 1);
-+
 +    ctx->prepared = false;
++    dev_info(ctx->dev, "rf35h: panel off (unprepare)\n");
 +
 +    return 0;
 +}
@@ -495,6 +511,7 @@ devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimoss
 +    //msleep(ctx->delays.ready);
 +
 +    ctx->prepared = true;
++    dev_info(ctx->dev, "rf35h: panel on, init sequence sent (prepare)\n");
 +
 +    return 0;
 +
@@ -637,6 +654,8 @@ devaOS RF35H: rigenerata sulla 7.2.7 (applica a fuzz 0). drm_panel_init() rimoss
 +                               &generic_panel_funcs, DRM_MODE_CONNECTOR_DSI);
 +    if (IS_ERR(ctx))
 +        return PTR_ERR(ctx);
++
++    ctx->panel.prepare_prev_first = prev_first;
 +
 +    ctx->enable_gpio = devm_gpiod_get_optional(dev, "enable", GPIOD_OUT_LOW);
 +    if (IS_ERR(ctx->enable_gpio)) {

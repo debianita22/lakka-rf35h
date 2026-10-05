@@ -88,6 +88,8 @@ check "^int pm_async_enabled = 0;" "${K}/kernel/power/main.c"        "9901 suspe
 check "dmc: dmc"           "${K}/arch/arm64/boot/dts/rockchip/px30.dtsi" "0012 etichetta dmc"
 check "abs(rel_y) < 2 && abs(rel_x) < 2" "${K}/drivers/media/rc/imon.c"       "0062 imon, diagonali ignorate"
 check "rocknix,generic-dsi" "${K}/drivers/gpu/drm/panel/panel-generic-dsi.c"     "z-002 panel-generic-dsi"
+check "ctx->panel.prepare_prev_first = prev_first" "${K}/drivers/gpu/drm/panel/panel-generic-dsi.c" "z-002 DSI acceso prima dell'init del pannello"
+check "sent with the host powered down" "${K}/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c" "z-036 avviso comandi a DSI spento"
 # Standby: senza, al risveglio i PLL possono restare in slow mode (flicker e
 # console lenta, dalla v1.0.0). r-034 di ROCKNIX per il CRU, z-034 per il GPLL.
 check "register_syscore(&px30_clk_syscore)" "${K}/drivers/clk/rockchip/clk-px30.c" "r-034 CRU ripristinato al risveglio"

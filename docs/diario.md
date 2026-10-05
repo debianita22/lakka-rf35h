@@ -5558,3 +5558,46 @@ da qui:
 Da provare sulla console: standby e risveglio, piu' volte. Se va, la si
 promuove senza ricostruirla:
 `gh release edit v1.2.0 --repo debianita22/lakka-rf35h --prerelease=false --latest`.
+
+### Standby: l'init del pannello partiva con il DSI spento (5/10/2026, sera)
+
+Lettura del codice della 7.2.9, non piu' ipotesi sui tempi. Il driver del
+pannello (z-002) manda tutta la sequenza di init in `prepare()`. `prepare()`
+lo chiama il pre_enable del ponte del pannello, e
+`drm_atomic_bridge_chain_pre_enable` scorre la catena **dall'ultimo al primo**:
+il pannello prima del DSI, a meno che il pannello non chieda
+`prepare_prev_first`. `dw-mipi-dsi` accende il controller (`dw_mipi_dsi_mode_set`,
+`DSI_PWR_UP`, PHY) proprio nel suo pre_enable. Quindi l'init viene scritto in
+un controller in reset: `dw_mipi_dsi_write` aspetta le FIFO vuote, le trova
+vuote, ritorna 0. Nessun errore nel dmesg, che e' quello che si vedeva. Allo
+spegnimento lo stesso al contrario: il DSI si spegne nel suo post_disable
+prima di `unprepare()`, che manda display-off e sleep-in a un controller gia'
+spento. I pannelli mainline che fanno l'init in prepare con un host DSI che si
+accende in pre_enable mettono `prepare_prev_first` (st7701); st7703 manda
+l'init in `enable()`, quando il DSI e' gia' acceso.
+
+Altri progetti (ricerca su ROCKNIX, AURKNIX, arkos4clone, dArkOS, ArkOS,
+Batocera, Lakka): nessuna segnalazione identica, quasi tutti sono ancora sul
+kernel BSP 4.4 o non supportano lo standby. ROCKNIX `052e117` (GKD Pixel2,
+mainline) ha corretto nello stesso driver `unprepare()`: un errore DCS usciva
+prima di spegnere e lasciava `prepared` a vero, "schermo bloccato o corrotto
+fino al riavvio". La nostra z-002 aveva ancora quella versione. AURKNIX ha lo
+stesso driver senza la correzione.
+
+Ramo `ci-test/panel` (da main, senza le prove di `ci-test/standby`):
+- z-002: `ctx->panel.prepare_prev_first = prev_first` (parametro
+  `panel_generic_dsi.prev_first`, predefinito 1; `=0` sulla riga di comando
+  rimette l'ordine vecchio per confronto); `unprepare()` come ROCKNIX, senza
+  uscite anticipate e senza il secondo reset ripetuto; una riga nel log a ogni
+  accensione e spegnimento del pannello.
+- z-036 nuova: una riga quando il DSI si accende e si spegne, e un avviso
+  quando un comando DSI parte con `DSI_PWR_UP` in reset ("sent with the host
+  powered down: lost").
+- `tools/rf35h-panel-diag.sh`: `soc` (PX30 o PX30S dal DDR_GRF), `schermo`
+  (spegne e riaccende lo schermo da sway, stesso percorso del risveglio senza
+  standby), `standby`; raccoglie quelle righe e dice in che ordine sono andate.
+
+Compilato su 7.2.9 (arm64, W=1, -Werror) con r-025: le patch applicano a fuzz
+0 e danno l'albero provato. Non verificato sulla console. Se lo schermo dopo
+lo standby e' pulito ma la console resta lenta, la lentezza ha un'altra causa
+e va cercata a parte.

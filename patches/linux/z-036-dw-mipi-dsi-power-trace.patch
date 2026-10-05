@@ -1,0 +1,38 @@
+devaOS RF35H (5/10/2026): diagnostica dell'ordine di accensione del DSI rispetto al pannello.
+Una riga nel log quando il controller si accende (pre_enable) e si spegne
+(post_disable), e un avviso se un comando DSI parte con il controller spento:
+finirebbe perso senza errori. Serve a confermare sul device la causa dello
+standby (pannello inizializzato prima del DSI); poche righe per modeset.
+
+--- a/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c
++++ b/drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.c
+@@ -515,6 +515,13 @@ static ssize_t dw_mipi_dsi_host_transfer(struct mipi_dsi_host *host,
+ 		return ret;
+ 	}
+ 
++	/* devaOS RF35H: un comando con il controller spento (DSI_PWR_UP in
++	 * reset) finisce nella FIFO e non parte, senza errori. Lo si dice. */
++	if (!(dsi_read(dsi, DSI_PWR_UP) & POWERUP))
++		dev_warn_ratelimited(dsi->dev,
++				     "rf35h: DSI command 0x%02x sent with the host powered down: lost\n",
++				     msg->tx_len ? ((const u8 *)msg->tx_buf)[0] : 0);
++
+ 	dw_mipi_message_config(dsi, msg);
+ 	if (dsi->slave)
+ 		dw_mipi_message_config(dsi->slave, msg);
+@@ -964,6 +971,7 @@ static void dw_mipi_dsi_bridge_post_atomic_disable(struct drm_bridge *bridge,
+ 
+ 	clk_disable_unprepare(dsi->pclk);
+ 	pm_runtime_put(dsi->dev);
++	dev_info(dsi->dev, "rf35h: DSI host off (post_disable)\n");
+ }
+ 
+ static unsigned int dw_mipi_dsi_get_lanes(struct dw_mipi_dsi *dsi)
+@@ -1031,6 +1039,7 @@ static void dw_mipi_dsi_bridge_atomic_pre_enable(struct drm_bridge *bridge,
+ 	struct dw_mipi_dsi *dsi = bridge_to_dsi(bridge);
+ 
+ 	/* Power up the dsi ctl into a command mode */
++	dev_info(dsi->dev, "rf35h: DSI host on (pre_enable)\n");
+ 	dw_mipi_dsi_mode_set(dsi, &dsi->mode);
+ 	if (dsi->slave)
+ 		dw_mipi_dsi_mode_set(dsi->slave, &dsi->mode);
