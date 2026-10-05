@@ -1,0 +1,63 @@
+devaOS RF35H: il GPLL (PMU CRU) come r-034 fa per il CRU. PX30_PMU_MODE salvato prima della sospensione e rimesso al risveglio, solo il campo del GPLL e solo se il PLL e' acceso e agganciato (PLL_CON1: LOCK_STATUS bit 10, PWRDOWN bit 13, come in clk-pll.c). Si applica dopo r-034 (ne usa le funzioni); a fuzz 0 sulla 7.2.9.
+
+--- a/drivers/clk/rockchip/clk-px30.c
++++ b/drivers/clk/rockchip/clk-px30.c
+@@ -1002,6 +1002,21 @@
+ static void __iomem *px30_cru_base;
+ 
+ /*
++ * devaOS RF35H: GPLL lives in the PMU CRU, whose mode register
++ * PX30_PMU_MODE the list below does not cover. Same treatment: saved before
++ * suspend, put back after resume - but only if GPLL is then powered and
++ * locked, since normal mode on a PLL that is off would stop every clock
++ * derived from it. Bits as RK3036_PLLCON1_LOCK_STATUS and
++ * RK3036_PLLCON1_PWRDOWN in clk-pll.c (pll_rk3328 is an rk3036-type PLL).
++ */
++#define PX30_PLLCON1_LOCK_STATUS	BIT(10)
++#define PX30_PLLCON1_PWRDOWN		BIT(13)
++#define PX30_PMU_MODE_GPLL_MASK		0x3
++
++static void __iomem *px30_pmucru_base;
++static u32 px30_saved_pmu_mode;
++
++/*
+  * PX30_MODE_CON (PLL slow/normal mode select) and PX30_CLKSEL_CON(0)
+  * (the armclk/CPU-core divider) are reset across suspend/resume on
+  * this SoC, the same way rk3288's equivalent CRU registers are reset
+@@ -1025,6 +1040,9 @@
+ 		px30_saved_cru_regs[i] = readl_relaxed(px30_cru_base + reg_id);
+ 	}
+ 
++	if (px30_pmucru_base)
++		px30_saved_pmu_mode = readl_relaxed(px30_pmucru_base + PX30_PMU_MODE);
++
+ 	return 0;
+ }
+ 
+@@ -1032,6 +1050,18 @@
+ {
+ 	int i, reg_id;
+ 
++	if (px30_pmucru_base) {
++		u32 con1 = readl_relaxed(px30_pmucru_base + PX30_PMU_PLL_CON(1));
++
++		if ((con1 & PX30_PLLCON1_LOCK_STATUS) && !(con1 & PX30_PLLCON1_PWRDOWN))
++			writel_relaxed((PX30_PMU_MODE_GPLL_MASK << 16) |
++				       (px30_saved_pmu_mode & PX30_PMU_MODE_GPLL_MASK),
++				       px30_pmucru_base + PX30_PMU_MODE);
++		else
++			pr_warn("%s: GPLL not powered or not locked, mode not restored\n",
++				__func__);
++	}
++
+ 	for (i = ARRAY_SIZE(px30_saved_cru_reg_ids) - 1; i >= 0; i--) {
+ 		reg_id = px30_saved_cru_reg_ids[i];
+ 		writel_relaxed(px30_saved_cru_regs[i] | 0xffff0000,
+@@ -1114,6 +1144,7 @@
+ 		pr_err("%s: rockchip pmu clk init failed\n", __func__);
+ 		return;
+ 	}
++	px30_pmucru_base = reg_base;
+ 
+ 	rockchip_clk_register_plls(ctx, px30_pmu_pll_clks,
+ 				   ARRAY_SIZE(px30_pmu_pll_clks), PX30_GRF_SOC_STATUS0);

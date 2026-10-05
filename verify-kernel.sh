@@ -88,6 +88,10 @@ check "^int pm_async_enabled = 0;" "${K}/kernel/power/main.c"        "9901 suspe
 check "dmc: dmc"           "${K}/arch/arm64/boot/dts/rockchip/px30.dtsi" "0012 etichetta dmc"
 check "abs(rel_y) < 2 && abs(rel_x) < 2" "${K}/drivers/media/rc/imon.c"       "0062 imon, diagonali ignorate"
 check "rocknix,generic-dsi" "${K}/drivers/gpu/drm/panel/panel-generic-dsi.c"     "z-002 panel-generic-dsi"
+# Standby: senza, al risveglio i PLL possono restare in slow mode (flicker e
+# console lenta, dalla v1.0.0). r-034 di ROCKNIX per il CRU, z-034 per il GPLL.
+check "register_syscore(&px30_clk_syscore)" "${K}/drivers/clk/rockchip/clk-px30.c" "r-034 CRU ripristinato al risveglio"
+check "px30_pmucru_base = reg_base"         "${K}/drivers/clk/rockchip/clk-px30.c" "z-034 GPLL ripristinato al risveglio"
 check "rk3326-xifan-rf35h"  "${D}/Makefile"                          "z-010 DTS nel Makefile"
 check "opp-600000000"       "${D}/rk3326-xifan-rf35h.dts"            "z-010 scala OPP piena"
 check "role-switch-default" "${D}/rk3326-xifan-rf35h.dts"            "z-010 USB OTG host"

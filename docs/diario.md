@@ -140,10 +140,12 @@ Prima build: alcune ore, ~100 GB di disco.
 
 ## Cosa contiene
 
-    patches/linux/            5 patch kernel, tutte a fuzz 0 sulla 7.2.7:
-                              r-024/r-025 (rk915 SDIO, MIPI), z-002 (pannello),
-                              z-010 (i due device tree xf35h/rf35h, GPU fino a
-                              600 MHz), 0000 (batteria rinominata: di Lakka,
+    patches/linux/            7 patch kernel, tutte a fuzz 0 sulla 7.2.9:
+                              r-024/r-025 (rk915 SDIO, MIPI), r-034 (CRU
+                              rimesso al risveglio: di ROCKNIX), z-034 (GPLL
+                              al risveglio), z-002 (pannello), z-010 (i due
+                              device tree xf35h/rf35h, GPU fino a 600 MHz),
+                              0000 (batteria rinominata: di Lakka,
                               rigenerata). Nessuna al codec.
     patches/linux-default/    9901 di Lakka (suspend asincrono), rigenerata
     packages/rk915/           driver Wi-Fi SDIO + firmware, patch per 7.0 e 7.2
@@ -5503,3 +5505,35 @@ dmesg; `ripristina` rimette nel modo di prima solo CPLL, NPLL e GPLL, e solo
 se accesi e agganciati (APLL dipende dalla tensione della CPU, DPLL e' la
 DDR del firmware). Provato sotto busybox con un devmem finto (registri e
 maschera hiword).
+
+### La correzione: r-034 di ROCKNIX e z-034 (5/10/2026)
+
+L'utente conferma: anche la v1.0.0 aveva flicker e lentezza dopo lo standby
+(non e' una regressione della v1.1.0), e chiede la v1.2.0 con la correzione
+di ROCKNIX.
+
+- `r-034-px30-cru-suspend-resume-restore.patch`: la `034` di ROCKNIX
+  invariata (commit 633ec4f del 4/10, sha256 nel file). Registra in
+  `clk-px30.c` un syscore che prima della sospensione salva MODE_CON (modo di
+  APLL, DPLL, CPLL, NPLL) e CLKSEL_CON(0) (divisore della CPU) e al risveglio
+  li riscrive (maschera hiword 0xffff0000), come `clk-rk3288.c` upstream. Il
+  driver e' lo stesso per PX30 e PX30S. Le API sono quelle della 7.2
+  (`struct syscore`, `register_syscore`, callback con `void *data`).
+- `z-034-px30-pmucru-gpll-resume.patch`, nostra: il GPLL sta nel PMU CRU, il
+  cui registro di modo (PX30_PMU_MODE, 0xff2bc020) r-034 non tocca. Salvato e
+  rimesso allo stesso modo, ma solo il suo campo e solo se al risveglio il PLL
+  e' acceso e agganciato (PLL_CON1: LOCK_STATUS bit 10, PWRDOWN bit 13, i bit
+  di `clk-pll.c`): il modo normal su un PLL spento fermerebbe tutto quello che
+  ne deriva. Altrimenti `pr_warn` e modo lasciato com'e'.
+
+Verifiche: le due patch applicano a fuzz 0, in ordine, sulla 7.2.9 (gregkh,
+tag v7.2.9); `clk-px30.o` compilato per arm64 (gcc 13.3, defconfig con
+CLK_PX30, PM_SLEEP) con `-Werror`, senza avvisi anche con `W=1`;
+nel disassemblato il resume legge GPLL_CON1, confronta i bit 10 e 13 (0x2400
+contro 0x400), scrive `(modo & 3) | 0x30000` in PMU_MODE, poi CLKSEL_CON(0) e
+MODE_CON con `| 0xffff0000`. verify-kernel controlla le due patch nel
+sorgente della build, verify-claims nell'albero (220 verifiche).
+
+Da provare sul device: standby e risveglio con la v1.2.0 (pre-release). Se
+flicker o lentezza restano, `tools/rf35h-resume-diag.sh` dice quali registri
+cambiano ancora.

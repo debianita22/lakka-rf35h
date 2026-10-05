@@ -259,11 +259,15 @@ if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 fi
 chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${W}/packages/graphics/mesa' '${O}/packages'"
 chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
-chk "pila snella: 6 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 6 ]"
+chk "pila snella: 8 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 8 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
 chk "z-001 e 0002-input-polldev fuori"         "[ ! -e '$RKP/z-001-st7703-xifan-xf35h-panel.patch' ] && [ ! -e '$RKP/0002-add-input-polldev.patch' ]"
 chk "r-024 portata (dw_mmc senza slot)"        "grep -q 'host->mmc->caps2 & MMC_CAP2_WIFI_RK912' '$RKP/r-024-mainline-linux-hacks-for-rk915.patch'"
+# Standby (flicker e lentezza al risveglio): r-034 di ROCKNIX invariata (CRU:
+# MODE_CON e CLKSEL_CON(0)), z-034 nostra (GPLL, solo se acceso e agganciato).
+chk "r-034: CRU salvato e rimesso (ROCKNIX)"   "grep -q 'register_syscore(&px30_clk_syscore)' '$RKP/r-034-px30-cru-suspend-resume-restore.patch' && grep -q 'sha256 3d867b7df6cf' '$RKP/r-034-px30-cru-suspend-resume-restore.patch'"
+chk "z-034: GPLL rimesso solo se agganciato"   "grep -q '^+	px30_pmucru_base = reg_base;' '$RKP/z-034-px30-pmucru-gpll-resume.patch' && grep -q 'PX30_PLLCON1_LOCK_STATUS) && !(con1 & PX30_PLLCON1_PWRDOWN' '$RKP/z-034-px30-pmucru-gpll-resume.patch'"
 chk "z-002 portata (devm_drm_panel_alloc)"     "grep -q 'devm_drm_panel_alloc' '$RKP/z-002-panel-generic-dsi.patch' && ! grep -q '^+.*drm_panel_init(&ctx' '$RKP/z-002-panel-generic-dsi.patch'"
 chk "rk915: strncpy sostituita (7.2)"          "grep -q 'strscpy_pad(priv->name, RPU_DRIVER_NAME, 12)' '${W}/projects/Rockchip/devices/RK3326/packages/rk915/patches/0003-rk915-linux-7.2-strncpy.patch'"
 chk "joypad: of_gpio ricostruito (7.2)"        "grep -q 'gpio_device_find_by_fwnode' '${W}/projects/Rockchip/devices/RK3326/packages/rocknix-joypad/patches/0003-rocknix-joypad-linux-7.2-of-gpio.patch'"

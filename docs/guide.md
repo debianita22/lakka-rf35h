@@ -49,7 +49,7 @@ Updates rewrite partition 1 and the boot loader area (with the same loader);
 | Rumble | Supported, on/off only (the motor is on a GPIO) |
 | Stick RGB rings, red and blue status LEDs | Supported |
 | Battery and charging | Supported |
-| Suspend and resume | Supported |
+| Suspend and resume | Supported. Up to v1.1.0 the screen could flicker and the console run slowly after waking, until a restart: from v1.2.0 the kernel restores at wake-up the clock settings that standby loses |
 | USB-C | Host mode (default) or USB network gadget |
 | Internal eMMC | Not used; the factory firmware is left untouched |
 | CPU boost to 1416 MHz | Present, off by default (see [Performance](#performance)) |
