@@ -5588,3 +5588,38 @@ col vsync sembra lento) o immagine spostata. Prova (ramo `ci-test/standby`):
 sleep-in: pochi mA) e `delays=20,20,120,120,20` (120 ms fra il reset e
 l'init). Il DTS compila (cpp + dtc sul 7.2.9 con la 0012). Se funziona, poi
 si puo' provare a togliere l'always-on tenendo i 120 ms.
+
+### Standby: perche' "prima non c'era" (5/10/2026, sera)
+
+Domanda: con i kernel mainline precedenti il problema non c'era? Confronto
+6.15.6 (devaOS) contro 7.2.9 su tutta la catena del display: `dw-mipi-dsi.c`,
+`dw-mipi-dsi-rockchip.c`, `phy-rockchip-inno-dsidphy.c`, `bridge/panel.c`,
+`drm_panel.c`, `rockchip_drm_vop.c`, `pm-domains.c`. Nessuna differenza di
+comportamento sul PX30: solo API (`drm_atomic_state` -> `drm_atomic_commit`,
+`devm_drm_bridge_alloc`, `devm_drm_panel_alloc`, `HIWORD_UPDATE` ->
+`FIELD_PREP_WM16_CONST` con gli stessi valori: lanecfg1 = maschera<<16, lcdsel
+= 0x00010001), il PHY cambia solo per l'rk3506 (pre-emphasis, max_lanes = 4
+per gli altri). Il resto e' identico fra i due sistemi: z-002 e r-025 sono le
+stesse patch di devaOS (cambia solo l'allocazione del pannello), il DTS ha lo
+stesso `vcc18_lcd0` con `regulator-off-in-suspend` e gli stessi
+`delays=20,20,20,120,20`, lo standby e' lo stesso `echo mem` in deep.
+
+Quindi non c'e' una regressione del kernel da cercare. Il "prima" non e' mai
+stato provato: `docs/NEXT.md` di devaOS mette il quick resume fra le cose "mai
+verificate sull'hardware"; la v1.0.0 (7.2.7) ce l'ha gia'; il log del 22/9
+(build di sviluppo, 7.0.x) ha un risveglio seguito da un SEGV di RetroArch 80
+secondi dopo e dal recupero firmware dell'RK915 (`sdio_writeb_comp -110`).
+
+Correzione alla voce precedente: `regulator-off-in-suspend` su un
+`regulator-fixed` non fa niente (in `__suspend_set_state` servono
+`set_suspend_disable`/`set_suspend_enable`, che `fixed_voltage_ops` non ha). A
+spegnere il pannello e' solo `generic_panel_unprepare` -> `regulator_disable`.
+E' `regulator-always-on` a cambiare le cose: il conteggio non scende a zero e
+il GPIO0_B5 resta alto. ROCKNIX su R36S fa come noi prima (`vcc_lcd` LDO8 del
+rk817, spento in standby) ma con il driver st7703, che ha i suoi tempi; il
+mainline odroid-go non da' alimentazioni al pannello (sempre acceso).
+
+Da sistemare dopo la prova: il nodo del pannello ha `vcc-supply`, il driver
+chiede `vdd` (da cui "supply vdd not found, using dummy regulator" nel
+dmesg). Con l'always-on non cambia niente; va rinominato `vdd-supply`
+insieme al prossimo giro del DTS.
