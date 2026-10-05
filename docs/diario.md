@@ -5537,3 +5537,24 @@ sorgente della build, verify-claims nell'albero (220 verifiche).
 Da provare sul device: standby e risveglio con la v1.2.0 (pre-release). Se
 flicker o lentezza restano, `tools/rf35h-resume-diag.sh` dice quali registri
 cambiano ancora.
+
+## v1.2.0, pre-release (5/10/2026)
+
+Run #14 (`de117e4`, Run workflow con version v1.2.0 e prerelease): 344/344
+in 89 minuti al primo tentativo, 38 core, nessuno escluso; ccache al 63% di
+colpi. Pubblicata pre-release alle 10:30 UTC: `releases/latest` resta la
+v1.1.0. Note: "Changes since v1.1.0" (i quattro commit), il link alle note
+della v1.1.0, l'avviso per chi aggiorna dalla v1.0.0 o dalla rc1. Verificata
+da qui:
+- `rf35h-update` della v1.1.0 con `TAG=v1.2.0`: scarica 639 MB, dimensione e
+  sha256 giusti, "ready: v1.2.0" in `.rf35h-staged/`; quello della v1.0.0
+  lo stesso, nella sua cartella; stesso file;
+- nel tar: md5 di KERNEL e SYSTEM giusti; KERNEL Linux 7.2.9 con la stringa
+  del `pr_warn` di z-034, che applica solo sopra r-034 (e verify-kernel, a
+  fine build, le ha trovate tutte e due nel sorgente); loader = known-good
+  (`52850532...`); DTB rf35h; moduli in `lib/modules/7.2.9`; re3 assente
+  (l'unico "re3" nell'elenco del SYSTEM e' `pumpkinadventure3.cht`).
+
+Da provare sulla console: standby e risveglio, piu' volte. Se va, la si
+promuove senza ricostruirla:
+`gh release edit v1.2.0 --repo debianita22/lakka-rf35h --prerelease=false --latest`.
