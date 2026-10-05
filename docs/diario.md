@@ -5604,11 +5604,20 @@ stesse patch di devaOS (cambia solo l'allocazione del pannello), il DTS ha lo
 stesso `vcc18_lcd0` con `regulator-off-in-suspend` e gli stessi
 `delays=20,20,20,120,20`, lo standby e' lo stesso `echo mem` in deep.
 
-Quindi non c'e' una regressione del kernel da cercare. Il "prima" non e' mai
-stato provato: `docs/NEXT.md` di devaOS mette il quick resume fra le cose "mai
-verificate sull'hardware"; la v1.0.0 (7.2.7) ce l'ha gia'; il log del 22/9
-(build di sviluppo, 7.0.x) ha un risveglio seguito da un SEGV di RetroArch 80
-secondi dopo e dal recupero firmware dell'RK915 (`sdio_writeb_comp -110`).
+Quindi la catena del display non spiega una regressione. Correzione,
+dall'utente: lo standby lo aveva provato sulle build di settembre (kernel
+7.0.1, boot log del 28/9) e funzionava. Quel log ha lo stesso driver e le
+stesse alimentazioni ("supply vdd not found", iovcc = vcc18_lcd0): il ciclo
+di alimentazione del pannello c'era anche li'. Il ramo `ci-test/standby` resta
+una prova, non la spiegazione. Confronto 7.0.1 contro 7.2.9 (display, DSI,
+PHY, VOP, bridge, panel, vblank, atomic helper, regolatori, pm-domains, clk
+PX30): solo API, piu' due cose fuori dal display - il thermal sospeso e
+ripreso dal core PM (`thermal_pm_prepare/complete`) e i GPIO Rockchip a
+numerazione dinamica. Fuori dal kernel, dopo quelle build e' cambiata la
+configurazione di sway (`sway-lean`: niente barra ne' sfondo, quindi direct
+scanout del buffer di RetroArch): e' la prima candidata, perche' il restart
+di RetroArch una volta ha rimesso tutto a posto. Prova a caldo:
+`WLR_SCENE_DISABLE_DIRECT_SCANOUT=1` per sway, poi standby.
 
 Correzione alla voce precedente: `regulator-off-in-suspend` su un
 `regulator-fixed` non fa niente (in `__suspend_set_state` servono
