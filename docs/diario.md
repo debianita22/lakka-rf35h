@@ -5466,3 +5466,40 @@ pre-release, `vX.Y.Z`, antenata del commit (fuori dal job, o se l'API non
 risponde, il tag come prima), e mette il link alle sue note per chi aggiorna
 da piu' indietro. Prove in `test-ci-build.sh` (7 nuove, una verificata
 togliendo il controllo che prova).
+
+## Standby: flicker e lentezza al risveglio (5/10/2026)
+
+Segnalato dall'utente sulla v1.1.0: parte, ma dopo lo standby lo schermo
+sfarfalla e la console e' molto lenta. Build della v1.2.0 annullata (run #13,
+nessun tag ne' release): sarebbe stata la v1.1.0 con lo stesso problema.
+
+Cosa si sa:
+- fra v1.0.0 e v1.1.0 il percorso dello standby (logind, `rf35h-idle`,
+  `rf35h-suspend.service`) non cambia in nulla che agisca al risveglio. Il
+  kernel passa da 7.2.7 a 7.2.9: nei 896 commit stable nessuna modifica a clk
+  rockchip, drm rockchip, pannelli, bridge DSI, phy, cpufreq, devfreq, opp,
+  regolatori, mfd, pwm, backlight (`git log v7.2.7..v7.2.9` sui tag di
+  gregkh/linux). Del percorso di sospensione toccano solo sched/cache (capacita'
+  dell'LLC all'hotplug delle CPU: qui un solo LLC) e il governor step_wise
+  (voti con `lower` diverso da 0: i nostri cooling map hanno 0);
+- il 22/9, kernel 7.0.1, una ripresa e' nei log (crash-20260922): sospensione
+  "deep" (Disabling non-boot CPUs, PSCI), poi il recupero dell'RK915. Del
+  display non dicono niente;
+- `clk-px30.c` (7.2.9) include `syscore_ops.h` ma non registra suspend ne'
+  resume: nessun registro del CRU salvato o ripristinato. ROCKNIX ha
+  `034-px30s-cru-suspend-resume-restore` (MODE_CON e CLKSEL_CON(0), sul
+  modello di `clk-rk3288.c`) per un crash dopo il resume sul PX30S.
+
+Ipotesi principale: al risveglio il firmware lascia un PLL (CPLL, NPLL o
+GPLL) in slow mode, cioe' a 24 MHz. Il kernel non se ne accorge: la sua vista
+e' in cache, e `rockchip_rk3036_pll_set_params` rimette in normal solo un PLL
+che era gia' in normal. Il VOP con il dclk sbagliato sfarfalla, bus e GPU a 24
+MHz rallentano tutto. Da confermare sul device.
+
+`tools/rf35h-resume-diag.sh`: dump di CRU (0xff2b0000) e PMUCRU (0xff2bc000)
+con devmem prima e dopo lo standby, stato dei PLL decodificato (modo, MHz dai
+divisori, lock, power-down), cpufreq, devfreq, cooling, carico, interrupt,
+dmesg; `ripristina` rimette nel modo di prima solo CPLL, NPLL e GPLL, e solo
+se accesi e agganciati (APLL dipende dalla tensione della CPU, DPLL e' la
+DDR del firmware). Provato sotto busybox con un devmem finto (registri e
+maschera hiword).
