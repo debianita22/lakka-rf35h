@@ -74,7 +74,7 @@ static long now_s(void)
  * a un UDC, cioe' il suo file UDC non vuoto. */
 static const char *busy(void)
 {
-	static const char *const units[] = { "rf35h-update.service", "rf35h-scrape.service" };
+	static const char *const units[] = { "rf35h-update.service", "rf35h-scrape.service", "rf35h-cores.service" };
 	const char *dir = getenv("RF35H_UNITS_DIR");
 	const char *udc = getenv("RF35H_GADGET_UDC");
 	char path[512];

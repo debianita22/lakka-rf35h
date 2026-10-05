@@ -1,0 +1,391 @@
+#!/bin/sh
+# rf35h-cores - i core libretro aggiornati uno per uno, dalla release "cores".
+#
+#   rf35h-cores refresh          scarica l'indice (index.txt) e rifa' lo stato
+#   rf35h-cores list             core, versione installata, versione disponibile
+#   rf35h-cores update <core>..  scarica e installa quei core in /storage/cores
+#   rf35h-cores update-all       tutti quelli con una versione nuova
+#   rf35h-cores reset <core>|all torna al core dell'immagine (via l'override)
+#   rf35h-cores rollback <core>  la versione di /storage/cores di prima
+#   rf35h-cores status [<core>]  la riga di stato, quella che mostra il menu
+#   rf35h-cores boot             all'avvio: via gli override che non valgono piu'
+#   rf35h-cores run              la coda del menu (cores.queue): refresh e update
+#
+# Come funziona: RetroArch carica i core da /tmp/cores, un overlay di
+# /usr/lib/libretro (l'immagine, sola lettura) con /storage/cores sopra: un
+# .so in /storage/cores vince su quello dell'immagine. Qui ci si mette un core
+# compilato dalla CI (cores.yml) con lo stesso toolchain, gli stessi flag e lo
+# stesso Lakka dell'immagine; al prossimo caricamento del core RetroArch usa
+# quello. I .info restano quelli dell'immagine.
+#
+# Cosa c'e' installato: /usr/share/rf35h/cores.txt (lo scrive la build: ogni
+# core dell'immagine col suo commit, piu' il commit di Lakka) e, per gli
+# override, /storage/cores/.rf35h/<so>.ver (commit, lakka, data). L'indice:
+#   https://github.com/<repo>/releases/download/cores/index.txt
+# (repo come rf35h-update: /usr/share/rf35h/update-repo, o REPO= in
+# update.conf; CORES_URL= in update.conf per un altro indice), righe
+# chiave=valore: core so commit site file url sha256 size lakka sysroot date.
+# Un core si prende solo se il suo lakka= e' quello dell'immagine: compilato
+# contro un altro sistema potrebbe non caricarsi. Dopo un aggiornamento di
+# sistema "boot" toglie gli override compilati per il Lakka precedente, e
+# quelli allo stesso commit del core nuovo dell'immagine (non servono piu').
+#
+# Lo stato per il menu (Device Settings > Core Updates), una riga per core in
+# cores.status: "<core> <so> <stato>", stato fra: "image <commit7>",
+# "updated <commit7>", "available <commit7>", "downloading", "error: ...",
+# "needs system update", "custom" (un .so in /storage/cores non nostro).
+set -u
+
+STATE="${RF35H_STATE_DIR:-/storage/.config/rf35h}"
+CORES_DIR="${RF35H_CORES_DIR:-/storage/cores}"
+IMAGE_LIST="${RF35H_IMAGE_CORES:-/usr/share/rf35h/cores.txt}"
+REPO_FILE="${RF35H_UPDATE_REPO_FILE:-/usr/share/rf35h/update-repo}"
+NTP_SYNCED="${RF35H_NTP_SYNCED:-/run/systemd/timesync/synchronized}"
+LOCK="${RF35H_CORES_LOCK:-/run/rf35h-cores.lock}"
+CURL="${RF35H_CURL:-curl}"
+DEFAULT_REPO="debianita22/lakka-rf35h"
+
+INDEX="${STATE}/cores.index"
+STATUS="${STATE}/cores.status"
+QUEUE="${STATE}/cores.queue"
+META="${CORES_DIR}/.rf35h"
+
+say() { echo "rf35h-cores: $*" >&2; }
+die() { say "$*"; exit 2; }
+kv() { sed -n "s/^$1=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}[[:space:]]*\$/\1/p" "$2" 2>/dev/null | head -1; }
+# il valore di "chiave=" in una riga dell'indice
+field() { printf '%s\n' "$2" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+
+image_lakka() { kv lakka "${IMAGE_LIST}"; }
+# il commit di un core dell'immagine (per nome di pacchetto)
+image_commit() { awk -v c="$1" '$1 == c && $2 ~ /^https?:/ { print $3 }' "${IMAGE_LIST}" 2>/dev/null; }
+# la riga dell'indice di un core
+index_line() { grep "^core=$1 " "${INDEX}" 2>/dev/null | head -1; }
+
+# l'override di un core (<so>): "commit lakka" se e' nostro, "custom" se c'e'
+# un .so senza il nostro .ver, niente se non c'e'
+override_of() {
+	_so="${CORES_DIR}/$1_libretro.so"
+	[ -f "${_so}" ] || return 0
+	if [ -f "${META}/$1.ver" ]; then
+		echo "$(kv commit "${META}/$1.ver") $(kv lakka "${META}/$1.ver")"
+	else
+		echo custom
+	fi
+}
+
+short() { printf '%.7s' "$1"; }
+
+index_url() {
+	_conf="${STATE}/update.conf"
+	_u="$(kv CORES_URL "${_conf}")"
+	if [ -n "${_u}" ]; then echo "${_u}"; return 0; fi
+	_repo="$(kv REPO "${_conf}")"
+	if [ -z "${_repo}" ] && [ -r "${REPO_FILE}" ]; then IFS= read -r _repo < "${REPO_FILE}" || true; fi
+	echo "https://github.com/${_repo:-${DEFAULT_REPO}}/releases/download/cores/index.txt"
+}
+
+wait_clock() {
+	_n=0
+	while [ ! -e "${NTP_SYNCED}" ] && [ "${_n}" -lt "${RF35H_CLOCK_WAIT:-15}" ]; do sleep 2; _n=$((_n + 1)); done
+}
+fetch() { "${CURL}" -fsSL --connect-timeout 20 --retry 2 "$@"; }
+curl_reason() {
+	case "$1" in
+		6|7) echo "no network" ;;
+		28)  echo "network too slow (timeout)" ;;
+		35|51|53|54|58|59|60|77|80|82|83|90|91) echo "secure connection failed: is the clock right? (Network Time)" ;;
+		22)  echo "not found on the server (HTTP error)" ;;
+		23)  echo "cannot write to /storage" ;;
+		*)   echo "download failed (curl $1)" ;;
+	esac
+}
+
+# Una riga dell'indice viene dalla rete: ogni campo che finisce in un nome di
+# file o in una riga di comando si controlla. Esce 0 se la riga e' buona.
+line_ok() {
+	_c="$(field core "$1")"; _s="$(field so "$1")"; _m="$(field commit "$1")"
+	_f="$(field file "$1")"; _u="$(field url "$1")"; _h="$(field sha256 "$1")"
+	_z="$(field size "$1")"; _l="$(field lakka "$1")"
+	case "${_c}" in ''|*[!a-z0-9_]*) return 1 ;; esac
+	case "${_s}" in ''|*[!A-Za-z0-9_]*) return 1 ;; esac
+	case "${_m}" in *[!0-9a-f]*) return 1 ;; esac; [ "${#_m}" = 40 ] || return 1
+	case "${_f}" in ''|*/*|.*|*[!A-Za-z0-9._-]*) return 1 ;; "${_s}_libretro-"*.so.gz) ;; *) return 1 ;; esac
+	case "${_u}" in https://*) ;; *) return 1 ;; esac
+	case "${_u}" in *[!A-Za-z0-9._~:/?#@!\$\&\'\(\)*+,\;=%-]*) return 1 ;; esac
+	case "${_h}" in *[!0-9a-f]*) return 1 ;; esac; [ "${#_h}" = 64 ] || return 1
+	case "${_z}" in ''|*[!0-9]*) return 1 ;; esac
+	case "${_l}" in *[!0-9a-f]*) return 1 ;; esac; [ "${#_l}" = 40 ] || return 1
+	return 0
+}
+
+# Lo stato di un core, dall'indice e da cosa c'e' installato
+state_of() {   # core
+	_line="$(index_line "$1")"
+	_so="$(field so "${_line}")"
+	_img="$(image_commit "$1")"
+	if [ -z "${_so}" ]; then
+		# non nell'indice: solo quello dell'immagine (o custom)
+		echo "$1 - image $(short "${_img:-?}")"
+		return 0
+	fi
+	_ov="$(override_of "${_so}")"
+	_avail="$(field commit "${_line}")"
+	_lk="$(field lakka "${_line}")"
+	case "${_ov}" in
+		custom) echo "$1 ${_so} custom"; return 0 ;;
+		'') _have="${_img}" ;;
+		*)  _have="${_ov% *}" ;;
+	esac
+	if [ "${_have}" = "${_avail}" ]; then
+		if [ -n "${_ov}" ]; then echo "$1 ${_so} updated $(short "${_avail}")"; else echo "$1 ${_so} image $(short "${_img}")"; fi
+	elif [ "${_lk}" != "$(image_lakka)" ]; then
+		echo "$1 ${_so} needs system update"
+	else
+		echo "$1 ${_so} available $(short "${_avail}")"
+	fi
+}
+
+# cores.status da capo, tenendo le righe "downloading"/"error" dei core dati
+# (quelle di un giro in corso)
+write_status() {
+	mkdir -p "${STATE}" 2>/dev/null
+	{
+		# tutti i core dell'immagine, poi quelli solo nell'indice
+		awk '$2 ~ /^https?:/ { print $1 }' "${IMAGE_LIST}" 2>/dev/null
+		sed -n 's/^core=\([a-z0-9_]*\) .*/\1/p' "${INDEX}" 2>/dev/null
+	} | awk '!seen[$0]++' | while read -r c; do
+		[ -n "${c}" ] || continue
+		keep=""
+		[ -f "${STATUS}" ] && keep="$(grep "^${c} [^ ]* \(downloading\|error\)" "${STATUS}" 2>/dev/null | head -1)"
+		if [ -n "${keep}" ]; then echo "${keep}"; else state_of "${c}"; fi
+	done > "${STATUS}.tmp" && mv -f "${STATUS}.tmp" "${STATUS}"
+}
+
+# una riga di stato per un core, al volo (durante un download)
+set_state() {   # core so testo
+	mkdir -p "${STATE}" 2>/dev/null
+	[ -f "${STATUS}" ] || : > "${STATUS}"
+	{ grep -v "^$1 " "${STATUS}"; echo "$1 $2 $3"; } > "${STATUS}.tmp" 2>/dev/null && mv -f "${STATUS}.tmp" "${STATUS}"
+	[ -t 2 ] && printf '\r%s %s\n' "$1" "$3" >&2
+}
+
+cmd_refresh() {
+	mkdir -p "${STATE}" || die "cannot write ${STATE}"
+	src="$(index_url)"
+	wait_clock
+	tmp="${INDEX}.tmp"
+	rc=0; fetch --max-time 60 -o "${tmp}" "${src}" || rc=$?
+	if [ "${rc}" != 0 ]; then
+		rm -f "${tmp}"
+		say "$(curl_reason "${rc}")"
+		echo "error: $(curl_reason "${rc}")" > "${STATE}/cores.error"
+		write_status
+		return 2
+	fi
+	# solo le righe buone
+	: > "${tmp}.ok"
+	while IFS= read -r l; do
+		case "${l}" in core=*) line_ok "${l}" && printf '%s\n' "${l}" >> "${tmp}.ok" ;; esac
+	done < "${tmp}"
+	mv -f "${tmp}.ok" "${INDEX}" && rm -f "${tmp}" "${STATE}/cores.error"
+	write_status
+	say "indice: $(grep -c '^core=' "${INDEX}") core"
+	return 0
+}
+
+# ELF a 64 bit little-endian per aarch64 (e_machine 0xb7), intero quanto basta
+elf_ok() {
+	[ "$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')" = 7f454c46 ] || return 1
+	[ "$(od -An -tx1 -j4 -N2 "$1" 2>/dev/null | tr -d ' \n')" = 0201 ] || return 1
+	[ "$(od -An -tx1 -j18 -N2 "$1" 2>/dev/null | tr -d ' \n')" = b700 ] || return 1
+	return 0
+}
+
+fsize() {
+	# shellcheck disable=SC2012
+	_s="$(ls -ln "$1" 2>/dev/null | awk '{ print $5 }')"
+	case "${_s}" in ''|*[!0-9]*) echo 0 ;; *) echo "${_s}" ;; esac
+}
+
+# Un core: scarica, verifica, installa in /storage/cores. Esce 0 se installato
+# (o gia' a quella versione), 1 se no (lo stato dice perche').
+update_one() {   # core
+	c="$1"
+	line="$(index_line "${c}")"
+	[ -n "${line}" ] || { set_state "${c}" - "error: not in the index"; return 1; }
+	so="$(field so "${line}")"; commit="$(field commit "${line}")"; url="$(field url "${line}")"
+	sum="$(field sha256 "${line}")"; size="$(field size "${line}")"; lakka="$(field lakka "${line}")"
+	if [ "${lakka}" != "$(image_lakka)" ]; then
+		set_state "${c}" "${so}" "needs system update"
+		say "${c}: compilato per un altro Lakka (${lakka}), l'immagine ha $(image_lakka)"
+		return 1
+	fi
+	case "$(override_of "${so}")" in
+		custom) set_state "${c}" "${so}" "custom"; say "${c}: in ${CORES_DIR} c'e' un ${so}_libretro.so non nostro: lo lascio"; return 1 ;;
+		"${commit} "*) set_state "${c}" "${so}" "updated $(short "${commit}")"; return 0 ;;
+	esac
+	if [ "$(image_commit "${c}")" = "${commit}" ] && [ -z "$(override_of "${so}")" ]; then
+		set_state "${c}" "${so}" "image $(short "${commit}")"; return 0
+	fi
+	mkdir -p "${CORES_DIR}" "${META}" || { set_state "${c}" "${so}" "error: cannot write ${CORES_DIR}"; return 1; }
+	need=$(( size / 1024 * 6 + 10240 ))   # il .gz, il .so (fino a 5x) e un margine
+	free="$(df -Pk "${CORES_DIR}" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+	[ "${free:-0}" -ge "${need}" ] || { set_state "${c}" "${so}" "error: not enough space in /storage"; return 1; }
+	gz="${META}/${so}.so.gz.part"
+	set_state "${c}" "${so}" "downloading"
+	rm -f "${gz}"
+	tries=0
+	while :; do
+		tries=$((tries + 1))
+		rc=0; "${CURL}" -fsL --connect-timeout 20 --max-time 600 -o "${gz}" "${url}" || rc=$?
+		[ "${rc}" = 0 ] && break
+		case "${rc}" in 22|35|51|53|54|58|59|60|77|80|82|83|90|91) break ;; esac
+		[ "${tries}" -lt 3 ] || break
+		sleep 3
+	done
+	if [ "${rc}" != 0 ]; then
+		rm -f "${gz}"
+		set_state "${c}" "${so}" "error: $(curl_reason "${rc}")"
+		return 1
+	fi
+	if [ "$(fsize "${gz}")" != "${size}" ]; then
+		rm -f "${gz}"; set_state "${c}" "${so}" "error: wrong size, try again"; return 1
+	fi
+	if [ "$(sha256sum "${gz}" | cut -d' ' -f1)" != "${sum}" ]; then
+		rm -f "${gz}"; set_state "${c}" "${so}" "error: checksum mismatch, try again"; return 1
+	fi
+	new="${CORES_DIR}/${so}_libretro.so.new"
+	if ! gunzip -c "${gz}" > "${new}" 2>/dev/null || ! elf_ok "${new}"; then
+		rm -f "${gz}" "${new}"; set_state "${c}" "${so}" "error: corrupt core file"; return 1
+	fi
+	rm -f "${gz}"
+	# l'override di prima resta come .prev (rollback); il .ver insieme al .so
+	cur="${CORES_DIR}/${so}_libretro.so"
+	if [ -f "${cur}" ] && [ -f "${META}/${so}.ver" ]; then
+		mv -f "${cur}" "${META}/${so}.so.prev" && mv -f "${META}/${so}.ver" "${META}/${so}.ver.prev"
+	fi
+	{ echo "commit=${commit}"; echo "lakka=${lakka}"; echo "core=${c}"; echo "date=$(date -u +%Y%m%d 2>/dev/null)"; } > "${META}/${so}.ver.tmp"
+	mv -f "${new}" "${cur}" && mv -f "${META}/${so}.ver.tmp" "${META}/${so}.ver" || { set_state "${c}" "${so}" "error: cannot write ${CORES_DIR}"; return 1; }
+	sync
+	set_state "${c}" "${so}" "updated $(short "${commit}")"
+	say "${c}: ${so}_libretro.so $(short "${commit}") in ${CORES_DIR}"
+	return 0
+}
+
+cmd_update() {
+	[ -s "${INDEX}" ] || cmd_refresh || return 2
+	# (urc e non rc: rc lo usa update_one per curl)
+	urc=0
+	for c in "$@"; do
+		case "${c}" in ''|*[!a-z0-9_]*) say "nome di core non valido: ${c}"; urc=1; continue ;; esac
+		update_one "${c}" || urc=1
+	done
+	return "${urc}"
+}
+
+cmd_update_all() {
+	cmd_refresh || return 2
+	list="$(awk '$3 == "available" { print $1 }' "${STATUS}")"
+	[ -n "${list}" ] || { say "tutti i core sono aggiornati"; return 0; }
+	# shellcheck disable=SC2086
+	cmd_update ${list}
+}
+
+reset_one() {   # so
+	rm -f "${CORES_DIR}/$1_libretro.so" "${META}/$1.ver" "${META}/$1.so.prev" "${META}/$1.ver.prev"
+}
+
+cmd_reset() {
+	if [ "${1:-}" = all ]; then
+		for v in "${META}"/*.ver; do
+			[ -f "${v}" ] || continue
+			so="${v##*/}"; so="${so%.ver}"
+			reset_one "${so}"; say "${so}: torna il core dell'immagine"
+		done
+	else
+		for c in "$@"; do
+			so="$(field so "$(index_line "${c}")")"
+			[ -n "${so}" ] || so="$(awk -v c="${c}" '$1 == c { print $2 }' "${STATUS}" 2>/dev/null)"
+			[ -n "${so}" ] && [ "${so}" != - ] || { say "${c}: non so quale .so sia (indice assente)"; continue; }
+			[ -f "${META}/${so}.ver" ] || { say "${c}: nessun override nostro"; continue; }
+			reset_one "${so}"; say "${c}: torna il core dell'immagine"
+		done
+	fi
+	sync
+	write_status
+}
+
+cmd_rollback() {
+	c="${1:?core}"
+	so="$(field so "$(index_line "${c}")")"
+	[ -n "${so}" ] || die "${c}: non nell'indice"
+	[ -f "${META}/${so}.so.prev" ] || die "${c}: nessuna versione precedente in ${META}"
+	mv -f "${META}/${so}.so.prev" "${CORES_DIR}/${so}_libretro.so" && mv -f "${META}/${so}.ver.prev" "${META}/${so}.ver"
+	sync
+	write_status
+	say "${c}: rimessa la versione precedente ($(short "$(kv commit "${META}/${so}.ver")"))"
+}
+
+# All'avvio. Dopo un aggiornamento di sistema gli override compilati per il
+# Lakka di prima non valgono piu' (via), e quelli allo stesso commit del core
+# che l'immagine ha adesso non servono (via, cosi' si vede "image").
+cmd_boot() {
+	lk="$(image_lakka)"
+	[ -n "${lk}" ] || return 0
+	for v in "${META}"/*.ver; do
+		[ -f "${v}" ] || continue
+		so="${v##*/}"; so="${so%.ver}"
+		c="$(kv core "${v}")"
+		if [ "$(kv lakka "${v}")" != "${lk}" ]; then
+			reset_one "${so}"; say "${so}: override per un altro Lakka, tolto (torna quello dell'immagine)"
+		elif [ -n "${c}" ] && [ "$(kv commit "${v}")" = "$(image_commit "${c}")" ]; then
+			reset_one "${so}"; say "${so}: l'immagine ha gia' questo commit, override tolto"
+		fi
+	done
+	# un download rimasto a meta'
+	rm -f "${META}"/*.part "${CORES_DIR}"/*.so.new 2>/dev/null
+	[ -f "${INDEX}" ] && write_status
+	return 0
+}
+
+# La coda del menu: righe "refresh", "all" o nomi di core. Letta e svuotata
+# subito, poi eseguita: un'altra richiesta nel frattempo la prende il giro dopo.
+cmd_run() {
+	if command -v flock >/dev/null 2>&1; then
+		exec 9> "${LOCK}" || die "cannot create ${LOCK}"
+		flock -n 9 || { say "gia' in corso"; exit 2; }
+	fi
+	[ -f "${QUEUE}" ] || { write_status; return 0; }
+	q="$(cat "${QUEUE}")"; rm -f "${QUEUE}"
+	qrc=0
+	for item in ${q}; do
+		case "${item}" in
+			refresh) cmd_refresh || qrc=1 ;;
+			all)     cmd_update_all || qrc=1 ;;
+			*)       cmd_update "${item}" || qrc=1 ;;
+		esac
+	done
+	return "${qrc}"
+}
+
+case "${1:-}" in
+	refresh)    cmd_refresh ;;
+	list)
+		[ -f "${STATUS}" ] || write_status
+		awk '{ st = $3; for (i = 4; i <= NF; i++) st = st " " $i; printf "%-17s %-18s %s\n", $1, $2, st }' "${STATUS}" ;;
+	update)     shift; [ $# -ge 1 ] || die "uso: rf35h-cores update <core>..."; cmd_update "$@" ;;
+	update-all) cmd_update_all ;;
+	reset)      shift; [ $# -ge 1 ] || die "uso: rf35h-cores reset <core>...|all"; cmd_reset "$@" ;;
+	rollback)   cmd_rollback "${2:-}" ;;
+	status)
+		[ -f "${STATUS}" ] || write_status
+		if [ -n "${2:-}" ]; then
+			awk -v c="$2" '$1 == c { st = $3; for (i = 4; i <= NF; i++) st = st " " $i; print st }' "${STATUS}"
+		else
+			cat "${STATUS}"
+		fi ;;
+	boot)       cmd_boot ;;
+	run)        cmd_run ;;
+	*) echo "uso: rf35h-cores refresh|list|update <core>..|update-all|reset <core>|all|rollback <core>|status [core]|boot|run" >&2; exit 2 ;;
+esac

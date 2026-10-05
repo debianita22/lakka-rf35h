@@ -15,6 +15,10 @@ ConditionPathExists=/storage/.config/rf35h
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/bin/rf35h-update boot
+# I core aggiornati uno per uno (/storage/cores): dopo un aggiornamento di
+# sistema via quelli compilati per il Lakka di prima e quelli che l'immagine
+# ha gia' allo stesso commit (rf35h-cores)
+ExecStart=-/usr/bin/rf35h-cores boot
 
 [Install]
 WantedBy=multi-user.target

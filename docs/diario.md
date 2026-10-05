@@ -153,12 +153,13 @@ Prima build: alcune ore, ~100 GB di disco.
     patches/linux-default/    9901 di Lakka (suspend asincrono), rigenerata
     packages/rk915/           driver Wi-Fi SDIO + firmware, patch per 7.0 e 7.2
     packages/rocknix-joypad/  driver joypad ADC multiplexato (of_gpio per 7.2)
-    packages/rf35h-utils/     19 script e 18 unit: volume DAC, tasti volume,
+    packages/rf35h-utils/     20 script e 19 unit: volume DAC, tasti volume,
                               LED, luminosita', sospensione, idle, zram, USB,
                               caricamento Wi-Fi, crash log, override per-core
                               (overrides/: 10 .cfg portatili + 1 .opt N64),
                               ripiego da Vulkan a gl per RetroArch,
-                              aggiornamento dalle release (rf35h-update)
+                              aggiornamento dalle release (rf35h-update),
+                              core uno per uno (rf35h-cores)
     packages/ikemen-go/       IKEMEN GO 1.0 (3 patch: OpenGL ES su Linux, fix
                               GLES/Vulkan, Vulkan spegnibile), lanciatore
                               rf35h-ikemen, servizio, core ikemen_libretro per
@@ -6078,3 +6079,75 @@ di dpkg 60 s invece di fallire; i passi che lo usano hanno `timeout-minutes`
 `docker image prune` 300. Un blocco cosi' costa al massimo 20 minuti e un
 errore leggibile, non sei ore. Prove in test-ci-build.sh (81): apt appeso e
 ucciso, install fallito, tre tentativi falliti.
+
+## Core aggiornabili uno per uno (5/10/2026)
+
+Richiesta dell'utente: aggiornare i core senza rifare l'immagine, con fork
+dei repository dei core e CI che li tenga all'upstream, e ogni nuova release
+di Lakka con i core gia' aggiornati; ogni core aggiornabile singolarmente
+dal menu. Il buildbot libretro esiste (RetroArch ha l'updater, Lakka lo
+nasconde) ma i suoi core sono generici: senza -mtune=cortex-a35 ne' LTO,
+compilati contro un'altra glibc, nightly non verificati, e i nostri quattro
+giochi non ci sono. Quindi release nostre, dalla stessa CI dell'immagine.
+
+Dei 34 core di default, 11 hanno patch Lakka (sameboy, picodrive,
+snes9x2010, mgba, mame2010, mame2015, mupen64plus_next, parallel_n64, stella,
+melonds, flycast): per quelli il fork ha senso (ramo rf35h = upstream + patch,
+rebase a ogni bump); per gli altri 23 "aggiornato all'upstream" e' solo lo
+sha nel package.mk. L'utente ha confermato: fork solo degli 11.
+
+**Com'e' fatto.**
+- `cores/pins.txt`: pacchetto, repository, commit, ramo. apply.sh scrive
+  PKG_SITE/PKG_URL/PKG_VERSION nei package di Lakka (il resto resta loro; per
+  un fork debianita22/ toglie le patch del package, gia' nel fork) e porta
+  l'elenco con il commit di Lakka nell'immagine: `/usr/share/rf35h/cores.txt`
+  (rf35h-utils). `cores` e' nella firma dell'overlay.
+- `build-lakka-rf35h.sh --build-packages "a b"`: solo quei pacchetti con
+  `scripts/build` (le dipendenze gia' fatte hanno lo stamp), i .so in
+  `target/cores/<pkg>/`, resoconto `*-pacchetti.txt`; chi fallisce non ferma
+  gli altri.
+- CI: a build finita `pack-sysroot` (albero senza sources, kernel, ccache,
+  log: artifact `sysroot-<versione>`, 90 giorni). `cores.yml` (lunedi' 05:23
+  UTC, o a mano con cores/rebuild/dry_run): `tools/cores-bump.sh` chiede a
+  ogni repository la punta del ramo (git ls-remote), i core cambiati si
+  compilano sul sysroot piu' recente (unpack, reset, prepare con i pin nuovi,
+  ccache dalla cache), i riusciti vanno nella release rolling `cores`
+  (pre-release, mai latest: `<so>_libretro-<commit7>.so.gz` + `index.txt`,
+  righe chiave=valore con core, so, commit, url, sha256, size, lakka,
+  sysroot; degli asset di un core restano gli ultimi 2) e il loro pin entra
+  in cores/pins.txt con un commit di github-actions sul ramo principale (la
+  prossima immagine li ha); i falliti restano al vecchio commit e finiscono
+  in un issue aggiornato a ogni giro.
+- Console: `rf35h-cores` (refresh, list, update, update-all, reset, rollback,
+  status, boot, run) e `rf35h-cores.service` avviata dal menu dalla coda
+  `cores.queue`. Il core va in `/storage/cores` (l'overlay di /tmp/cores
+  vince sul SYSTEM), con `.rf35h/<so>.ver` (commit, lakka, data) e il
+  precedente in `.so.prev`; verifica dimensione, sha256 e intestazione ELF
+  aarch64; accetta solo core con `lakka=` uguale a quello dell'immagine
+  ("needs system update" altrimenti); al boot (da rf35h-update-boot) toglie
+  gli override per un altro Lakka e quelli che l'immagine ha gia' allo stesso
+  commit; un .so non nostro in /storage/cores e' "custom" e non si tocca.
+  rf35h-idle non sospende mentre gira. I .info restano quelli dell'immagine.
+- Menu: terzo stadio del generatore (`tools/gen-retroarch-rf35h-cores.py`,
+  dopo menu e sottomenu): Device Settings > Core Updates, con Check for
+  Updates, Update All Cores, Use System Cores e una voce per core, dinamica
+  (menu_entries_append dalle righe di cores.status, come la lista Wi-Fi), con
+  il nome del core come path; OK aggiorna, o torna al core di sistema se era
+  aggiornato; il sottotitolo e' lo stato (riletto 2 volte al secondo). La 1003
+  rigenerata (stadi 1+2 riproducono byte per byte la precedente; con il 3:
+  2605 righe), la serie 99..1010 applica a fuzz 0 nell'ordine di Lakka, i
+  file toccati compilano con HAVE_LAKKA senza avvisi, check-menu-labels 30/30.
+
+Prove: test-rf35h-cores 27 (busybox, curl e df finti: indice con righe
+cattive, stati, update, sha256/ELF/spazio/rete sbagliati, rollback, reset,
+custom, boot dopo un aggiornamento di sistema, coda del menu); test-ci-build
++8 (publish-cores: indice unito e asset vecchi tolti; pins-merge: solo i
+riusciti, commit e push); verify-claims 225 (pin per ogni core, applicati
+nell'albero, elenco nell'immagine, sysroot salvato, contents: write anche in
+cores/publish, rf35h-cores con unit e boot). Ramo `ci-test/cores`: build di
+prova (run #15) che produce il primo sysroot; poi cores.yml in dry run da li'.
+
+Nota del 5/10, 14:45: l'utente riferisce che anche la v1.2.0 ha flicker e
+lentezza al risveglio: r-034/z-034 non bastano. `rf35h-resume-diag.sh` ora
+legge anche PMU, GRF, PMUGRF, i registri del rk817 e i regolatori; si
+aspettano i dump prima/dopo dalla console.

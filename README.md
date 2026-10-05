@@ -52,6 +52,7 @@ need a port (device tree, boot loader, controls): see
   controllers), USB drives (NTFS included), keyboards and USB-C audio; a USB
   network mode to copy files from a PC.
 - Suspend on the power button and after a configurable idle time.
+- Emulator cores updatable one by one from the console (*Device Settings > Core Updates*), rebuilt weekly from their upstreams.
 - Integer scaling by default for handheld-console cores; Nintendo 64
   (Mupen64Plus-Next) rendered at 320x240.
 

@@ -360,6 +360,9 @@ chk "scraper: db_name come cartella, scraper.conf 0600"       "dev_scrape"
 echo "== aggiornamento di sistema e release"
 U="${P}/scripts/rf35h-update"
 chk "rf35h-update: script e due unit"          "[ -x '$U' ] && [ -f '$P/system.d/rf35h-update.service' ] && [ -f '$P/system.d/rf35h-update-boot.service' ]"
+# I core uno per uno: lo script, la sua unit (la avvia il menu), il controllo
+# al boot, il vincolo sul Lakka dell'immagine, l'idle che aspetta.
+chk "rf35h-cores: script, unit, boot, vincolo Lakka" "[ -x '$P/scripts/rf35h-cores' ] && [ -f '$P/system.d/rf35h-cores.service' ] && grep -q 'rf35h-cores boot' '$P/system.d/rf35h-update-boot.service' && grep -q 'needs system update' '$P/scripts/rf35h-cores' && grep -q 'rf35h-cores.service' '$P/sources/rf35h-idle.c'"
 chk "rf35h-update.service la avvia il menu"    "! grep -q 'enable_service rf35h-update.service' '$P/package.mk' && grep -q 'enable_service rf35h-update-boot.service' '$P/package.mk'"
 chk "repository delle release nell'immagine"   "grep -q 'usr/share/rf35h/update-repo' '$P/package.mk' && grep -q '^PKG_STAMP=\"update-repo=' '$P/package.mk'"
 chk "aggiornamento: dimensione e sha256 prima del pronto" "grep -q 'checksum mismatch' '$U' && grep -q 'wrong size' '$U' && [ \$(grep -n 'checksum mismatch' '$U' | cut -d: -f1) -lt \$(grep -n 'mv -f \"\${part}\" \"\${target}\"' '$U' | cut -d: -f1) ]"
