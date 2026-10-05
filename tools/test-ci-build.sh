@@ -363,5 +363,40 @@ ok "bozza di un tentativo fallito: cancellata, poi da capo" '[ "${rc}" = 0 ] && 
 FAKE_RELEASES="556 false" pub v1.2.0; rc=$?
 ok "release gia' pubblicata: si ferma, niente cancellato" '[ "${rc}" != 0 ] && ! called DELETE && ! called "release create"'
 
+echo "note della release: da quale release"
+# un repository vero (merge-base, describe, log) con v1.0.0, v1.1.0-rc1 e
+# v1.1.0, e un gh finto che risponde come gh api ... --jq: i tag delle release
+# stabili, dalla piu' nuova (FAKE_STABLE; FAKE_GH_FAIL=yes: errore)
+NR="${T}/notes-repo"; mkdir -p "${NR}/tools" "${T}/notesbin" "${T}/ndist"
+cp "${O}/tools/ci-release-notes.sh" "${NR}/tools/"
+cp "${REPO}/build-lakka-rf35h.sh" "${NR}/"
+nc() { git -C "${NR}" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "$1"; [ -z "${2:-}" ] || git -C "${NR}" tag "$2"; }
+git -C "${NR}" init -q && git -C "${NR}" add -A && nc "first" v1.0.0 && nc "lto" v1.1.0-rc1 && nc "fixes" v1.1.0 && nc "docs"
+printf 'version=v1.2.0\ntar=x-v1.2.0.tar\n' > "${T}/ndist/update.txt"; : > "${T}/ndist/x-v1.2.0.img.gz"
+cat > "${T}/notesbin/gh" <<'EOF'
+#!/bin/bash
+[ "${FAKE_GH_FAIL:-no}" = yes ] && exit 1
+case "$*" in "api repos/o/r/releases?per_page=100 "*) printf '%b\n' "${FAKE_STABLE:-}" ;; *) exit 2 ;; esac
+EOF
+chmod +x "${T}/notesbin/gh"
+NSHA="$(git -C "${NR}" rev-parse HEAD)"
+notes() { ( export PATH="${T}/notesbin:${PATH}" GITHUB_REPOSITORY=o/r GITHUB_SHA="${NSHA}"
+	bash "${NR}/tools/ci-release-notes.sh" "${T}/ndist" > "${T}/nnotes.md" 2>/dev/null ); }
+GH_TOKEN=x FAKE_STABLE="v1.0.0" notes; rc=$?
+ok "v1.1.0 ancora pre-release: i cambi dalla v1.0.0, tutti" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.0.0:" "${T}/nnotes.md" && [ "$(grep -c "^- \(lto\|fixes\|docs\)$" "${T}/nnotes.md")" = 3 ]'
+ok "  ...e il link alle note della v1.0.0" 'grep -qF "[v1.0.0 release notes](https://github.com/o/r/releases/tag/v1.0.0)" "${T}/nnotes.md"'
+GH_TOKEN=x FAKE_STABLE="v1.1.0-rc1\nv1.1.0\nv1.0.0" notes; rc=$?
+ok "v1.1.0 promossa, rc1 senza la spunta pre-release: dalla v1.1.0" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.1.0:" "${T}/nnotes.md" && grep -qx -- "- docs" "${T}/nnotes.md" && ! grep -qx -- "- fixes" "${T}/nnotes.md"'
+# job release rilanciato: il tag v1.2.0 c'e' gia', sul commit della build
+git -C "${NR}" tag v1.2.0
+GH_TOKEN=x FAKE_STABLE="v1.2.0\nv1.1.0" notes; rc=$?
+ok "la release stessa (job rilanciato, tag gia' creato) non conta" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.1.0:" "${T}/nnotes.md"'
+git -C "${NR}" tag -d v1.2.0 >/dev/null
+GH_TOKEN=x FAKE_GH_FAIL=yes notes; rc=$?
+ok "gh in errore: l'ultimo tag senza trattino, senza link" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.1.0:" "${T}/nnotes.md" && ! grep -q "release notes\](" "${T}/nnotes.md"'
+( unset GH_TOKEN; FAKE_STABLE="v1.0.0" notes ); rc=$?
+ok "senza GH_TOKEN (prove, a mano): l'ultimo tag senza trattino" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.1.0:" "${T}/nnotes.md"'
+ok "la nota per chi aggiorna dalla v1.0.0 o dalla rc1, con la versione giusta" 'grep -q "^\*\*Updating from v1.0.0 or v1.1.0-rc1\*\*" "${T}/nnotes.md" && grep -qF "*ready: v1.2.0, select to restart and install*" "${T}/nnotes.md"'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

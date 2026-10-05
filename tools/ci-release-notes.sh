@@ -51,15 +51,51 @@ if [ -s "${D}/cores.txt" ]; then
 	echo "RetroArch cores ($(wc -l < "${D}/cores.txt")): $(tr '\n' ' ' < "${D}/cores.txt" | sed 's/ $//; s/ /, /g')."
 fi
 
-# I cambi dall'ultima release vera (le pre-release, con il trattino, no): i
-# soggetti dei commit, in inglese. Serve la storia con i tag (build.yml:
-# checkout con fetch-depth 0); il tag di questa release ancora non c'e'.
-prev="$(git -C "${O}" describe --tags --abbrev=0 --match 'v*' --exclude '*-*' "${sha}^" 2>/dev/null || true)"
+# I cambi dall'ultima release stabile: vX.Y.Z senza trattino, pubblicata e
+# non pre-release, antenata di questo commit; i soggetti dei commit, in
+# inglese. Il tag da solo non basta: una vX.Y.Z costruita come pre-release e
+# non ancora promossa non e' arrivata a nessuna console. Nel job release
+# (GH_TOKEN) lo si chiede a GitHub; altrove (prove, a mano) l'ultimo tag senza
+# trattino. Serve la storia con i tag (build.yml: checkout con fetch-depth 0);
+# il tag di questa release ancora non c'e'.
+prev=""
+prev_rel=no
+if [ -n "${GH_TOKEN:-}" ] && command -v gh >/dev/null 2>&1; then
+	for t in $(gh api "repos/${repo}/releases?per_page=100" \
+			--jq '.[] | select((.draft or .prerelease) | not) | .tag_name' 2>/dev/null); do
+		case "${t}" in *-*|"${v}") continue ;; v[0-9]*.[0-9]*.[0-9]*) ;; *) continue ;; esac
+		if git -C "${O}" merge-base --is-ancestor "${t}" "${sha}" 2>/dev/null; then
+			prev="${t}"
+			prev_rel=yes
+			break
+		fi
+	done
+fi
+if [ -z "${prev}" ]; then
+	prev="$(git -C "${O}" describe --tags --abbrev=0 --match 'v*' --exclude '*-*' "${sha}^" 2>/dev/null || true)"
+fi
 if [ -n "${prev}" ]; then
 	echo
 	echo "Changes since ${prev}:"
 	git -C "${O}" log --no-merges --format='- %s' "${prev}..${sha}"
+	# quelle di prima, per chi aggiorna da una release piu' vecchia (solo se
+	# prev e' una release vera: il link non va a vuoto)
+	if [ "${prev_rel}" = yes ]; then
+		echo
+		echo "Earlier changes: [${prev} release notes](https://github.com/${repo}/releases/tag/${prev})."
+	fi
 fi
+# Il menu della v1.0.0 e della v1.1.0-rc1, durante il download, scrive
+# "interrupted": il controllo "sta girando?" seguiva il link invocation:<unit>
+# di systemd, che punta a un percorso che non esiste (corretto da eaaa503,
+# v1.1.0). Chi aggiorna da li' lo vede con qualunque release: lo dicono tutte,
+# finche' qualcuno puo' essere ancora su quelle due.
+echo
+echo "**Updating from v1.0.0 or v1.1.0-rc1**: while the update downloads, System Update"
+echo "on those versions shows *interrupted: select to resume* instead of the progress."
+echo "It is a display bug of those versions, fixed since v1.1.0: the download goes on"
+echo "(selecting the entry again does no harm) and, when it is done, the entry says"
+echo "*ready: ${v}, select to restart and install*."
 
 if [ -s "${D}/dropped.txt" ]; then
 	echo

@@ -435,6 +435,13 @@ rf35h-update cancel    # remove a downloaded or partial update
 
 `lakka-update` runs `rf35h-update run` on this console.
 
+**From v1.0.0 or v1.1.0-rc1**, the entry shows *interrupted: select to
+resume* for the whole download instead of the progress: a display bug of
+those two versions, fixed since v1.1.0. The download goes on (selecting the
+entry does not stop it), and when it is done the entry shows *ready*: select
+it to restart and install. Over SSH, `rf35h-update status` shows the real
+progress.
+
 ### Choosing what to install
 
 `/storage/.config/rf35h/update.conf`, one `KEY=value` per line, no comments

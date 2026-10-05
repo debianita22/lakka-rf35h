@@ -5438,3 +5438,31 @@ loader e' il known-good, i moduli sono in `lib/modules/7.2.9` (v1.0.0:
   `-C libretro` (BOOTROMS_DIR e BIN come li passa il target): da fare dopo la
   prova della rc1, con una build di prova.
 - invariati, come previsto, i core senza LTO (dynarec, giganti, giochi).
+
+## v1.1.0 e la v1.2.0 (5/10/2026)
+
+v1.1.0 dalla run #12 (`e2fb53c`, il merge della PR #1), pubblicata come
+pre-release e poi promossa a mano: e' `releases/latest`. Contiene tutta la
+rc1 (`b3884fa` e' sua antenata) piu' 33 commit. Il ramo principale dopo la
+v1.1.0 ha solo documentazione: la v1.2.0, chiesta come release cumulativa di
+rc1 e v1.1.0, sulla console e' la v1.1.0.
+
+**"interrupted: select to resume" aggiornando dalla v1.0.0.** Il menu della
+v1.0.0 (e della rc1) decide "sta girando?" con `path_is_valid()` sul link
+`/run/systemd/units/invocation:rf35h-update.service`, che e' un symlink a un
+percorso che non esiste: sempre falso. Durante il download lo stato
+"downloading ..." diventa quindi "interrupted", e selezionare la voce non
+ferma niente (ramo "non gira": `systemctl start` su una unit `Type=simple`
+gia' attiva non fa nulla). A download finito lo stato e' "ready: <versione>,
+select to restart and install" e la voce riavvia. Corretto da `eaaa503`
+(lstat, v1.1.0); chi e' sulla v1.0.0 lo vede con qualunque release: lo dicono
+la guida e le note di ogni release.
+
+**Note della release.** "Changes since" partiva dall'ultimo tag senza
+trattino: con la v1.1.0 ancora pre-release, le note di una v1.2.0 sarebbero
+partite dalla v1.1.0, che nessuna console aveva. Ora, nel job release,
+`ci-release-notes.sh` chiede a GitHub l'ultima release pubblicata e non
+pre-release, `vX.Y.Z`, antenata del commit (fuori dal job, o se l'API non
+risponde, il tag come prima), e mette il link alle sue note per chi aggiorna
+da piu' indietro. Prove in `test-ci-build.sh` (7 nuove, una verificata
+togliendo il controllo che prova).
