@@ -58,12 +58,17 @@ is_lakka_tree "${TREE}" || {
 SRC="${TREE}/sources"
 
 # nome_in_cache | url_da_cui_prendere | url_da_scrivere_nello_stamp | sha256
+# ncurses (5/10/2026): invisible-mirror.net non risponde dai runner di GitHub
+# (timeout, due tentativi della build #18) e il mirror di LibreELEC da' 404;
+# la stessa release e' su ftp.gnu.org. Se i byte non fossero gli stessi lo
+# sha256 di Lakka lo direbbe e il file non verrebbe usato.
 SEEDS="
 fakeroot|fakeroot-1.37.2.tar.gz|http://archive.ubuntu.com/ubuntu/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|http://ftp.debian.org/debian/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|0eea60fbe89771b88fcf415c8f2f0a6ccfe9edebbcf3ba5dc0212718d98884db
 netbase|netbase-6.5.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/n/netbase/netbase_6.5.tar.xz|http://ftp.debian.org/debian/pool/main/n/netbase/netbase_6.5.tar.xz|9116047aebbaa1698934052d01c6e09b4c3aed643e93df63d2ddcbec243c26d1
 parted|parted-3.7.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/p/parted/parted_3.7.orig.tar.xz|https://ftpmirror.gnu.org/parted/parted-3.7.tar.xz|008de57561a4f3c25a0648e66ed11e7b30be493889b64334a6d70f2c1951ef7b
 ccid|ccid-1.7.1.tar.xz|http://archive.ubuntu.com/ubuntu/pool/universe/c/ccid/ccid_1.7.1.orig.tar.xz|https://ccid.apdu.fr/files/ccid-1.7.1.tar.xz|32799ab16fe6e493c9452be3823f21810fbe80b884021a6f6f3fa69f26be5c86
 pcsc-lite|pcsc-lite-2.4.1.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/p/pcsc-lite/pcsc-lite_2.4.1.orig.tar.xz|https://pcsclite.apdu.fr/files/pcsc-lite-2.4.1.tar.xz|afd3ba68c8000d2be048dc292df99a9812df9ad2efaf0a366eea22ac1faa19a7
+ncurses|ncurses-6.6.tar.gz|https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz|http://invisible-mirror.net/archives/ncurses/ncurses-6.6.tar.gz|355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11
 "
 
 # Un secondo modo, per i tarball che non esistono da nessuna parte come file.
