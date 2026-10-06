@@ -9,6 +9,8 @@
 #   sh rf35h-display-dump.sh vop              interrupt del VOP al secondo (60 = buono)
 #   sh rf35h-display-dump.sh ripara           58,5 Hz e ritorno a 60: riprogramma il
 #                                             clock dei pixel
+#   sh rf35h-display-dump.sh frac             riscrive il divisore frazionario del
+#                                             clock dei pixel (prima uguale, poi no)
 #
 # Perche' (6/10/2026). Con la build ci-21 il DSI si accende prima dell'init del
 # pannello e nessun comando va perso, eppure spegnere e riaccendere lo schermo
@@ -132,6 +134,31 @@ ripara() {
 	echo "Guarda lo schermo: e' tornato pulito e veloce?"
 }
 
+# Il clock dei pixel del VOP: CPLL -> dclk_vopb_src (CLKSEL_CON5, divisore
+# intero, gate CLKGATE_CON2 bit 2) -> dclk_vopb_frac (CLKSEL_CON6, frazionario
+# numeratore<<16 | denominatore, gate bit 3) -> dclk_vopb_mux (CLKSEL_CON5 bit
+# 15:14) -> dclk_vopb (gate bit 4). Prova 1: riscrive lo STESSO valore nel
+# frazionario. Prova 2: un valore appena diverso, poi l'originale. Dice quale
+# delle due basta a riportare il VOP a 60 interrupt al secondo.
+CRU=0xff2b0000
+frac() {
+	s5=$("${DM}" $(( CRU + 0x114 )) 32); s6=$("${DM}" $(( CRU + 0x118 )) 32)
+	g2=$("${DM}" $(( CRU + 0x208 )) 32)
+	m=$(( (s6 >> 16) & 0xffff )); n=$(( s6 & 0xffff ))
+	echo "CLKSEL_CON5=${s5} (div $(( (s5 & 0xff) + 1 )), mux src $(( (s5 >> 11) & 1 )), mux out $(( (s5 >> 14) & 3 )): 0 src, 1 frac, 2 24M)"
+	echo "CLKSEL_CON6=${s6} (frazionario ${m}/${n})  CLKGATE_CON2=${g2}"
+	echo "VOP adesso: $(vop_hz) interrupt/s"
+	"${DM}" $(( CRU + 0x118 )) 32 "${s6}"
+	sleep 1
+	echo "prova 1, stesso valore riscritto: $(vop_hz) interrupt/s"
+	"${DM}" $(( CRU + 0x118 )) 32 $(( s6 + 0x10000 ))
+	sleep 1
+	"${DM}" $(( CRU + 0x118 )) 32 "${s6}"
+	sleep 1
+	echo "prova 2, valore diverso e poi l'originale: $(vop_hz) interrupt/s"
+	echo "CLKSEL_CON6 ora: $("${DM}" $(( CRU + 0x118 )) 32)"
+}
+
 rompi() {
 	sway_sock
 	SWAYSOCK="${S}" swaymsg output DSI-1 power off >/dev/null
@@ -145,7 +172,8 @@ case "${1:-}" in
 salva)     [ -n "${2:-}" ] || { echo "uso: $0 salva <nome>"; exit 1; }; salva "$2" ;;
 vop)       echo "VOP: $(vop_hz) interrupt/s (60 = buono)" ;;
 ripara)    ripara ;;
+frac)      frac ;;
 rompi)     rompi ;;
 confronta) [ -n "${3:-}" ] || { echo "uso: $0 confronta <a> <b>"; exit 1; }; confronta "$2" "$3" ;;
-*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b> | vop | ripara" >&2; exit 1 ;;
+*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b> | vop | ripara | frac" >&2; exit 1 ;;
 esac

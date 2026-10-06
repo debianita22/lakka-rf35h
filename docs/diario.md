@@ -5644,3 +5644,15 @@ pastebinit (`cat "$@" | curl https://paste.libreelec.tv`), quindi
 `paste -d' '` ha fatto partire un caricamento vuoto (cat ha rifiutato `-d`,
 il server ha risposto "unauthorized": nessun dato inviato); e `diff` non
 c'e'. Ora solo awk. Anche `rf35h-audiotest` usa `diff`: da sistemare.
+
+**Confermato sulla console (6/10, 14:19).** Stato rotto: VOP a 7 interrupt/s.
+`ripara` (58,5 Hz e ritorno a 60): 59, poi 60 interrupt/s, schermo pulito e
+console veloce. Una modeset a frequenza diversa riscrive il clock dei pixel;
+quella alla riaccensione chiede la stessa frequenza e il framework dei clock
+non scrive niente. Il resto della modeset (tempi del VOP, DSI, PHY) e' uguale
+nei due casi. Quindi e' il clock dei pixel: dopo il gate chiuso e riaperto
+(clk_disable/clk_enable del VOP) l'uscita non e' piu' quella giusta finche'
+qualcuno non riscrive il registro. Prossima prova, `rf35h-display-dump.sh
+frac`: riscrive il frazionario (CLKSEL_CON6) prima con lo stesso valore, poi
+con uno diverso e di nuovo l'originale, per sapere quale correzione serve nel
+kernel.
