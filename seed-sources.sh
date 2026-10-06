@@ -62,6 +62,10 @@ SRC="${TREE}/sources"
 # (timeout, due tentativi della build #18) e il mirror di LibreELEC da' 404;
 # la stessa release e' su ftp.gnu.org. Se i byte non fossero gli stessi lo
 # sha256 di Lakka lo direbbe e il file non verrebbe usato.
+# I pacchetti GNU (6/10/2026): ftpmirror.gnu.org, il redirector verso un
+# mirror a caso, dai runner va in timeout (build #22 ferma su make 4.4.1, due
+# tentativi). Stessi file presi da ftp.gnu.org, lo stamp tiene l'URL del
+# package.mk. Sono quelli dell'albero pinnato con ftpmirror nel PKG_URL.
 SEEDS="
 fakeroot|fakeroot-1.37.2.tar.gz|http://archive.ubuntu.com/ubuntu/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|http://ftp.debian.org/debian/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|0eea60fbe89771b88fcf415c8f2f0a6ccfe9edebbcf3ba5dc0212718d98884db
 netbase|netbase-6.5.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/n/netbase/netbase_6.5.tar.xz|http://ftp.debian.org/debian/pool/main/n/netbase/netbase_6.5.tar.xz|9116047aebbaa1698934052d01c6e09b4c3aed643e93df63d2ddcbec243c26d1
@@ -69,6 +73,23 @@ parted|parted-3.7.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/p/parted/par
 ccid|ccid-1.7.1.tar.xz|http://archive.ubuntu.com/ubuntu/pool/universe/c/ccid/ccid_1.7.1.orig.tar.xz|https://ccid.apdu.fr/files/ccid-1.7.1.tar.xz|32799ab16fe6e493c9452be3823f21810fbe80b884021a6f6f3fa69f26be5c86
 pcsc-lite|pcsc-lite-2.4.1.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/p/pcsc-lite/pcsc-lite_2.4.1.orig.tar.xz|https://pcsclite.apdu.fr/files/pcsc-lite-2.4.1.tar.xz|afd3ba68c8000d2be048dc292df99a9812df9ad2efaf0a366eea22ac1faa19a7
 ncurses|ncurses-6.6.tar.gz|https://ftp.gnu.org/gnu/ncurses/ncurses-6.6.tar.gz|http://invisible-mirror.net/archives/ncurses/ncurses-6.6.tar.gz|355b4cbbed880b0381a04c46617b7656e362585d52e9cf84a67e2009b749ff11
+diffutils|diffutils-3.11.tar.xz|https://ftp.gnu.org/gnu/diffutils/diffutils-3.11.tar.xz|https://ftpmirror.gnu.org/diffutils/diffutils-3.11.tar.xz|a73ef05fe37dd585f7d87068e4a0639760419f810138bd75c61ddaa1f9e2131e
+patch|patch-2.8.tar.xz|https://ftp.gnu.org/gnu/patch/patch-2.8.tar.xz|https://ftpmirror.gnu.org/patch/patch-2.8.tar.xz|f87cee69eec2b4fcbf60a396b030ad6aa3415f192aa5f7ee84cad5e11f7f5ae3
+screen|screen-5.0.1.tar.gz|https://ftp.gnu.org/gnu/screen/screen-5.0.1.tar.gz|https://ftpmirror.gnu.org/screen/screen-5.0.1.tar.gz|2dae36f4db379ffcd14b691596ba6ec18ac3a9e22bc47ac239789ab58409869d
+autoconf-archive|autoconf-archive-2024.10.16.tar.xz|https://ftp.gnu.org/gnu/autoconf-archive/autoconf-archive-2024.10.16.tar.xz|https://ftpmirror.gnu.org/autoconf-archive/autoconf-archive-2024.10.16.tar.xz|7bcd5d001916f3a50ed7436f4f700e3d2b1bade3ed803219c592d62502a57363
+autoconf|autoconf-2.73.tar.xz|https://ftp.gnu.org/gnu/autoconf/autoconf-2.73.tar.xz|https://ftpmirror.gnu.org/autoconf/autoconf-2.73.tar.xz|9fd672b1c8425fac2fa67fa0477b990987268b90ff36d5f016dae57be0d6b52e
+automake|automake-1.18.1.tar.xz|https://ftp.gnu.org/gnu/automake/automake-1.18.1.tar.xz|https://ftpmirror.gnu.org/automake/automake-1.18.1.tar.xz|168aa363278351b89af56684448f525a5bce5079d0b6842bd910fdd3f1646887
+bison|bison-3.8.2.tar.xz|https://ftp.gnu.org/gnu/bison/bison-3.8.2.tar.xz|https://ftpmirror.gnu.org/bison/bison-3.8.2.tar.xz|9bba0214ccf7f1079c5d59210045227bcf619519840ebfa80cd3849cff5a5bf2
+libtool|libtool-2.5.4.tar.xz|https://ftp.gnu.org/gnu/libtool/libtool-2.5.4.tar.xz|https://ftpmirror.gnu.org/libtool/libtool-2.5.4.tar.xz|f81f5860666b0bc7d84baddefa60d1cb9fa6fceb2398cc3baca6afaa60266675
+m4|m4-1.4.21.tar.bz2|https://ftp.gnu.org/gnu/m4/m4-1.4.21.tar.bz2|https://ftpmirror.gnu.org/m4/m4-1.4.21.tar.bz2|dc487e11d2f0c9e01555bb1af26be4eae983ec8f0726746505b4327186eb21fc
+make|make-4.4.1.tar.gz|https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz|https://ftpmirror.gnu.org/make/make-4.4.1.tar.gz|dd16fb1d67bfab79a72f5e8390735c49e3e8e70b4945a15ab1f81ddb78658fb3
+mpc|mpc-1.4.1.tar.xz|https://ftp.gnu.org/gnu/mpc/mpc-1.4.1.tar.xz|https://ftpmirror.gnu.org/mpc/mpc-1.4.1.tar.xz|91204cd32f164bd3b7c992d4a6a8ce6519511aadab30f78b6982d0bf8d73e931
+mpfr|mpfr-4.2.2.tar.xz|https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.2.tar.xz|https://ftpmirror.gnu.org/mpfr/mpfr-4.2.2.tar.xz|b67ba0383ef7e8a8563734e2e889ef5ec3c3b898a01d00fa0a6869ad81c6ce01
+readline|readline-8.3.tar.gz|https://ftp.gnu.org/gnu/readline/readline-8.3.tar.gz|https://ftpmirror.gnu.org/readline/readline-8.3.tar.gz|fe5383204467828cd495ee8d1d3c037a7eba1389c22bc6a041f627976f9061cc
+gcc|gcc-16.1.0.tar.xz|https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz|https://ftpmirror.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz|50efb4d94c3397aff3b0d61a5abd748b4dd31d9d3f2ab7be05b171d36a510f79
+libidn2|libidn2-2.3.8.tar.gz|https://ftp.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz|https://ftpmirror.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz|f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a
+mtools|mtools-4.0.49.tar.bz2|https://ftp.gnu.org/gnu/mtools/mtools-4.0.49.tar.bz2|https://ftpmirror.gnu.org/mtools/mtools-4.0.49.tar.bz2|6fe5193583d6e7c59da75e63d7234f76c0b07caf33b103894f46f66a871ffc9f
+libmicrohttpd|libmicrohttpd-1.0.5.tar.gz|https://ftp.gnu.org/gnu/libmicrohttpd/libmicrohttpd-1.0.5.tar.gz|https://ftpmirror.gnu.org/libmicrohttpd/libmicrohttpd-1.0.5.tar.gz|b46d00f58efa6f497b97d2e782c4ee66301d412ddd855dd3068518b3a2cd3ea2
 "
 
 # Un secondo modo, per i tarball che non esistono da nessuna parte come file.
