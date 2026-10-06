@@ -67,6 +67,10 @@ SRC="${TREE}/sources"
 # tentativi). Stessi file presi da mirrors.kernel.org/gnu (con ftp.gnu.org la
 # run #23 e' rimasta oltre 20 minuti nella preparazione), lo stamp tiene l'URL del
 # package.mk. Sono quelli dell'albero pinnato con ftpmirror nel PKG_URL.
+# attr e freetype (6/10/2026): savannah dai runner in timeout (build #25, attr).
+# Piu' sorgenti per voce, separate da spazi: tarballs.nixos.org per sha256 (il
+# mirror di nixpkgs, indirizzato dal contenuto), SourceForge per freetype (la
+# sua seconda sede ufficiale), il mirror savannah di csclub.
 SEEDS="
 fakeroot|fakeroot-1.37.2.tar.gz|http://archive.ubuntu.com/ubuntu/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|http://ftp.debian.org/debian/pool/main/f/fakeroot/fakeroot_1.37.2.orig.tar.gz|0eea60fbe89771b88fcf415c8f2f0a6ccfe9edebbcf3ba5dc0212718d98884db
 netbase|netbase-6.5.tar.xz|http://archive.ubuntu.com/ubuntu/pool/main/n/netbase/netbase_6.5.tar.xz|http://ftp.debian.org/debian/pool/main/n/netbase/netbase_6.5.tar.xz|9116047aebbaa1698934052d01c6e09b4c3aed643e93df63d2ddcbec243c26d1
@@ -91,6 +95,8 @@ gcc|gcc-16.1.0.tar.xz|https://mirrors.kernel.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.t
 libidn2|libidn2-2.3.8.tar.gz|https://mirrors.kernel.org/gnu/libidn/libidn2-2.3.8.tar.gz|https://ftpmirror.gnu.org/gnu/libidn/libidn2-2.3.8.tar.gz|f557911bf6171621e1f72ff35f5b1825bb35b52ed45325dcdee931e5d3c0787a
 mtools|mtools-4.0.49.tar.bz2|https://mirrors.kernel.org/gnu/mtools/mtools-4.0.49.tar.bz2|https://ftpmirror.gnu.org/mtools/mtools-4.0.49.tar.bz2|6fe5193583d6e7c59da75e63d7234f76c0b07caf33b103894f46f66a871ffc9f
 libmicrohttpd|libmicrohttpd-1.0.5.tar.gz|https://mirrors.kernel.org/gnu/libmicrohttpd/libmicrohttpd-1.0.5.tar.gz|https://ftpmirror.gnu.org/libmicrohttpd/libmicrohttpd-1.0.5.tar.gz|b46d00f58efa6f497b97d2e782c4ee66301d412ddd855dd3068518b3a2cd3ea2
+attr|attr-2.5.2.tar.gz|https://tarballs.nixos.org/sha256/39bf67452fa41d0948c2197601053f48b3d78a029389734332a6309a680c6c87 https://mirror.csclub.uwaterloo.ca/nongnu/attr/attr-2.5.2.tar.gz|http://download.savannah.nongnu.org/releases/attr/attr-2.5.2.tar.gz|39bf67452fa41d0948c2197601053f48b3d78a029389734332a6309a680c6c87
+freetype|freetype-2.14.3.tar.xz|https://downloads.sourceforge.net/project/freetype/freetype2/2.14.3/freetype-2.14.3.tar.xz https://tarballs.nixos.org/sha256/36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f https://mirror.csclub.uwaterloo.ca/nongnu/freetype/freetype-2.14.3.tar.xz|https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz|36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f
 "
 
 # Un secondo modo, per i tarball che non esistono da nessuna parte come file.
@@ -123,24 +129,32 @@ while IFS='|' read -r pkg name url stamp_url sha; do
 
 	mkdir -p "${SRC}/${pkg}"
 	printf '  %-24s scarico... ' "${pkg}"
-	# Un mirror lento non deve fermare tutto: sotto i 50 kB/s per un minuto,
-	# o oltre 10 minuti, si lascia perdere (la build ci riprova dall'URL del
-	# package.mk).
-	if ! curl -sL --fail --connect-timeout 20 --retry 2 --speed-limit 50000 --speed-time 60 \
-		--max-time 600 -o "${dest}.tmp" "${url}"; then
-		echo "FALLITO (${url})"
-		rc=1
-		continue
-	fi
-
-	got="$(sha256sum "${dest}.tmp" | cut -d' ' -f1)"
-	if [ "${got}" != "${sha}" ]; then
-		echo "sha256 DIVERSO"
-		echo "      ottenuto:  ${got}"
-		echo "      atteso:    ${sha}"
-		echo "      Non lo metto in cache: un tarball diverso da quello pinnato"
-		echo "      farebbe fallire la build piu' avanti, in modo meno chiaro."
-		rm -f "${dest}.tmp"
+	# Piu' URL separati da spazi: si provano in ordine, vale il primo con lo
+	# sha256 giusto. Un mirror lento non deve fermare tutto: sotto i 50 kB/s
+	# per un minuto, o oltre 10 minuti, si lascia perdere (la build ci
+	# riprova dall'URL del package.mk).
+	from=""; why=""
+	for u in ${url}; do
+		if ! curl -sL --fail --connect-timeout 20 --retry 2 --speed-limit 50000 --speed-time 60 \
+			--max-time 600 -o "${dest}.tmp" "${u}"; then
+			why="${why}
+      ${u}: download fallito"
+			rm -f "${dest}.tmp"
+			continue
+		fi
+		got="$(sha256sum "${dest}.tmp" | cut -d' ' -f1)"
+		if [ "${got}" != "${sha}" ]; then
+			# un tarball diverso da quello pinnato farebbe fallire la build piu'
+			# avanti, in modo meno chiaro: non va in cache
+			why="${why}
+      ${u}: sha256 DIVERSO (ottenuto ${got}, atteso ${sha})"
+			rm -f "${dest}.tmp"
+			continue
+		fi
+		from="${u}"; break
+	done
+	if [ -z "${from}" ]; then
+		echo "FALLITO${why}"
 		rc=1
 		continue
 	fi

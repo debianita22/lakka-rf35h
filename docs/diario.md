@@ -190,7 +190,8 @@ Prima build: alcune ore, ~100 GB di disco.
                               delle reti; salvataggio atomico della config)
     integration/              37 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
-                              tarball GNU da mirrors.kernel.org,
+                              sorgenti da mirrors.kernel.org e
+                              tarballs.nixos.org,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, Samba senza condivisioni
@@ -5702,7 +5703,8 @@ li riscarica tutti.
 
 `seed-sources.sh` li copriva uno alla volta (i pinnati con ftpmirror), e ne
 restavano fuori gettext, glibc, binutils, libiconv, nettle. Invece di
-allungare l'elenco, `integration/gnu-mirror-rf35h.patch` cambia
+allungare l'elenco, `integration/gnu-mirror-rf35h.patch` (ora
+`source-mirrors-rf35h.patch`, vedi sotto) cambia
 `scripts/get_archive`: per ogni `PKG_URL` su ftp.gnu.org/gnu, ftp.gnu.org/pub/gnu
 o ftpmirror.gnu.org prova per primo lo stesso percorso sotto
 `https://mirrors.kernel.org/gnu/` (raggiungibile dai runner: la #24 ci ha
@@ -5710,8 +5712,44 @@ preso i semi). Lo sha256 resta quello del package.mk, lo stamp `.url` resta
 il `PKG_URL`; con un 404 il giro e' quello di prima. Provata la riscrittura
 sui 27 `PKG_URL` GNU dell'albero: tutti nella forma giusta. Non ricompila
 niente (`calculate_stamp` non legge `scripts/`). `check-sources.sh` prova lo
-stesso mirror. Restano fuori i tre di savannah (attr, freetype, configtools):
-host diverso, finora mai in timeout.
+stesso mirror. Restavano fuori i tre di savannah (attr, freetype,
+configtools): host diverso, fino a quel momento mai in timeout.
+
+### Savannah, e lo stato delle parti che perdeva le cartelle "image" (6/10/2026)
+
+La #25 (ripresa della #24) si e' fermata su `attr:target`:
+`download.savannah.nongnu.org` in timeout sulla porta 80 e 404 sul mirror di
+LibreELEC. Savannah e ftp.gnu.org sono la stessa infrastruttura (FSF), e dai
+runner oggi non rispondono. La patch diventa
+`integration/source-mirrors-rf35h.patch` e aggiunge in fondo al giro
+`https://tarballs.nixos.org/sha256/<PKG_SHA256>`: il mirror dei sorgenti di
+nixpkgs, indirizzato dal contenuto (`copy-tarballs.pl` crea le chiavi sha256
+in esadecimale e in base32, che rimandano al file). Vale per ogni pacchetto
+con uno sha256; un file che li' non c'e' e' un 404. In piu',
+`seed-sources.sh` accetta piu' URL per voce e semina attr (nixos, poi il
+mirror savannah di csclub) e freetype (SourceForge, che FreeType usa come
+seconda sede, poi nixos e csclub). Nessuno di questi indirizzi l'ho potuto
+provare da qui: lo sha256 decide, e se mancano tutti la build si ferma come
+prima. configtools (snapshot di cgit) resta solo su savannah e sul mirror di
+LibreELEC.
+
+Nella stessa #25 il primo tentativo era fallito su `linux`:
+`drivers/usb/Kconfig:118: can't open file "drivers/usb/image/Kconfig"`.
+Causa: `cmd_pack` (lo stato fra le parti) escludeva
+`lakka-rf35h-build/build.*/image`, e per GNU tar un'esclusione vale a ogni
+profondita' e `*` attraversa le `/`: usciva dallo stato OGNI cartella di nome
+`image` sotto `build.*`, non solo l'immagine in costruzione. Il kernel della
+#24, scompattato e non ancora compilato, e' arrivato alla #25 senza
+`drivers/usb/image`; il secondo tentativo lo ha riscompattato. Peggio, lo
+stesso valeva per `install_pkg`: una cartella `image` installata da un
+pacchetto fatto in una parte precedente all'ultima spariva dall'immagine.
+Non ne conosco nessuna nei pacchetti che costruiamo (nessun package.mk
+installa in una cartella `image`, e nel kernel `USB_MDC800` e `USB_MICROTEK`
+sono spenti, quindi nessun modulo in `drivers/usb/image`), ma le release
+v1.0.0-v1.2.0 sono tutte build a piu' parti. Ora
+`tar --anchored --no-wildcards-match-slash`: provato con GNU tar 1.35, escono
+solo `build.*/image` e `build.*/.threads` di primo livello; prova in
+`test-ci-build.sh`, che sul codice di prima fallisce.
 
 ## Tutti i core che compilano nell'immagine (6/10/2026)
 

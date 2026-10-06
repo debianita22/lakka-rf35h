@@ -275,7 +275,13 @@ cmd_pack() {
 	# Fuori: i sorgenti (si riscaricano, e solo per i pacchetti ancora da
 	# fare), i log e i resoconti (vanno negli artifact a parte), i file
 	# temporanei dell'immagine, lo stato dei thread.
-	tar -C "${W}" \
+	# --anchored --no-wildcards-match-slash: senza, per tar le esclusioni
+	# valgono a ogni profondita' e "*" attraversa le "/", quindi
+	# build.*/image toglieva OGNI cartella "image" sotto build.*: nel
+	# sorgente del kernel drivers/usb/image (build #25: olddefconfig fallito
+	# su un kernel scompattato nella parte prima) e in install_pkg quelle
+	# dei pacchetti fatti nelle parti prima, che sparivano dall'immagine.
+	tar -C "${W}" --anchored --no-wildcards-match-slash \
 		--exclude="${TREE_NAME}/sources" \
 		--exclude="${TREE_NAME}/target" \
 		--exclude="${TREE_NAME}/build-rf35h-*" \
