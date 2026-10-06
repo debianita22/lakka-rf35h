@@ -94,6 +94,7 @@ check "sent with the host powered down" "${K}/drivers/gpu/drm/bridge/synopsys/dw
 # console lenta, dalla v1.0.0). r-034 di ROCKNIX per il CRU, z-034 per il GPLL.
 check "register_syscore(&px30_clk_syscore)" "${K}/drivers/clk/rockchip/clk-px30.c" "r-034 CRU ripristinato al risveglio"
 check "px30_pmucru_base = reg_base"         "${K}/drivers/clk/rockchip/clk-px30.c" "z-034 GPLL ripristinato al risveglio"
+check "mux_dclk_vopb_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT" "${K}/drivers/clk/rockchip/clk-px30.c" "z-037 clock dei pixel sul divisore intero"
 check "rk3326-xifan-rf35h"  "${D}/Makefile"                          "z-010 DTS nel Makefile"
 check "opp-600000000"       "${D}/rk3326-xifan-rf35h.dts"            "z-010 scala OPP piena"
 check "role-switch-default" "${D}/rk3326-xifan-rf35h.dts"            "z-010 USB OTG host"

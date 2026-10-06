@@ -1,0 +1,42 @@
+devaOS RF35H (6/10/2026): il clock dei pixel del VOP-big resta sul divisore intero.
+
+Misurato sulla console (rf35h-display-dump.sh): dopo l'avvio dclk_vopb esce da
+dclk_vopb_src = CPLL/51 = 31,06 MHz e il VOP fa 60 interrupt al secondo; dopo
+uno spegnimento e riaccensione dello schermo (o uno standby) il mux passa al
+frazionario alimentato da CPLL a 1584 MHz (31,08 MHz "esatti") e il VOP scende
+a 3-7 fotogrammi al secondo: sfarfallio e console lenta. Solo una modeset a
+un'altra frequenza lo rimetteva a posto, spostando CPLL a 600 MHz (e con lui la
+GPU). Il mux non cambia piu' genitore e dclk_vopb_src non ritocca CPLL.
+
+--- a/drivers/clk/rockchip/clk-px30.c
++++ b/drivers/clk/rockchip/clk-px30.c
+@@ -245,8 +245,17 @@ static struct rockchip_clk_branch px30_uart5_fracmux __initdata =
+ 	MUX(0, "clk_uart5_mux", mux_uart5_p, CLK_SET_RATE_PARENT,
+ 			PX30_CLKSEL_CON(47), 14, 2, MFLAGS);
+ 
++/*
++ * devaOS RF35H: the VOP-big pixel clock stays on the integer divider.
++ * With the mux free to reparent, a modeset after the first one picks the
++ * fractional divider fed straight from CPLL at 1584 MHz, and on this board
++ * the VOP then runs at 3-7 frames per second (flicker, everything that
++ * follows vsync slowed down) until a modeset at another rate. The first
++ * modeset after boot takes the integer path (CPLL / 51 = 31.06 MHz for the
++ * 60 Hz panel mode) and works; keep it that way on every modeset.
++ */
+ static struct rockchip_clk_branch px30_dclk_vopb_fracmux __initdata =
+-	MUX(0, "dclk_vopb_mux", mux_dclk_vopb_p, CLK_SET_RATE_PARENT,
++	MUX(0, "dclk_vopb_mux", mux_dclk_vopb_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
+ 			PX30_CLKSEL_CON(5), 14, 2, MFLAGS);
+ 
+ static struct rockchip_clk_branch px30_dclk_vopl_fracmux __initdata =
+@@ -419,7 +428,9 @@ static struct rockchip_clk_branch px30_clk_branches[] __initdata = {
+ 	COMPOSITE(SCLK_VOPB_PWM, "clk_vopb_pwm", mux_gpll_xin24m_p, 0,
+ 			PX30_CLKSEL_CON(7), 7, 1, MFLAGS, 0, 7, DFLAGS,
+ 			PX30_CLKGATE_CON(2), 5, GFLAGS),
+-	COMPOSITE(0, "dclk_vopb_src", mux_cpll_npll_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
++	/* devaOS RF35H: no CLK_SET_RATE_PARENT, the pixel clock must not retune
++	 * CPLL, which also feeds the GPU (a 30 MHz mode moved it to 600 MHz). */
++	COMPOSITE(0, "dclk_vopb_src", mux_cpll_npll_p, CLK_SET_RATE_NO_REPARENT,
+ 			PX30_CLKSEL_CON(5), 11, 1, MFLAGS, 0, 8, DFLAGS,
+ 			PX30_CLKGATE_CON(2), 2, GFLAGS),
+ 	COMPOSITE_FRACMUX(0, "dclk_vopb_frac", "dclk_vopb_src", CLK_SET_RATE_PARENT,

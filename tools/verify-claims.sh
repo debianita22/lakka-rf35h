@@ -259,7 +259,7 @@ if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 fi
 chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${W}/packages/graphics/mesa' '${O}/packages'"
 chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
-chk "pila snella: 9 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 9 ]"
+chk "pila snella: 10 patch per RK3326"         "[ \$(ls '$RKP'/*.patch | wc -l) -eq 10 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
 chk "z-001 e 0002-input-polldev fuori"         "[ ! -e '$RKP/z-001-st7703-xifan-xf35h-panel.patch' ] && [ ! -e '$RKP/0002-add-input-polldev.patch' ]"
@@ -274,6 +274,9 @@ chk "z-002 portata (devm_drm_panel_alloc)"     "grep -q 'devm_drm_panel_alloc' '
 chk "z-002: DSI acceso prima dell'init (prepare_prev_first)" "grep -q '^+    ctx->panel.prepare_prev_first = prev_first;' '$RKP/z-002-panel-generic-dsi.patch' && grep -q '^+static bool prev_first = true;' '$RKP/z-002-panel-generic-dsi.patch'"
 chk "z-002: unprepare senza uscita anticipata"  "! grep -A2 'failed to enter sleep mode' '$RKP/z-002-panel-generic-dsi.patch' | grep -q 'return ret'"
 chk "z-036: avviso sui comandi a DSI spento"    "grep -q 'sent with the host powered down' '$RKP/z-036-dw-mipi-dsi-power-trace.patch'"
+# Standby (6/10/2026): il VOP a 3-7 fps dopo la riaccensione era il clock dei
+# pixel passato al frazionario da CPLL a 1584 MHz.
+chk "z-037: clock dei pixel sul divisore intero" "grep -q '^+	MUX(0, \"dclk_vopb_mux\", mux_dclk_vopb_p, CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,' '$RKP/z-037-px30-dclk-vopb-integer.patch' && grep -q '^+	COMPOSITE(0, \"dclk_vopb_src\", mux_cpll_npll_p, CLK_SET_RATE_NO_REPARENT,' '$RKP/z-037-px30-dclk-vopb-integer.patch'"
 chk "rk915: strncpy sostituita (7.2)"          "grep -q 'strscpy_pad(priv->name, RPU_DRIVER_NAME, 12)' '${W}/projects/Rockchip/devices/RK3326/packages/rk915/patches/0003-rk915-linux-7.2-strncpy.patch'"
 chk "joypad: of_gpio ricostruito (7.2)"        "grep -q 'gpio_device_find_by_fwnode' '${W}/projects/Rockchip/devices/RK3326/packages/rocknix-joypad/patches/0003-rocknix-joypad-linux-7.2-of-gpio.patch'"
 chk "perf senza strumenti dell'host (Rust)"   "[ \$(grep -c 'NO_RUST=1' '$LPK') -eq 2 ]"

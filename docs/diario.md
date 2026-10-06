@@ -140,12 +140,13 @@ Prima build: alcune ore, ~100 GB di disco.
 
 ## Cosa contiene
 
-    patches/linux/            8 patch kernel, tutte a fuzz 0 sulla 7.2.9:
+    patches/linux/            9 patch kernel, tutte a fuzz 0 sulla 7.2.9:
                               r-024/r-025 (rk915 SDIO, MIPI), r-034 (CRU
                               rimesso al risveglio: di ROCKNIX), z-034 (GPLL
                               al risveglio), z-002 (pannello, init dopo
                               l'accensione del DSI), z-036 (accensione del
-                              DSI nel log), z-010 (i due
+                              DSI nel log), z-037 (clock dei pixel sul
+                              divisore intero), z-010 (i due
                               device tree xf35h/rf35h, GPU fino a 600 MHz),
                               0000 (batteria rinominata: di Lakka,
                               rigenerata). Nessuna al codec.
@@ -5656,3 +5657,35 @@ qualcuno non riscrive il registro. Prossima prova, `rf35h-display-dump.sh
 frac`: riscrive il frazionario (CLKSEL_CON6) prima con lo stesso valore, poi
 con uno diverso e di nuovo l'originale, per sapere quale correzione serve nel
 kernel.
+
+### Standby: trovato, il clock dei pixel passa al frazionario (6/10/2026)
+
+`rf35h-display-dump.sh` sulla console, `clk_summary` nei tre stati:
+- **buono** (dopo l'avvio): `dclk_vopb_src` 31 058 824 Hz = CPLL 1584 / 51,
+  `dclk_vopb_mux` sul divisore intero, frazionario spento. VOP a 59,6/s.
+- **rotto** (schermo spento e riacceso, o standby): `dclk_vopb_src` 1584 MHz
+  (divisore 1), `dclk_vopb_frac` 31,08 MHz, mux sul frazionario. VOP a 3-7/s.
+  `crtc-0: timed out waiting for DSP hold` e WARNING in
+  `vop_crtc_atomic_disable` allo spegnimento.
+- **riparato** (`ripara`: 58,5 Hz e ritorno a 60): CPLL **spostato a 600 MHz**
+  (e la GPU, che sta sullo stesso PLL, da 200 a 300 MHz), frazionario da 600.
+  VOP a 60/s.
+
+Perche' l'avvio e' diverso: la prima modeset parte con il mux sul sorgente
+intero e il framework sceglie CPLL/51 (31,06 MHz, il piu' vicino senza
+superare 31,08). Alle successive la frequenza attuale (31,06) e' diversa da
+quella chiesta (31,08), il mux puo' cambiare genitore e il frazionario, con
+`rockchip_fractional_approximation` che gli da' in ingresso CPLL intero, ne
+offre una "esatta": vince lui. Con 1584 MHz in ingresso questo frazionario
+qui non funziona (con 600 si'). Perche' prima andava: il modo predefinito era
+58,5 Hz (30 MHz), che il framework otteneva portando CPLL a 600 MHz e
+dividendo per 20, senza frazionario; il 60 Hz (31,08 MHz, non ottenibile da
+nessun PLL della tabella con un divisore intero) e' arrivato pochi giorni fa.
+Le prove `frac`, `mux` e `gate` non cambiavano niente perche' non spostavano
+CPLL ne' il divisore.
+
+Correzione, z-037 (clk-px30.c): `dclk_vopb_mux` con `CLK_SET_RATE_NO_REPARENT`
+(resta sul divisore intero, come all'avvio) e `dclk_vopb_src` senza
+`CLK_SET_RATE_PARENT` (il clock dei pixel non ritocca piu' CPLL e quindi la
+GPU). Risultato atteso: sempre CPLL/51 = 31,06 MHz, 59,96 Hz. Compilato
+arm64 con W=1 -Werror, a fuzz 0 dopo r-034 e z-034.
