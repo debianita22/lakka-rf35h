@@ -10,9 +10,9 @@
 #
 # Per ogni pacchetto prova l'URL del package.mk e poi il mirror di LibreELEC,
 # esattamente come fa scripts/get_archive (per gli URL GNU, prima ancora
-# mirrors.kernel.org: integration/gnu-mirror-rf35h.patch): se almeno uno
-# risponde, quel pacchetto non e' un problema. Stampa solo quelli dove
-# falliscono tutti.
+# mirrors.kernel.org; per ultimo tarballs.nixos.org per sha256:
+# integration/source-mirrors-rf35h.patch): se almeno uno risponde, quel
+# pacchetto non e' un problema. Stampa solo quelli dove falliscono tutti.
 #
 # Quello che trova va aggiunto a seed-sources.sh. Gli stessi tarball stanno
 # quasi sempre nel pool di Ubuntu, che le versioni vecchie le tiene:
@@ -109,7 +109,7 @@ try() {
 	curl -s --fail -r 0-0 --connect-timeout 20 --max-time 60 -o /dev/null "$1" 2>/dev/null && return 0
 	return 1
 }
-# come integration/gnu-mirror-rf35h.patch: un URL GNU prima da mirrors.kernel.org
+# come integration/source-mirrors-rf35h.patch: un URL GNU prima da mirrors.kernel.org
 case "${url}" in
 	https://ftpmirror.gnu.org/gnu/*) try "https://mirrors.kernel.org/gnu/${url#https://ftpmirror.gnu.org/gnu/}" && exit 0 ;;
 	https://ftpmirror.gnu.org/*)     try "https://mirrors.kernel.org/gnu/${url#https://ftpmirror.gnu.org/}" && exit 0 ;;
@@ -118,6 +118,8 @@ case "${url}" in
 esac
 try "${url}" && exit 0
 try "${MIRROR}/${name}/${sname}" && exit 0
+# e per ultimo il mirror di nixpkgs per sha256 (stesso patch)
+[ -n "${sha}" ] && try "https://tarballs.nixos.org/sha256/${sha}" && exit 0
 printf '%s|%s|%s|%s\n' "${name}" "${sname}" "${url}" "${sha}" >> "${OUT}"
 printf '  %-24s %s\n' "${name}" "${url}"
 ONE

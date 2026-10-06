@@ -150,9 +150,10 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/perf-host-t
 # L'hash dei pacchetti divideva sugli spazi i nomi dei nostri override
 # ("TGB Dual/TGB Dual.cfg"): errori sha256sum e file esclusi dall'hash.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/stamp-spaces-rf35h.patch"
-# I tarball GNU prima da mirrors.kernel.org: ftp.gnu.org e ftpmirror.gnu.org
-# dai runner di GitHub vanno in timeout (build #22 e #24)
-patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/gnu-mirror-rf35h.patch"
+# Sorgenti: i tarball GNU prima da mirrors.kernel.org (ftp.gnu.org e
+# ftpmirror.gnu.org dai runner di GitHub vanno in timeout, build #22 e #24),
+# per ultimo tarballs.nixos.org per sha256 (savannah, build #25)
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/source-mirrors-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/retroarch-no-go2-rf35h.patch"
 # RF35H_ALL_CORES=1: include anche lr_moonlight e vitaquake3, che Lakka
 # esclude su ogni progetto. La patch sta in optional/ perche' quei due

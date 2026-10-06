@@ -237,6 +237,11 @@ mkpw() {
 	pkgdir linux linux-7.2.9; stamp linux target
 	# un nome che comincia come quello di un interrotto, ma e' un altro pacchetto
 	pkgdir mgba-tools mgba-tools-2.0; stamp mgba-tools target
+	# l'immagine in costruzione (fuori) e due cartelle "image" dentro i
+	# pacchetti (restano: un'esclusione non ancorata le toglieva)
+	mkdir -p "${B}/image/system" "${B}/build/linux-7.2.9/drivers/usb/image" "${B}/install_pkg/mgba-1.0/usr/share/image"
+	echo x > "${B}/image/system/f"; echo x > "${B}/build/linux-7.2.9/drivers/usb/image/Kconfig"
+	echo x > "${B}/install_pkg/mgba-1.0/usr/share/image/pic"
 }
 pack() { ( export PATH="${T}/bin:${PATH}"; W="${PW}" bash "${CB}" pack 1 "${1:-}" > "${T}/pack.out" 2>&1 ); }
 mkpw; pack; rc=$?
@@ -250,6 +255,8 @@ ok "retroarch solo scompattato, linux fatto: restano" 'inst build/retroarch-1.21
 ok "mgba-tools (altro pacchetto, nome simile): resta" 'inst build/mgba-tools-2.0/file && inst .stamps/mgba-tools/build_target'
 ok "install_pkg resta (lo rifa' la build del pacchetto)" 'inst install_pkg/mgba-1.0/'
 ok "lo dice nel log" 'grep -q "interrotti: gcc:target mgba:target: si rifanno da capo (2 cartelle" "${T}/pack.out"'
+ok "build.*/image e .threads fuori dallo stato" '! inst image/ && ! inst .threads/'
+ok "una cartella image dentro un pacchetto resta (kernel, install_pkg)" 'inst build/linux-7.2.9/drivers/usb/image/Kconfig && inst install_pkg/mgba-1.0/usr/share/image/pic'
 mkpw; rm -rf "${B}/.threads"; pack failed; rc=$?
 ok "senza .threads (nessuna build in questa parte): non toglie niente" '[ "${rc}" = 0 ] && [ -e "${B}/build/mgba-1.0" ] && [ -e "${B}/build/gcc-15.1.0" ]'
 
