@@ -205,6 +205,19 @@ if command -v mksquashfs >/dev/null 2>&1 && command -v unsquashfs >/dev/null 2>&
 	collect "${R}"; rm "${T}/w/dist/core-packages.txt"
 	checkdist; rc=$?
 	ok "artifact senza core-packages.txt: check-dist si ferma" '[ "${rc}" != 0 ] && grep -q "manca .*core-packages.txt" "${T}/check.out"'
+
+	# GitHub non accetta nella release un file da 2 GiB in su (truncate: un
+	# file sparso, niente spazio su disco)
+	collect "${R}"
+	rm -rf "${T}/w/dist"; mkimg "${R}" "${T}/w/lakka-rf35h-build/target"
+	truncate -s 2147483648 "${T}/w/lakka-rf35h-build/target/${NAME}.img.gz"
+	W="${T}/w" RF35H_VERSION=v9.9.9 bash "${CB}" collect > "${T}/collect.out" 2>&1; rc=$?
+	ok "un .img.gz da 2 GiB: collect esce 0 (l'artifact serve lo stesso)" '[ "${rc}" = 0 ] && [ -f "${T}/w/dist/${NAME}.img.gz" ]'
+	checkdist; rc=$?
+	ok "  ...check-dist lo ferma e lo nomina" '[ "${rc}" != 0 ] && grep -q "file oltre i 2 GiB, la release non si pubblica: ${NAME}.img.gz:2147483648" "${T}/check.out"'
+	truncate -s 2147483647 "${T}/w/dist/${NAME}.img.gz"
+	checkdist; rc=$?
+	ok "  ...un byte sotto il limite passa" '[ "${rc}" = 0 ]'
 	unset PKGS
 else
 	skip=$((skip + 1)); echo "  (salto collect: serve squashfs-tools)"

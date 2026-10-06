@@ -5712,3 +5712,45 @@ sui 27 `PKG_URL` GNU dell'albero: tutti nella forma giusta. Non ricompila
 niente (`calculate_stamp` non legge `scripts/`). `check-sources.sh` prova lo
 stesso mirror. Restano fuori i tre di savannah (attr, freetype, configtools):
 host diverso, finora mai in timeout.
+
+## Tutti i core che compilano nell'immagine (6/10/2026)
+
+Richiesta: nella release tutti i core che su Lakka compilavano, tranne quelli
+che non compilavano. `CORES_DEFAULT` passa da 34 a 162; il set di prima resta
+come `CORES_BASE` (`--base-cores`), per build di prova piu' corte, e la
+tabella principale/riserva della guida ora descrive quello.
+
+Come si arriva a 162. Il piano di build con `--all-cores` (dry run da utente
+non root: da root `genbuildplan` si ferma) ha 507 passi e 171 core; Lakka ne
+elenca 175, e kronos (solo OpenGL), lr_moonlight, vitaquake3 (esclusi su
+Rockchip) e np2kai (disattivato) non entrano nemmeno nel piano. Dei 171:
+- beetle_bsnes, beetle_saturn, blastem, bsnes_mercury, holani, lrps2 hanno
+  `PKG_ARCH` solo x86: `scripts/build` e `scripts/install` escono 0 senza
+  installare niente, e check-dist li darebbe per mancanti;
+- panda3ds, azahar ed ecwolf non compilano (build del 21/9, "Core riparati e
+  core lasciati fuori"); applewin, uae4arm e cannonball, riparati allora,
+  ci sono.
+Ordine: prima i lunghi (`EARLY_START_LR_CORES` di Lakka, che con
+`CUSTOM_LIBRETRO_CORES` non vale piu'), poi il set di base, poi gli altri.
+
+**Difetto latente trovato strada facendo.** Lakka toglie gli esclusi con
+`${LIBRETRO_CORES// ${core} /}`: la sua lista ha molti spazi fra i nomi, la
+nostra (`CUSTOM_LIBRETRO_CORES`) uno solo. Provato sul suo package.mk:
+"gambatte fceumm mgba" senza fceumm diventa "gambattemgba", e il primo e
+l'ultimo non si tolgono affatto. Con `--keep-going` un core fallito in mezzo
+alla lista avrebbe fermato la build su un pacchetto inesistente, e uno in
+cima o in fondo sarebbe stato ritentato fino a "gia' escluso ma fallisce
+ancora". `build_env` ora passa ogni nome con uno spazio suo da entrambe le
+parti (" a  b  c "): stesso package.mk, tolti giusti in mezzo, in cima e in
+fondo.
+
+CI: fino a otto parti invece di quattro (la build da zero con 34 core ne
+usava due). Il job release controlla anche che ogni file stia sotto i 2 GiB,
+il limite di GitHub per i file di una release: collect avvisa, check-dist
+ferma (prova in `test-ci-build.sh` con un file sparso a 2 GiB e a un byte
+sotto). Il SYSTEM sta in 3 GB dalla v1.0.0 (`SYSTEM_SIZE=3072`).
+
+Da sapere: molti dei nuovi core su un A35 non sono giocabili (`play`,
+`dolphin`, `citra`); la build da zero dura molto di piu' (mame, same_cdi,
+scummvm); l'aggiornamento di sistema scarica e riscrive un SYSTEM piu'
+grande. Misure vere alla prima build in CI.

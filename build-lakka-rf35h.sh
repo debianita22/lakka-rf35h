@@ -21,9 +21,10 @@ DEVA_BOARD=""
 OVERLAY=""
 JOBS=""
 PKG_JOBS=""
-# Set di core di default: per ogni sistema della collezione un core principale
-# e almeno una riserva, scelti per quello che l'RK3326 regge. Verificati uno
-# per uno nei loro package.mk e Makefile (vedi docs/diario.md, "Core").
+# Set di base (--base-cores, ed era il default fino alla v1.2): per ogni
+# sistema della collezione un core principale e almeno una riserva, scelti per
+# quello che l'RK3326 regge. Verificati uno per uno nei loro package.mk e
+# Makefile (vedi docs/diario.md, "Core").
 #   SNES/SFC        snes9x2010 (veloce), snes9x (accurato), snes9x2005 (leggero)
 #   GB/GBC          gambatte, sameboy, tgbdual
 #   NES/Famicom     fceumm, nestopia
@@ -45,8 +46,21 @@ PKG_JOBS=""
 #   Nintendo DS     melonds (JIT arm64), melondsds (desmume e' un interprete: su un A35 non gira)
 #   Amstrad CPC     cap32, crocods
 #   Dreamcast       flycast (unico core Dreamcast)
-# --all-cores per i ~120 di Lakka; --cores "..." per un elenco proprio.
-CORES_DEFAULT="gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbneo fbalpha2012 mame2010 mame2015 mupen64plus_next parallel_n64 pcsx_rearmed beetle_ngp race beetle_wswan handy beetle_lynx stella2014 stella melonds melondsds cap32 crocods flycast"
+CORES_BASE="gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbneo fbalpha2012 mame2010 mame2015 mupen64plus_next parallel_n64 pcsx_rearmed beetle_ngp race beetle_wswan handy beetle_lynx stella2014 stella melonds melondsds cap32 crocods flycast"
+# Default (dal 6/10/2026): tutti i core che Lakka costruisce per RK3326 e che
+# qui compilano, 162. Lakka ne elenca 175; fuori:
+#   - kronos (solo OpenGL), lr_moonlight e vitaquake3 (Lakka li esclude su
+#     Rockchip), np2kai (disattivato in Lakka): non entrano nemmeno nel piano;
+#   - beetle_bsnes, beetle_saturn, blastem, bsnes_mercury, holani, lrps2:
+#     PKG_ARCH solo x86, su aarch64 la build li salta senza installare niente;
+#   - panda3ds, azahar (3DS) ed ecwolf: non compilano (build del 21/9/2026,
+#     docs/diario.md "Core riparati e core lasciati fuori").
+# Prima i lunghi (EARLY_START_LR_CORES di Lakka: con CUSTOM_LIBRETRO_CORES
+# l'ordine e' il nostro), poi il set di base, poi gli altri in ordine
+# alfabetico. Su una riga: la legge tools/ci-build.sh (default_cores).
+# --all-cores per tutti quelli di Lakka, i tre che non compilano compresi;
+# --cores "..." per un elenco proprio.
+CORES_DEFAULT="mame scummvm mame2015 mame2010 same_cdi vice dolphin ppsspp fbneo gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbalpha2012 mupen64plus_next parallel_n64 pcsx_rearmed beetle_ngp race beetle_wswan handy beetle_lynx stella2014 stella melonds melondsds cap32 crocods flycast 2048 81 a5200 amiarcadia amiberry anarch applewin ardens atari800 b2 beetle_pcfx beetle_psx beetle_supafaust beetle_supergrafx beetle_vb bluemsx bnes boom3 boytacean bsnes bsnes2014 bsnes_hd bsnes_jg cannonball chailove citra clownmdemu craft daphne desmume desmume_2015 dice dinothawr dirksimple dosbox dosbox_core dosbox_pure dosbox_svn doublecherrygb doukutsu_rs easyrpg emux_sms ep128emu fake_08 fmsx freechaf freeintv fuse_libretro gam4980 gearboy gearcoleco geargrafx gearlynx genesis_plus_gx_wide geolith gme gw_libretro hatari higan_sfc higan_sfc_balanced jaxe jollycv jumpnbump lowres_nx lutro m2000 mame2000 mame2003_plus meowpc98 mesen mesen_s mgba_fork mojozork mrboom mu neocd noods numero nxengine o2em openlara opera pd777 play pocketcdg pokemini potator prboom prosystem puae puae2021 px68k pzretro quasi88 quicknes reminiscence retro8 rustation_ng sameduck skyemu snes9x2002 snes9x2005_plus superbroswar swanstation tamalibretro theodore thepowdertoy tic80 tyrquake uae4arm uzem vbam vecx vircon32 virtualjaguar virtualxt vitaquake2 wasm4 xmil xrick yabasanshiro yabause"
 CORES="${CORES_DEFAULT}"
 SKIP_CORES=""
 KEEP_GOING="no"
@@ -89,14 +103,18 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      i core e RAM/2 GB: cosi' il prodotto resta vicino ai core
                      veri e non si va in swap. Per spingere: --pkg-jobs 4
                      --jobs 4.
-  --all-cores        tutti i ~120 core di Lakka per RK3326 (default: 30, con riserve)
+  --all-cores        tutti i core di Lakka per RK3326, anche panda3ds, azahar ed
+                     ecwolf, che qui non compilano (default: i 162 che compilano)
+  --base-cores       solo il set di base: 34 core, un principale e una riserva
+                     per sistema (il default fino alla v1.2). Per una build di
+                     prova piu' corta; non per una release
   --skip-core NOME   esclude un core dalla build; ripetibile. Lakka applica
                      EXCLUDE_LIBRETRO_CORES dopo la lista, quindi vale sia con
                      --all-cores sia con --cores
   --keep-going       non fermarsi al primo core che non compila: lo esclude e
                      riprende, poi elenca alla fine quelli saltati
   --keep-going-max N quante riprese al massimo (default 25)
-  --cores "a b c"    costruisci solo questi core libretro invece dei 30 di
+  --cores "a b c"    costruisci solo questi core libretro invece dei 162 di
                      default. Per una prima immagine di prova bastano:
                      --cores "gambatte fceumm genesis_plus_gx snes9x2010 mgba"
   --kms              applica anche optional/kms-no-compositor.patch
@@ -135,6 +153,7 @@ while [ $# -gt 0 ]; do
 		--pkg-jobs) PKG_JOBS="$2"; shift 2 ;;
 		--cores)    CORES="$2"; shift 2 ;;
 		--all-cores) CORES=""; shift ;;   # vuoto = tutti quelli di Lakka
+		--base-cores) CORES="${CORES_BASE}"; shift ;;
 		--skip-core)
 				[ -n "${2:-}" ] || { printf '\033[31m[x] %s\033[0m\n' "--skip-core vuole il nome di un core" >&2; exit 1; }
 			SKIP_CORES="${SKIP_CORES} $2"; shift 2 ;;
@@ -245,7 +264,16 @@ build_env() {
 	if [ -n "${OVERLAY_REV:-}" ]; then BENV+=(BUILDER_VERSION="${OVERLAY_REV}"); fi
 	if [ -n "${JOBS}" ]; then BENV+=(CONCURRENCY_MAKE_LEVEL="${JOBS}"); fi
 	if [ -n "${PKG_JOBS}" ]; then BENV+=(THREADCOUNT="${PKG_JOBS}"); fi
-	if [ -n "${CORES}" ]; then BENV+=(CUSTOM_LIBRETRO_CORES="${CORES}"); fi
+	# Ogni nome con uno spazio suo da entrambe le parti (" a  b  c "): Lakka
+	# toglie gli esclusi con ${LIBRETRO_CORES// ${core} /}, che con un solo
+	# spazio fra i nomi incolla i vicini ("a b c" senza b diventa "ac") e non
+	# trova il primo ne' l'ultimo. Con --keep-going un core fallito in mezzo
+	# alla lista avrebbe fermato la build su un pacchetto inesistente.
+	if [ -n "${CORES}" ]; then
+		local c padded=""
+		for c in ${CORES}; do padded="${padded} ${c} "; done
+		BENV+=(CUSTOM_LIBRETRO_CORES="${padded}")
+	fi
 	if [ -n "${SKIP_CORES}" ]; then BENV+=(EXCLUDE_LIBRETRO_CORES="${SKIP_CORES# }"); fi
 }
 
@@ -735,18 +763,21 @@ if [ -n "${CORES}" ]; then
   I nomi sono quelli delle cartelle in ${WORKDIR}/packages/lakka/libretro_cores/"
 	n=0; for c in ${CORES}; do n=$((n+1)); done
 	if [ "${CORES}" = "${CORES_DEFAULT}" ]; then
-		echo "  ${n} core (set curato per RK3326): ${CORES}"
+		echo "  ${n} core: tutti quelli che compilano per RK3326 (mame, scummvm e dolphin compresi: sono ore)"
+		warn "su questo SoC molti non sono giocabili; per una build di prova piu' corta: --base-cores"
+	elif [ "${CORES}" = "${CORES_BASE}" ]; then
+		echo "  ${n} core (set di base, --base-cores: non per una release): ${CORES}"
 	else
 		echo "  ${n} core: ${CORES}"
 	fi
 else
 	say "Core libretro"
 	# contati da CORES_DEFAULT, non scritti: il numero scritto era rimasto a 13
-	# quando il set e' passato a 30 (34 dal 4/10/2026)
+	# quando il set e' passato a 30 (34 dal 4/10/2026, 162 dal 6/10/2026)
 	n=0; for c in ${CORES_DEFAULT}; do n=$((n+1)); done
-	warn "tutti i ~120 di Lakka per RK3326, mame/ppsspp/scummvm compresi: sono ore,"
-	warn "e su questo SoC molti non sono giocabili. Il default (senza --all-cores)"
-	warn "e' un set curato di ${n}."
+	warn "tutti quelli di Lakka per RK3326, anche panda3ds, azahar ed ecwolf che"
+	warn "non compilano (con --keep-going si saltano). Il default (senza"
+	warn "--all-cores) sono i ${n} che compilano."
 fi
 
 # Ogni modifica dichiarata deve essere davvero nell'albero. Si verifica sia al
@@ -823,10 +854,12 @@ echo "  versione: ${RF35H_VERSION:-quella di Lakka (devel-<data>)}${OVERLAY_REV:
 echo "  make -j per pacchetto: ${JOBS}"
 echo "  pacchetti in parallelo: ${PKG_JOBS}${PKG_JOBS_WHY:+ (${PKG_JOBS_WHY})}"
 echo "  compilatori al massimo: $(( JOBS * PKG_JOBS ))"
-if [ -n "${CORES}" ]; then
+if [ "${CORES}" = "${CORES_DEFAULT}" ]; then
+	echo "  core libretro: i ${n} di default. Sono mame, same_cdi e scummvm a mangiare le ore."
+elif [ -n "${CORES}" ]; then
 	echo "  core libretro: ${CORES}"
 else
-	warn "core libretro: tutti (--all-cores). Sono mame, ppsspp e scummvm a mangiare le ore."
+	warn "core libretro: tutti (--all-cores). Sono mame, same_cdi e scummvm a mangiare le ore."
 fi
 echo "  log: ${LOG}"
 echo

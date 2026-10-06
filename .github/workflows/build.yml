@@ -11,7 +11,8 @@
 #                            rifa' solo i pacchetti cambiati. Pacchetti di
 #                            due commit insieme: mai per una release.
 #
-# La build sta in fino a quattro parti di 6 ore (build-stage.yml). La release
+# La build sta in fino a otto parti di 6 ore (build-stage.yml): con tutti i
+# 162 core da zero ne servono piu' di quattro. La release
 # ha l'immagine (.img.gz, prima installazione), l'aggiornamento (.tar, quello
 # che scaricano le console da Device Settings > Aggiornamento di sistema),
 # update.txt (cosa scaricare: le console leggono quello della release
@@ -151,16 +152,50 @@ jobs:
     uses: ./.github/workflows/build-stage.yml
     with:
       stage: 4
+      version: ${{ needs.setup.outputs.version }}
+
+  stage5:
+    needs: [setup, stage4]
+    if: needs.stage4.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 5
+      version: ${{ needs.setup.outputs.version }}
+
+  stage6:
+    needs: [setup, stage5]
+    if: needs.stage5.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 6
+      version: ${{ needs.setup.outputs.version }}
+
+  stage7:
+    needs: [setup, stage6]
+    if: needs.stage6.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 7
+      version: ${{ needs.setup.outputs.version }}
+
+  stage8:
+    needs: [setup, stage7]
+    if: needs.stage7.outputs.result == 'continue'
+    uses: ./.github/workflows/build-stage.yml
+    with:
+      stage: 8
       last: true
       version: ${{ needs.setup.outputs.version }}
 
   release:
     name: Release
-    needs: [setup, stage1, stage2, stage3, stage4]
+    needs: [setup, stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8]
     if: >-
       !cancelled() && needs.setup.outputs.publish == 'true' &&
       (needs.stage1.outputs.result == 'done' || needs.stage2.outputs.result == 'done' ||
-       needs.stage3.outputs.result == 'done' || needs.stage4.outputs.result == 'done')
+       needs.stage3.outputs.result == 'done' || needs.stage4.outputs.result == 'done' ||
+       needs.stage5.outputs.result == 'done' || needs.stage6.outputs.result == 'done' ||
+       needs.stage7.outputs.result == 'done' || needs.stage8.outputs.result == 'done')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

@@ -28,9 +28,10 @@
 #
 # Perche' "install" a parte: all'avvio l'init installa qualunque aggiornamento
 # trovi in /storage/.update, senza chiedere, e riscrive KERNEL e poi SYSTEM
-# (~650 MB): se la batteria muore li', la card va riscritta. La batteria si
-# guarda quindi subito prima del riavvio, non quando si scarica, e fino ad
-# allora il .tar sta in .update/.rf35h-staged. L'init cerca solo in cima a
+# (~650 MB col set di base, di piu' con tutti i core): se la batteria muore
+# li', la card va riscritta. La batteria si guarda quindi subito prima del
+# riavvio, non quando si scarica, e fino ad allora il .tar sta in
+# .update/.rf35h-staged. L'init cerca solo in cima a
 # .update (KERNEL con SYSTEM, il primo *.tar, *.img.gz o *.img), e la sua
 # pulizia (rm -rf .update/[0-9a-zA-Z]*, poi .tmp, .nocheck e .nocompat) non
 # tocca una cartella col punto: li' dentro il .tar non viene ne' installato

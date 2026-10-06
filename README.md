@@ -34,10 +34,11 @@ need a port (device tree, boot loader, controls): see
 
 ## Features
 
-- RetroArch with a curated set of 34 libretro cores: a main core and, where
-  one exists, a fallback for each system, chosen for the Cortex-A35; 19
-  interpreter cores are built with link-time optimization. All of Lakka's
-  RK3326 cores are available as a build option.
+- RetroArch with 162 libretro cores: every core Lakka builds for RK3326 that
+  compiles here. Many are too heavy for the Cortex-A35; the guide lists a
+  main core and a fallback per system, chosen for this SoC (the base set, a
+  build option on its own). 19 interpreter cores are built with link-time
+  optimization.
 - Mesa Panfrost with OpenGL ES by default; Vulkan (PanVK) selectable in
   RetroArch.
 - *Device Settings* in RetroArch: brightness, sleep timer, stick and status
@@ -115,7 +116,8 @@ Updates: *Settings > Device Settings > System Update*.
 
 ## Building
 
-An x86_64 Linux host with about 100 GB free; the first build takes hours. The
+An x86_64 Linux host with about 100 GB free (more for all 162 cores: see the
+guide); the first build takes hours, many of them for the larger cores. The
 build runs in an Ubuntu 24.04 container, so the host needs only `git` and
 Docker (or Podman). These lines also install the tools `flash-sd.sh` uses.
 

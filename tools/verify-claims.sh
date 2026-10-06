@@ -414,6 +414,17 @@ chk "firma dell'overlay senza percorsi"       "grep -q 'overlay-sig2' '$O/build-
 chk "--verify-only e --sh in ogni posizione"  "grep -q -- '--verify-only) VERIFY_ONLY=' '$O/build-lakka-rf35h.sh' && grep -q 'SHMODE=yes' '$O/build-in-docker.sh'"
 # con --workdir relativo il log finiva in ${WORKDIR}/${WORKDIR}/ dopo il cd
 chk "--workdir reso assoluto (log della build)" "grep -qF 'pwd)/\$(basename \"\${WORKDIR}\")' '$O/build-lakka-rf35h.sh'"
+# I core (6/10/2026): il default sono tutti quelli che compilano, il set di
+# base resta per le build di prova. Con CUSTOM_LIBRETRO_CORES a spazio singolo
+# Lakka incollava i vicini di un core escluso ("a b c" senza b: "ac").
+BLD="$O/build-lakka-rf35h.sh"
+NDEF="$(sed -n 's/^CORES_DEFAULT="\(.*\)"$/\1/p' "$BLD" | wc -w)"
+NBASE="$(sed -n 's/^CORES_BASE="\(.*\)"$/\1/p' "$BLD" | wc -w)"
+chk "core: CUSTOM_LIBRETRO_CORES coi nomi staccati" "grep -qF 'padded=\"\${padded} \${c} \"' '$BLD' && grep -qF 'CUSTOM_LIBRETRO_CORES=\"\${padded}\"' '$BLD'"
+chk "core: --base-cores"                      "grep -qF -- '--base-cores) CORES=\"\${CORES_BASE}\"' '$BLD'"
+chk "core: nel default nessuno che non compila" "! sed -n 's/^CORES_DEFAULT=\"\(.*\)\"\$/ \1 /p' '$BLD' | grep -qE ' (panda3ds|azahar|ecwolf|kronos|lr_moonlight|vitaquake3|np2kai|beetle_bsnes|beetle_saturn|blastem|bsnes_mercury|holani|lrps2) '"
+chk "core: il set di base sta nel default"   "( for c in \$(sed -n 's/^CORES_BASE=\"\(.*\)\"\$/\1/p' '$BLD'); do sed -n 's/^CORES_DEFAULT=\"\(.*\)\"\$/ \1 /p' '$BLD' | grep -qF \" \${c} \" || exit 1; done )"
+chk "core: ${NDEF} e ${NBASE} in help, README, guida e commenti" "[ '$NDEF' -gt '$NBASE' ] && grep -qF 'default: i $NDEF che compilano' '$BLD' && grep -qF 'invece dei $NDEF di' '$BLD' && grep -qF 'qui compilano, $NDEF.' '$BLD' && grep -qF 'set di base: $NBASE core' '$BLD' && grep -qF 'with $NDEF libretro cores' '$O/README.md' && grep -qF 'more for all $NDEF cores' '$O/README.md' && grep -qF 'has $NDEF libretro cores' '$O/docs/guide.md' && grep -qF 'base set of $NBASE cores' '$O/docs/guide.md' && grep -qF 'default set of $NDEF cores' '$O/docs/guide.md' && grep -qF 'kernel, $NDEF core)' '$O/tools/ci-build.sh' && grep -qF '# $NDEF core da zero' '$O/.github/workflows/build.yml'"
 
 echo "== documentazione allineata ai file"
 # Il riassunto in cima al README e' la prima cosa che si legge, ed e' stato
@@ -443,6 +454,10 @@ chk "release: col trattino sempre pre-release"     "grep -qF 'in *-*) prerelease
 chk "release: tag solo dal ramo principale"        "grep -qF 'merge-base --is-ancestor' '$CIB' && grep -qF 'run: ./tools/ci-build.sh version' '$BYML'"
 chk "release: latest solo alla versione piu' alta" "grep -qF 'sort -V' '$CIB' && grep -qF -- '--latest=\"\${latest}\"' '$CIB' && grep -qF 'run: ./tools/ci-build.sh publish dist' '$BYML'"
 chk "release: una per versione alla volta"         "grep -qF 'inputs.version || github.ref }}' '$BYML'"
+# Con tutti i core la build da zero sta in piu' di quattro parti, e il .tar
+# cresce: GitHub rifiuta nella release i file da 2 GiB in su.
+chk "CI: otto parti, l'ultima e' la 8"            "[ \"\$(grep -c 'last: true' '$BYML')\" = 1 ] && sed -n '/^  stage8:/,/^\$/p' '$BYML' | grep -q 'last: true' && grep -qF 'needs: [setup, stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8]' '$BYML' && grep -qF \"needs.stage8.outputs.result == 'done'\" '$BYML'"
+chk "release: ogni file sotto i 2 GiB"             "grep -q '^too_big()' '$CIB' && sed -n '/^cmd_check_dist() {/,/^}/p' '$CIB' | grep -q 'file oltre i 2 GiB'"
 
 echo "== aggiornamento e strumenti per la card: le correzioni dopo la v1.0.0"
 # rf35h-update: (1) la batteria si guardava solo scaricando, e il .tar

@@ -20,7 +20,7 @@
 #                               solo se e' la versione piu' alta
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
-# da zero (toolchain, llvm per l'host, Mesa, kernel, 30 core) ne chiede di
+# da zero (toolchain, llvm per l'host, Mesa, kernel, 162 core) ne chiede di
 # piu'. Ogni parte costruisce fino a BUILD_MINUTES dall'inizio del job; se non
 # ha finito si ferma, e la successiva riparte dallo stato: LibreELEC salta i
 # pacchetti gia' fatti (stamp); quelli interrotti si rifanno da capo
@@ -484,6 +484,19 @@ completeness() {
 	[ ! -s "${d}/missing.txt" ] && [ ! -s "${d}/dropped.txt" ]
 }
 
+# GitHub non accetta in una release un file da 2 GiB in su: con tutti i core
+# il .tar e' cresciuto, e scoprirlo a meta' della pubblicazione lascerebbe una
+# bozza a meta'. I file della release in <d> oltre il limite, uno per parola.
+ASSET_MAX=$(( 2 * 1024 * 1024 * 1024 ))
+too_big() {
+	local d="$1" f big=""
+	for f in "${d}"/*.img.gz "${d}"/*.tar; do
+		[ -f "${f}" ] || continue
+		[ "$(stat -c%s "${f}")" -lt "${ASSET_MAX}" ] || big="${big} ${f##*/}:$(stat -c%s "${f}")"
+	done
+	echo "${big# }"
+}
+
 # una riga: cosa manca e cosa la build ha lasciato fuori
 incomplete() {
 	local d="$1" m f
@@ -512,6 +525,15 @@ cmd_check_dist() {
 	fi
 	rm -rf "${chk}"
 	echo "  ok, $(wc -l < "${d}/cores.txt") core libretro, nessuno vuoto o troncato"
+
+	say "Dimensioni: ogni file sotto i 2 GiB"
+	local big
+	big="$(too_big "${d}")"
+	if [ -n "${big}" ]; then
+		note error "File troppo grande" "${big} (byte): GitHub accetta nella release solo file sotto i 2 GiB"
+		die "file oltre i 2 GiB, la release non si pubblica: ${big}"
+	fi
+	echo "  ok: $(cd "${d}" && du -h -- *.img.gz *.tar | tr '\t\n' ' ;')"
 
 	say "Core e giochi della build completa"
 	if completeness "${d}"; then
@@ -587,6 +609,12 @@ cmd_collect() {
 	if [ -s dropped.txt ]; then summ "- lasciati fuori dalla build: $(grep -oE '^  [A-Za-z0-9_.+-]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"; fi
 	note notice "Immagine" "$(basename "${img}") $(du -h "$(basename "${img}")" | cut -f1), ${tb} $(du -h "${tb}" | cut -f1), $(wc -l < cores.txt) core; fuori: $(grep -oE '^  [A-Za-z0-9_.+-]+' dropped.txt | tr -d ' ' | tr '\n' ' ')"
 	# la decisione e' del job release (check-dist); qui l'avviso, gia' sul run
+	local big
+	big="$(too_big "${dist}")"
+	if [ -n "${big}" ]; then
+		note warning "File troppo grande" "${big} (byte): oltre i 2 GiB, il job release non lo pubblica"
+		summ "- oltre i 2 GiB, non pubblicabile: ${big}"
+	fi
 	if ! completeness "${dist}"; then
 		note warning "Immagine incompleta" "$(incomplete "${dist}"): il job release non la pubblica senza allow_incomplete"
 		summ "- immagine incompleta: $(incomplete "${dist}")"

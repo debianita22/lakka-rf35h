@@ -221,8 +221,14 @@ shared: use SSH for those. `Cores` and `Playlists` are read-only.
 
 ### Cores
 
-The default image has 34 libretro cores: a main core and, where one exists, a
-fallback for each system. Names are the ones `--cores` takes.
+The image has 162 libretro cores: every core Lakka builds for RK3326 that
+compiles here. Lakka lists 175; left out are kronos (desktop OpenGL only),
+lr_moonlight, vitaquake3 and np2kai (disabled by Lakka for this platform), six
+x86-only cores, and panda3ds, azahar and ecwolf, which do not compile. Many of
+the rest are too heavy for the Cortex-A35 (`play`, `dolphin` and `citra`, for
+instance). This table is the base set (`--base-cores`): a main core and,
+where one exists, a fallback for each system, chosen for this SoC. Names are
+the ones `--cores` takes.
 
 | System | Main | Fallback |
 |---|---|---|
@@ -237,7 +243,7 @@ fallback for each system. Names are the ones `--cores` takes.
 | Neo Geo, CPS1/2/3 | `fbneo` | `fbalpha2012`, `mame2010` |
 | MAME (0.139 romset) | `mame2010` | `mame2015` (0.160; many 0.139 sets load) |
 | Nintendo 64 | `mupen64plus_next` | `parallel_n64` |
-| PlayStation | `pcsx_rearmed` | none in the default set (`swanstation` with `--cores`) |
+| PlayStation | `pcsx_rearmed` | none in the base set (`swanstation` and `beetle_psx` are heavier) |
 | Neo Geo Pocket | `beetle_ngp` | `race` |
 | WonderSwan / Color | `beetle_wswan` | none |
 | Atari Lynx | `handy` | `beetle_lynx` |
@@ -249,8 +255,7 @@ fallback for each system. Names are the ones `--cores` takes.
 `pcsx_rearmed` and `handy` run without BIOS files; a real PlayStation BIOS
 (`scph5501.bin` and the like) improves compatibility, and `beetle_lynx` needs
 `lynxboot.img`. *Settings > Core > Manage Cores*, then a core, lists the BIOS
-files it looks for and whether they are present. Other systems need an image
-built with `--cores` or `--all-cores` (see [Build options](#build-options)).
+files it looks for and whether they are present.
 
 Per-core defaults, copied to `/storage/.config/retroarch/config/` only when
 missing (delete a file to get the default back):
@@ -494,7 +499,7 @@ it drives the stick LED controller.
 |---|---|
 | Black screen at boot | Read `boot.log` from a PC. If it is missing, boot stopped before the system started: use the serial console. |
 | `/storage` stays at about 25 MB | The first-boot expansion did not run. From a PC, card unmounted: `sudo parted -s -f /dev/sdX resizepart 2 100%`, `sudo e2fsck -f -p /dev/sdX2`, `sudo resize2fs /dev/sdX2` (data is kept). |
-| Console does not start after an update | `sudo sh tools/rf35h-reflash-system.sh <image>.img.gz /dev/sdX` rewrites partition 1 from an image of this port (any release, newer ones too) and removes the failed update; ROMs, saves and settings stay. It needs `mtools`, `gzip` and `blkid`, and about 700 MB in `$TMPDIR`. |
+| Console does not start after an update | `sudo sh tools/rf35h-reflash-system.sh <image>.img.gz /dev/sdX` rewrites partition 1 from an image of this port (any release, newer ones too) and removes the failed update; ROMs, saves and settings stay. It needs `mtools`, `gzip` and `blkid`, and as much space in `$TMPDIR` as the release `.tar` (KERNEL and SYSTEM). |
 | Nothing on screen after installing a generic Lakka RK3326 update or image | `sudo sh tools/rf35h-reflash-system.sh --loader /dev/sdX` writes this port's boot loader back; then rewrite partition 1 with the line above. |
 | No network access to the console | `sudo sh tools/rf35h-rescue.sh /dev/sdX "<ssid>" "<password>"` from a PC (details below). |
 | Buttons wrong or missing | `cat /proc/bus/input/devices \| grep -A8 retrogame_joypad`: the `B: KEY=` line shows the buttons the driver reports. The mapping is in `autoconfig/retrogame_joypad.cfg`. |
@@ -528,9 +533,13 @@ reachable, remove it over SSH with
 
 - x86_64 Linux. An aarch64 host also needs qemu-user, because Rockchip's
   tools are x86 binaries.
-- About 100 GB free and a network connection for the whole build.
-- Time: about four hours from scratch on a 4-core, 16 GB machine; rebuilds
-  are incremental.
+- About 100 GB free for the base set (`--base-cores`) and a network
+  connection for the whole build. The default set of 162 cores needs more,
+  unless `AUTOREMOVE=yes` in the environment (as in CI) deletes each
+  package's build directory once it is installed.
+- Time: about four hours from scratch for the base set on a 4-core, 16 GB
+  machine; the default set takes much longer (`mame`, `same_cdi` and
+  `scummvm` alone take hours). Rebuilds are incremental.
 - The build scripts print their messages in Italian.
 
 Two ways to build:
@@ -689,7 +698,8 @@ version is Lakka's `devel-<date>-<commit>`.
 | Option | Effect |
 |---|---|
 | `--cores "a b c"` | build only these cores (folder names in `lakka-rf35h-build/packages/lakka/libretro_cores/`) |
-| `--all-cores` | all of Lakka's RK3326 cores (about 120); many are too heavy for this SoC |
+| `--all-cores` | all of Lakka's RK3326 cores, including panda3ds, azahar and ecwolf, which do not compile (the default is the 162 that do) |
+| `--base-cores` | only the base set of 34 cores (see [Cores](#cores)): a shorter test build, not for a release |
 | `--skip-core NAME` | leave a core out; repeatable, works with `--cores` and `--all-cores` |
 | `--keep-going` | when a core or an extra fails, drop it and continue; the list ends up in `build-rf35h-<date>-core-saltati.txt` |
 | `--keep-going-max N` | at most N restarts (25) |
@@ -766,7 +776,7 @@ Workflows in [`.github/workflows`](../.github/workflows):
 | Workflow | Runs on | Does |
 |---|---|---|
 | Check (`check.yml`) | push to `main`, pull requests, manual | `tools/ci-check.sh` (shellcheck, actionlint, Python syntax, patch hunk counts, `tools/test-*.sh`) and a dry run on the pinned Lakka commit |
-| Build (`build.yml`) | tag `v*`, *Run workflow*, push to `ci-test/**` | the full image in the same Ubuntu 24.04 container, in up to four jobs of at most 6 hours each |
+| Build (`build.yml`) | tag `v*`, *Run workflow*, push to `ci-test/**` | the full image in the same Ubuntu 24.04 container, in up to eight jobs of at most 6 hours each |
 | Upstream (`upstream.yml`) | every Monday, manual | a newer Linux 7.2.y whose signature (kernel.org keys), SHA-256 and kernel patches (fuzz 0) check out gets a `ci-test/kernel-<version>` branch, a test build and an issue; Lakka `devel` moving past the pinned commit gets an issue. Merging and releasing stay manual |
 
 - **Release**: `git tag v1.0.0 && git push origin v1.0.0`, or *Run workflow*
