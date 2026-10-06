@@ -6,6 +6,9 @@
 #                                             (riproduce sfarfallio e lentezza)
 #   sh rf35h-display-dump.sh salva rotto      dopo "rompi"
 #   sh rf35h-display-dump.sh confronta buono rotto
+#   sh rf35h-display-dump.sh vop              interrupt del VOP al secondo (60 = buono)
+#   sh rf35h-display-dump.sh ripara           58,5 Hz e ritorno a 60: riprogramma il
+#                                             clock dei pixel
 #
 # Perche' (6/10/2026). Con la build ci-21 il DSI si accende prima dell'init del
 # pannello e nessun comando va perso, eppure spegnere e riaccendere lo schermo
@@ -30,6 +33,8 @@ vop-mmu|0xff460f00|0x40
 dsi|0xff450000|0x100
 dsi-phy|0xff2e0000|0x400
 grf-vo|0xff140430|0x10
+cru|0xff2b0000|0x300
+pmucru|0xff2bc000|0x100
 "
 
 dump_regione() { # $1 base, $2 lunghezza
@@ -77,25 +82,58 @@ salva() {
 confronta() {
 	A="${BASE}/$1"; B="${BASE}/$2"
 	[ -d "${A}" ] && [ -d "${B}" ] || { echo "mancano ${A} o ${B}"; exit 1; }
+	# Niente paste ne' diff: su Lakka "paste" e' pastebinit (carica su
+	# paste.libreelec.tv) e diff non c'e'. Solo awk.
 	for f in "${A}"/reg-*.txt; do
 		n="$(basename "${f}")"
 		echo "== ${n#reg-}: registri diversi (indirizzo, $1, $2)"
-		paste -d' ' "${f}" "${B}/${n}" | awk '$2 != $4 { print "  " $1, $2, $4 }'
+		awk 'FILENAME == ARGV[1] { a[$1] = $2; next } ($1 in a) && a[$1] != $2 { print "  " $1, a[$1], $2 }' \
+			"${f}" "${B}/${n}"
 	done
-	echo "== velocita' ($1 / $2)"; paste -d'|' "${A}/velocita.txt" "${B}/velocita.txt" | sed 's/|/   |   /;s/^/  /'
+	echo "== velocita' ($1, poi $2)"; sed 's/^/  /' "${A}/velocita.txt" "${B}/velocita.txt"
 	echo "== interrupt al secondo, $1"; sed 's/^/  /' "${A}/irq-rate.txt" | head -12
 	echo "== interrupt al secondo, $2"; sed 's/^/  /' "${B}/irq-rate.txt" | head -12
-	echo "== stato DRM"; diff "${A}/drm-state.txt" "${B}/drm-state.txt" | head -40
-	echo "== clock"; diff "${A}/clk.txt" "${B}/clk.txt" | head -20
+	for f in drm-state.txt clk.txt; do
+		echo "== ${f}: righe solo in $1 (<) o solo in $2 (>)"
+		awk 'FILENAME == ARGV[1] { a[$0]++; next } { if (a[$0]) a[$0]--; else print "  > " $0 }' "${A}/${f}" "${B}/${f}" | head -30
+		awk 'FILENAME == ARGV[1] { a[$0]++; next } { if (a[$0]) a[$0]--; else print "  < " $0 }' "${B}/${f}" "${A}/${f}" | head -30
+	done
 	( cd "${BASE}" && tar -czf "confronto-$1-$2.tar.gz" "$1" "$2" )
 	echo "tutto in ${BASE}/confronto-$1-$2.tar.gz"
 }
 
-rompi() {
+vop_hz() { # interrupt del VOP al secondo, su 3 s
+	a=$(awk '/vop/ { s = 0; for (i = 2; i <= NF && $i ~ /^[0-9]+$/; i++) s += $i; print s }' /proc/interrupts)
+	sleep 3
+	b=$(awk '/vop/ { s = 0; for (i = 2; i <= NF && $i ~ /^[0-9]+$/; i++) s += $i; print s }' /proc/interrupts)
+	echo $(( (b - a) / 3 ))
+}
+
+sway_sock() {
 	for s in /var/run/0-runtime-dir/sway-ipc.*.sock /run/0-runtime-dir/sway-ipc.*.sock; do
 		[ -S "${s}" ] && S="${s}"
 	done
 	[ -n "${S:-}" ] || { echo "sway non trovato"; exit 1; }
+}
+
+# Cambia modo e torna al 60 Hz: costringe il kernel a riprogrammare il clock
+# dei pixel (dclk_vopb, divisore frazionario dal CPLL). Se dopo questo il VOP
+# torna a 60 interrupt al secondo, il colpevole e' il clock dei pixel non
+# riprogrammato alla riaccensione.
+ripara() {
+	sway_sock
+	echo "VOP prima: $(vop_hz) interrupt/s"
+	SWAYSOCK="${S}" swaymsg output DSI-1 mode 640x480@58.500Hz >/dev/null
+	sleep 2
+	echo "VOP a 58,5 Hz: $(vop_hz) interrupt/s"
+	SWAYSOCK="${S}" swaymsg output DSI-1 mode 640x480@60.000Hz >/dev/null
+	sleep 2
+	echo "VOP di nuovo a 60 Hz: $(vop_hz) interrupt/s"
+	echo "Guarda lo schermo: e' tornato pulito e veloce?"
+}
+
+rompi() {
+	sway_sock
 	SWAYSOCK="${S}" swaymsg output DSI-1 power off >/dev/null
 	sleep 2
 	SWAYSOCK="${S}" swaymsg output DSI-1 power on >/dev/null
@@ -105,7 +143,9 @@ rompi() {
 
 case "${1:-}" in
 salva)     [ -n "${2:-}" ] || { echo "uso: $0 salva <nome>"; exit 1; }; salva "$2" ;;
+vop)       echo "VOP: $(vop_hz) interrupt/s (60 = buono)" ;;
+ripara)    ripara ;;
 rompi)     rompi ;;
 confronta) [ -n "${3:-}" ] || { echo "uso: $0 confronta <a> <b>"; exit 1; }; confronta "$2" "$3" ;;
-*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b>" >&2; exit 1 ;;
+*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b> | vop | ripara" >&2; exit 1 ;;
 esac

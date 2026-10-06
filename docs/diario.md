@@ -5622,3 +5622,25 @@ stato buono, quindi non discrimina. Prossimo passo:
 `tools/rf35h-display-dump.sh` fotografa VOP, IOMMU del VOP, DSI, PHY, GRF del
 VO, stato DRM, clock, interrupt al secondo e velocita' di CPU e memoria in
 stato buono e rotto, e li confronta.
+
+### Standby: il VOP passa da 60 a 7 interrupt al secondo (6/10/2026)
+
+`rf35h-display-dump.sh` sulla ci-21, stato buono (dopo l'avvio) contro stato
+rotto (schermo spento e riacceso da sway): interrupt del VOP **59,6/s contro
+7,4/s**. CPU (ciclo di shell 5,2 s contro 5,0 s) e memoria (4000 MB in 2,7 s
+contro 2,6 s) uguali. La console non e' lenta: e' il VOP che dopo la
+riaccensione fa circa 7 fotogrammi al secondo invece di 60. RetroArch va al
+passo del vsync, quindi rallenta; un pannello rinfrescato a 7 Hz sfarfalla.
+Che la frequenza sia giusta "per il kernel" (dclk_vopb 31,08 MHz nel
+clk_summary dopo il risveglio) non dice niente: e' il valore in cache.
+Candidato principale: il clock dei pixel (dclk_vopb, divisore frazionario dal
+CPLL) che alla riaccensione non viene riprogrammato, perche' la frequenza
+chiesta e' la stessa e il framework dei clock non riscrive il registro.
+Prova senza ricompilare: `rf35h-display-dump.sh ripara` passa a 58,5 Hz e
+torna a 60 (due frequenze diverse = registro riscritto) e misura di nuovo.
+
+Due difetti dello script trovati sulla console: su Lakka `paste` e'
+pastebinit (`cat "$@" | curl https://paste.libreelec.tv`), quindi
+`paste -d' '` ha fatto partire un caricamento vuoto (cat ha rifiutato `-d`,
+il server ha risposto "unauthorized": nessun dato inviato); e `diff` non
+c'e'. Ora solo awk. Anche `rf35h-audiotest` usa `diff`: da sistemare.
