@@ -167,11 +167,14 @@ frac() {
 # Prova 4: gate del frazionario (CLKGATE_CON2 bit 3) chiuso e riaperto.
 mux() {
 	echo "VOP adesso: $(vop_hz) interrupt/s"
+	"${DM}" $(( CRU + 0x114 )) 32 0xC0004000
+	sleep 1
+	echo "prova 3a, mux riscritto sul frazionario (stesso valore): $(vop_hz) interrupt/s"
 	"${DM}" $(( CRU + 0x114 )) 32 0xC0008000
 	sleep 1
 	"${DM}" $(( CRU + 0x114 )) 32 0xC0004000
 	sleep 1
-	echo "prova 3, mux su 24 MHz e di nuovo sul frazionario: $(vop_hz) interrupt/s"
+	echo "prova 3b, mux su 24 MHz e di nuovo sul frazionario: $(vop_hz) interrupt/s"
 	echo "CLKSEL_CON5 ora: $("${DM}" $(( CRU + 0x114 )) 32)"
 }
 
