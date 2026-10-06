@@ -5751,6 +5751,15 @@ v1.0.0-v1.2.0 sono tutte build a piu' parti. Ora
 solo `build.*/image` e `build.*/.threads` di primo livello; prova in
 `test-ci-build.sh`, che sul codice di prima fallisce.
 
+La #27 (ripresa dallo stato della #25, impacchettato col codice di prima) e'
+finita, ma senza IKEMEN: `--keep-going` ha tolto `ikemen-go`. Il motivo
+quasi certo e' lo stesso: Go sta in `build.*/toolchain/lib/golang-bin`, e la
+sua libreria standard ha `src/image` (i pacchetti `image`, `image/png`...),
+che usciva dallo stato; IKEMEN li importa. Nelle release non poteva
+succedere senza che check-dist se ne accorgesse (IKEMEN e' fra i giochi
+pretesi). L'immagine della #27 resta buona per provare lo standby, non per
+una release; la #28 riparte da zero col codice nuovo.
+
 ## Tutti i core che compilano nell'immagine (6/10/2026)
 
 Richiesta: nella release tutti i core che su Lakka compilavano, tranne quelli
