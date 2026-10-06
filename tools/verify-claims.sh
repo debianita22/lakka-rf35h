@@ -282,6 +282,7 @@ chk "joypad: of_gpio ricostruito (7.2)"        "grep -q 'gpio_device_find_by_fwn
 chk "perf senza strumenti dell'host (Rust)"   "[ \$(grep -c 'NO_RUST=1' '$LPK') -eq 2 ]"
 chk "perf senza strumenti dell'host (shellck)" "[ \$(grep -c 'NO_SHELLCHECK=1' '$LPK') -eq 2 ]"
 chk "hash dei pacchetti: nomi con spazi"       "grep 'xargs -d' '${W}/config/functions' | grep -q 'sha256sum'"
+chk "sorgenti GNU prima da mirrors.kernel.org"  "grep -q 'for url in \${GNU_MIRROR_URL} ' '${W}/scripts/get_archive' && grep -q 'https://ftp.gnu.org/pub/gnu/\*)' '${W}/scripts/get_archive'"
 chk "audiotest: giri letti con validazione"    "grep -q 'ignorato:' '$P/scripts/rf35h-audiotest' && grep -q '^set -f$' '$P/scripts/rf35h-audiotest'"
 chk "verify-kernel sceglie il kernel piu' alto" "grep -q \"sort -V | tail -1\" '${O}/verify-kernel.sh'"
 chk "joypad: niente flag legacy nella build"   "! grep -qE '^[^#]*-DROCKNIX_OF_GPIO_LEGACY_PRESENT' '${W}/projects/Rockchip/devices/RK3326/packages/rocknix-joypad/package.mk'"

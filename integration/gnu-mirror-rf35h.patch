@@ -1,0 +1,47 @@
+Subject: scripts/get_archive: i tarball GNU prima da mirrors.kernel.org
+
+Build #24 (6/10/2026) ferma su gettext:host dopo 50 minuti: ftp.gnu.org dai
+runner di GitHub non risponde (connessione in timeout sulla 443) e il mirror
+di LibreELEC non ha gettext-1.0 (404). Prima era toccato a ftpmirror.gnu.org
+(#22, make). seed-sources.sh copre i tarball pinnati uno per uno; questa
+copre ogni PKG_URL GNU (ftp.gnu.org/gnu, ftp.gnu.org/pub/gnu,
+ftpmirror.gnu.org) senza elenchi: lo stesso percorso sotto
+https://mirrors.kernel.org/gnu/, provato per primo. Lo sha256 resta quello del
+package.mk, lo stamp .url resta il PKG_URL; con un 404 il giro e' quello di
+prima (URL del package.mk, poi il mirror di LibreELEC).
+
+Nessun pacchetto si ricompila: calculate_stamp non legge scripts/.
+
+---
+--- a/scripts/get_archive
++++ b/scripts/get_archive
+@@ -22,6 +22,20 @@
+ 
+ PACKAGE_MIRROR="${DISTRO_MIRROR}/${PKG_NAME}/${PKG_SOURCE_NAME}"
+ 
++# devaOS RF35H: i tarball GNU prima da mirrors.kernel.org. ftp.gnu.org e il
++# redirector ftpmirror.gnu.org dai runner di GitHub vanno in timeout (porta
++# 443, 30 s a tentativo, dieci giri: oltre 20 minuti per pacchetto prima di
++# fallire) e il mirror di LibreELEC non ha tutte le versioni. Stessi file,
++# stesso controllo di PKG_SHA256; con un 404 si prova come prima l'URL del
++# package.mk e poi il mirror.
++GNU_MIRROR_URL=""
++case "${PKG_URL}" in
++  https://ftpmirror.gnu.org/gnu/*) GNU_MIRROR_URL="https://mirrors.kernel.org/gnu/${PKG_URL#https://ftpmirror.gnu.org/gnu/}" ;;
++  https://ftpmirror.gnu.org/*)     GNU_MIRROR_URL="https://mirrors.kernel.org/gnu/${PKG_URL#https://ftpmirror.gnu.org/}" ;;
++  https://ftp.gnu.org/gnu/*)       GNU_MIRROR_URL="https://mirrors.kernel.org/gnu/${PKG_URL#https://ftp.gnu.org/gnu/}" ;;
++  https://ftp.gnu.org/pub/gnu/*)   GNU_MIRROR_URL="https://mirrors.kernel.org/gnu/${PKG_URL#https://ftp.gnu.org/pub/gnu/}" ;;
++esac
++
+ [ "${VERBOSE}" != "yes" ] && GET_OPT="--silent --show-error"
+ GET_CMD="curl ${GET_OPT} --fail --connect-timeout 30 --retry 3 --continue-at - --location --max-redirs 5 --output ${PACKAGE}"
+ 
+@@ -33,7 +47,7 @@
+ NBGET=10
+ NBCHKS=2
+ while [ ${NBGET} -gt 0 ] && [ ${NBCHKS} -gt 0 ]; do
+-  for url in "${PKG_URL}" "${PACKAGE_MIRROR}"; do
++  for url in ${GNU_MIRROR_URL} "${PKG_URL}" "${PACKAGE_MIRROR}"; do
+     rm -f "${PACKAGE}"
+     if ${GET_CMD} "${url}"; then
+       CALC_SHA256=$(sha256sum "${PACKAGE}" | cut -d" " -f1)

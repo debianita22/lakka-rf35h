@@ -188,8 +188,9 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              36 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              37 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
+                              tarball GNU da mirrors.kernel.org,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, Samba senza condivisioni
@@ -5689,3 +5690,25 @@ Correzione, z-037 (clk-px30.c): `dclk_vopb_mux` con `CLK_SET_RATE_NO_REPARENT`
 `CLK_SET_RATE_PARENT` (il clock dei pixel non ritocca piu' CPLL e quindi la
 GPU). Risultato atteso: sempre CPLL/51 = 31,06 MHz, 59,96 Hz. Compilato
 arm64 con W=1 -Werror, a fuzz 0 dopo r-034 e z-034.
+
+## Sorgenti GNU: ftp.gnu.org dai runner non risponde (6/10/2026)
+
+La build di prova #24 (z-037) si e' fermata dopo 50 minuti su `gettext:host`:
+`https://ftp.gnu.org/pub/gnu/gettext/gettext-1.0.tar.xz` in timeout sulla
+porta 443 a ogni tentativo e il mirror di LibreELEC senza gettext-1.0 (404).
+Due giorni di fila: prima `ftpmirror.gnu.org` (#22, make), poi ftp.gnu.org.
+In CI i sorgenti non si tengono fra un run e l'altro, quindi ogni build da zero
+li riscarica tutti.
+
+`seed-sources.sh` li copriva uno alla volta (i pinnati con ftpmirror), e ne
+restavano fuori gettext, glibc, binutils, libiconv, nettle. Invece di
+allungare l'elenco, `integration/gnu-mirror-rf35h.patch` cambia
+`scripts/get_archive`: per ogni `PKG_URL` su ftp.gnu.org/gnu, ftp.gnu.org/pub/gnu
+o ftpmirror.gnu.org prova per primo lo stesso percorso sotto
+`https://mirrors.kernel.org/gnu/` (raggiungibile dai runner: la #24 ci ha
+preso i semi). Lo sha256 resta quello del package.mk, lo stamp `.url` resta
+il `PKG_URL`; con un 404 il giro e' quello di prima. Provata la riscrittura
+sui 27 `PKG_URL` GNU dell'albero: tutti nella forma giusta. Non ricompila
+niente (`calculate_stamp` non legge `scripts/`). `check-sources.sh` prova lo
+stesso mirror. Restano fuori i tre di savannah (attr, freetype, configtools):
+host diverso, finora mai in timeout.

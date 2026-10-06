@@ -9,8 +9,10 @@
 # host non e' e la build l'avrebbe fermata lo stesso.
 #
 # Per ogni pacchetto prova l'URL del package.mk e poi il mirror di LibreELEC,
-# esattamente come fa scripts/get_archive: se almeno uno risponde, quel
-# pacchetto non e' un problema. Stampa solo quelli dove falliscono entrambi.
+# esattamente come fa scripts/get_archive (per gli URL GNU, prima ancora
+# mirrors.kernel.org: integration/gnu-mirror-rf35h.patch): se almeno uno
+# risponde, quel pacchetto non e' un problema. Stampa solo quelli dove
+# falliscono tutti.
 #
 # Quello che trova va aggiunto a seed-sources.sh. Gli stessi tarball stanno
 # quasi sempre nel pool di Ubuntu, che le versioni vecchie le tiene:
@@ -107,6 +109,13 @@ try() {
 	curl -s --fail -r 0-0 --connect-timeout 20 --max-time 60 -o /dev/null "$1" 2>/dev/null && return 0
 	return 1
 }
+# come integration/gnu-mirror-rf35h.patch: un URL GNU prima da mirrors.kernel.org
+case "${url}" in
+	https://ftpmirror.gnu.org/gnu/*) try "https://mirrors.kernel.org/gnu/${url#https://ftpmirror.gnu.org/gnu/}" && exit 0 ;;
+	https://ftpmirror.gnu.org/*)     try "https://mirrors.kernel.org/gnu/${url#https://ftpmirror.gnu.org/}" && exit 0 ;;
+	https://ftp.gnu.org/gnu/*)       try "https://mirrors.kernel.org/gnu/${url#https://ftp.gnu.org/gnu/}" && exit 0 ;;
+	https://ftp.gnu.org/pub/gnu/*)   try "https://mirrors.kernel.org/gnu/${url#https://ftp.gnu.org/pub/gnu/}" && exit 0 ;;
+esac
 try "${url}" && exit 0
 try "${MIRROR}/${name}/${sname}" && exit 0
 printf '%s|%s|%s|%s\n' "${name}" "${sname}" "${url}" "${sha}" >> "${OUT}"
@@ -119,7 +128,7 @@ xargs -d '\n' -I{} -P "${PAR}" "${TMP}/one.sh" "{}" "${TREE}" "${MIRROR}" "${TMP
 
 echo
 if [ -f "${TMP}/fails" ]; then
-	echo "Questi non si scaricano da nessuna delle due parti."
+	echo "Questi non si scaricano da nessuna parte."
 	echo "Cercali nel pool di Ubuntu e aggiungili a seed-sources.sh:"
 	echo
 	sed 's/^/  /' "${TMP}/fails"
