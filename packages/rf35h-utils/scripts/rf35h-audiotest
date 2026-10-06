@@ -96,7 +96,18 @@ fi
 
 echo
 echo "=== differenze fra il giro ${B1} (buono) e il ${C1} (cattivo) ==="
-if diff "${OUT}/giro-${B1}.txt" "${OUT}/giro-${C1}.txt" > "${OUT}/diff.txt"; then
+# awk e non diff: su Lakka diff non c'e' (busybox senza l'applet), e il
+# confronto falliva come se i registri fossero diversi. I due file hanno gli
+# stessi registri (dump): si confronta registro per registro, e un registro
+# che manca da una parte conta come diverso. FILENAME e non NR == FNR: con un
+# primo file vuoto anche le righe del secondo finirebbero fra quelle del primo.
+if awk 'FILENAME == ARGV[1] { b[$1] = $2; next }
+	{ seen[$1] = 1 }
+	!($1 in b) || b[$1] != $2 { printf "%s  buono %s  cattivo %s\n", $1, ($1 in b) ? b[$1] : "-", $2; n++ }
+	END {
+		for (r in b) if (!(r in seen)) { printf "%s  buono %s  cattivo -\n", r, b[r]; n++ }
+		exit (n > 0)
+	}' "${OUT}/giro-${B1}.txt" "${OUT}/giro-${C1}.txt" > "${OUT}/diff.txt"; then
 	echo "  NESSUNA: i registri sono identici."
 	echo "  Quindi non e' configurazione, e' un problema di TEMPI: la PLL del"
 	echo "  codec o l'allineamento I2S agganciano a volte si' e a volte no."

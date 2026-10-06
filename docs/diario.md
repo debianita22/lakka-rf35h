@@ -5754,3 +5754,14 @@ Da sapere: molti dei nuovi core su un A35 non sono giocabili (`play`,
 `dolphin`, `citra`); la build da zero dura molto di piu' (mame, same_cdi,
 scummvm); l'aggiornamento di sistema scarica e riscrive un SYSTEM piu'
 grande. Misure vere alla prima build in CI.
+
+## rf35h-audiotest: diff non c'e' su Lakka (6/10/2026)
+
+Trovato con `rf35h-display-dump.sh confronta`, che usava `diff`: la busybox di
+Lakka e' senza `CONFIG_DIFF`. `rf35h-audiotest` faceva lo stesso, quindi il
+confronto fra un giro buono e uno cattivo finiva sempre nel ramo "diversi"
+con un elenco vuoto. Ora e' awk registro per registro (`FILENAME == ARGV[1]`,
+non `NR == FNR`), e un registro che manca da una parte conta come diverso.
+Provato con la busybox awk: file uguali, due registri diversi, un file vuoto
+da una parte e dall'altra. Le altre utility dei nostri script sulla console
+ci sono tutte (unica fuori dall'elenco base: `flock`, presente).
