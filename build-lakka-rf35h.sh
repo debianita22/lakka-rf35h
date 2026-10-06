@@ -713,7 +713,9 @@ printf '  %-34s ok\n' "combo Select+volume"
 # versione corrente di ogni pacchetto e quando ne esce una nuova il tarball
 # pinnato sparisce. Meglio riempire la cache adesso che scoprirlo dopo venti
 # minuti di toolchain.
-if [ -x "${OVERLAY}/seed-sources.sh" ]; then
+# Non in --dry-run: e' il controllo veloce (anche della CI) e non deve
+# scaricare centinaia di MB; la build vera li semina comunque.
+if [ -x "${OVERLAY}/seed-sources.sh" ] && [ "${DRY_RUN:-}" != "yes" ]; then
 	say "Cache dei sorgenti"
 	"${OVERLAY}/seed-sources.sh" "${WORKDIR}" || warn "qualche sorgente non si e' scaricato: la build potrebbe fermarsi li'"
 fi
