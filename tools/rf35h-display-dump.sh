@@ -11,6 +11,8 @@
 #                                             clock dei pixel
 #   sh rf35h-display-dump.sh frac             riscrive il divisore frazionario del
 #                                             clock dei pixel (prima uguale, poi no)
+#   sh rf35h-display-dump.sh mux              mux del clock dei pixel su 24 MHz e ritorno
+#   sh rf35h-display-dump.sh gate             gate del frazionario chiuso e riaperto
 #
 # Perche' (6/10/2026). Con la build ci-21 il DSI si accende prima dell'init del
 # pannello e nessun comando va perso, eppure spegnere e riaccendere lo schermo
@@ -159,6 +161,30 @@ frac() {
 	echo "CLKSEL_CON6 ora: $("${DM}" $(( CRU + 0x118 )) 32)"
 }
 
+# Prova 3: il mux d'uscita (CLKSEL_CON5 bit 15:14, registro con maschera nei
+# 16 bit alti) spostato per un attimo su xin24m (2) e rimesso sul frazionario
+# (1). Mai sulla sorgente (0): sarebbero 1584 MHz al VOP.
+# Prova 4: gate del frazionario (CLKGATE_CON2 bit 3) chiuso e riaperto.
+mux() {
+	echo "VOP adesso: $(vop_hz) interrupt/s"
+	"${DM}" $(( CRU + 0x114 )) 32 0xC0008000
+	sleep 1
+	"${DM}" $(( CRU + 0x114 )) 32 0xC0004000
+	sleep 1
+	echo "prova 3, mux su 24 MHz e di nuovo sul frazionario: $(vop_hz) interrupt/s"
+	echo "CLKSEL_CON5 ora: $("${DM}" $(( CRU + 0x114 )) 32)"
+}
+
+gate() {
+	echo "VOP adesso: $(vop_hz) interrupt/s"
+	"${DM}" $(( CRU + 0x208 )) 32 0x00080008
+	sleep 1
+	"${DM}" $(( CRU + 0x208 )) 32 0x00080000
+	sleep 1
+	echo "prova 4, gate del frazionario chiuso e riaperto: $(vop_hz) interrupt/s"
+	echo "CLKGATE_CON2 ora: $("${DM}" $(( CRU + 0x208 )) 32)"
+}
+
 rompi() {
 	sway_sock
 	SWAYSOCK="${S}" swaymsg output DSI-1 power off >/dev/null
@@ -173,7 +199,9 @@ salva)     [ -n "${2:-}" ] || { echo "uso: $0 salva <nome>"; exit 1; }; salva "$
 vop)       echo "VOP: $(vop_hz) interrupt/s (60 = buono)" ;;
 ripara)    ripara ;;
 frac)      frac ;;
+mux)       mux ;;
+gate)      gate ;;
 rompi)     rompi ;;
 confronta) [ -n "${3:-}" ] || { echo "uso: $0 confronta <a> <b>"; exit 1; }; confronta "$2" "$3" ;;
-*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b> | vop | ripara | frac" >&2; exit 1 ;;
+*)         echo "uso: sh $0 salva <nome> | rompi | confronta <a> <b> | vop | ripara | frac | mux | gate" >&2; exit 1 ;;
 esac
