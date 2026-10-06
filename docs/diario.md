@@ -5603,3 +5603,22 @@ Compilato su 7.2.9 (arm64, W=1, -Werror) con r-025: le patch applicano a fuzz
 0 e danno l'albero provato. Non verificato sulla console. Se lo schermo dopo
 lo standby e' pulito ma la console resta lenta, la lentezza ha un'altra causa
 e va cercata a parte.
+
+### Standby: prova sulla console con ci-21 (6/10/2026)
+
+`rf35h-panel-diag.sh` sulla ci-21-13c91f5: PX30 (non PX30S, DDR_GRF_CON1
+0x617). L'ordine ora e' quello giusto, sia spegnendo lo schermo da sway sia in
+standby: pannello spento, poi DSI spento; DSI acceso, poi init del pannello;
+nessun comando perso. All'avvio lo schermo va. Ma **basta spegnere e
+riaccendere lo schermo da sway, senza standby, per avere sfarfallio e
+lentezza**; dopo lo standby lo stesso. Quindi: non e' lo standby (clock,
+firmware, regolatori), e non e' l'ordine DSI/pannello. E' qualcosa che la
+prima accensione all'avvio fa e una riaccensione a sistema avviato no (o il
+contrario). `prepare_prev_first` resta: e' corretto e non fa danni.
+
+Registri DSI uguali fra prima e dopo (PWR_UP 1, MODE_CFG video, PHY_RSTZ 0xf);
+INT_ST1 bit 7 (errore di scrittura nella FIFO dei pixel DPI) acceso anche nello
+stato buono, quindi non discrimina. Prossimo passo:
+`tools/rf35h-display-dump.sh` fotografa VOP, IOMMU del VOP, DSI, PHY, GRF del
+VO, stato DRM, clock, interrupt al secondo e velocita' di CPU e memoria in
+stato buono e rotto, e li confronta.
