@@ -6048,3 +6048,14 @@ davvero la pena. Quindi `always` resta, e cambia solo se la prova `core`
 dice "meglio" sulla CPU (tutti i giri) o libera decine di MB su un gioco
 pesante senza peggiorare la CPU.
 
+
+## v1.3.1 (7/10/2026)
+
+L'utente: huge page come stanno, una release nuova, poi avanti con il resto
+del progetto. La v1.3.0 (da e563026, senza `-mtune`) finisce stanotte; la
+v1.3.1 parte subito da `main`, in parallelo. Da zero, come ogni release: la
+ripresa da uno stato mescola pacchetti di due commit e build.yml la tiene
+per le build di prova. Il gruppo di concurrency e' per versione, quindi le
+due girano insieme; "latest" va alla piu' alta (sort -V), cioe' alla v1.3.1
+quando esce. Note in `docs/release-notes/v1.3.1.md`: il kernel con `-mtune`
+e, per chi arriva dalla v1.2.0, il rimando alla v1.3.0.
