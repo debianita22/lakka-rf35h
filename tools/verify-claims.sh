@@ -255,10 +255,11 @@ for c in ${LTOC}; do
 	grep -qE '^PKG_BUILD_FLAGS="([^"]* )?[+]lto( [^"]*)?"' "${pm}" || nolto="${nolto} ${c}"
 done
 if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
-	chk "LTO (+lto) su ${nlto} core${nolto:+, manca a:${nolto}}" "[ ${nlto} -ge 19 ] && [ -z '${nolto}' ]"
+	chk "LTO (+lto) su ${nlto} core${nolto:+, manca a:${nolto}}" "[ ${nlto} -ge 22 ] && [ -z '${nolto}' ]"
 fi
 chk "nessun +lto-parallel (flag inesistente)"  "! grep -rqE '^PKG_BUILD_FLAGS=.*lto-parallel' '${W}/packages/lakka/libretro_cores' '${W}/packages/graphics/mesa' '${O}/packages'"
 chk "Mesa con LTO (+lto)"                      "grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/graphics/mesa/package.mk'"
+chk "RetroArch con LTO (+lto)"                 "[ \"\$(grep -c '^PKG_BUILD_FLAGS=' '${W}/packages/lakka/retroarch_base/retroarch/package.mk')\" = 1 ] && grep -qx 'PKG_BUILD_FLAGS=\"+lto\"' '${W}/packages/lakka/retroarch_base/retroarch/package.mk'"
 chk "pila snella: 8 patch per RK3326"          "[ \$(ls '$RKP'/*.patch | wc -l) -eq 8 ]"
 chk "pila snella: 2 patch generiche"           "[ \$(ls '$DEF'/*.patch | wc -l) -eq 2 ]"
 chk "0000 e 9901 nostre, a fuzz 0"             "grep -q 'rigenerata sulla 7.2.7' '$RKP/0000-rename-rk817-battery.patch' && grep -q 'rigenerata sulla 7.2.7' '$DEF/linux-9901-pm-disable-async-suspend-resume-by-default.patch'"
