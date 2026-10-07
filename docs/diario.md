@@ -6165,3 +6165,42 @@ fa `CFLAGS := -Wall $(CFLAGS)` dall'ambiente. Provato sull'host al commit
 pinnato: il core si costruisce in `build/bin/`, 25 export `retro_*`, i CFLAGS
 dell'ambiente arrivano. Nella prossima build il `.so` deve cambiare di
 dimensione rispetto alla v1.2.0.
+
+### Ripreso il 7/10: su main, e tutti i 162 core
+
+Il ramo era rimasto al 5/10 (34 core), poi lo standby ha preso il resto. Ora,
+dopo la v1.3.0 e la v1.3.1, ribasato su `main`: conflitti solo nei testi
+(diario, guida: la riga di build.yml con otto parti, quella nuova di
+cores.yml; verify-claims: la pila di 10 patch RK3326 e il controllo di
+SameBoy). Il codice si unisce da solo; le patch di integrazione sono 40.
+
+- **`cores/pins.txt` con i 162 core** di CORES_DEFAULT, nello stesso ordine,
+  ai commit del Lakka pinnato: i 34 di prima erano gia' esattamente quelli
+  (sito, commit e ramo uguali al package di Lakka), quindi l'immagine non
+  cambia. 161 package usano `PKG_URL="${PKG_SITE}.git"`; gearcoleco prende
+  l'archivio del commit da GitHub e non ha `PKG_SHA256`, quindi il pin vale
+  anche li' (apply.sh lo accetta solo cosi'). 15 core seguono un ramo
+  (`PKG_GIT_CLONE_BRANCH`), 6 stanno fuori da GitHub (git.libretro.com,
+  codeberg, gitlab): `git ls-remote` va con tutti.
+- **Patch di Lakka: 37 core** (non piu' 11). Fork non ce ne sono (crearli
+  e' una cosa dell'utente su GitHub); senza fork il core resta sull'upstream
+  con le patch del package, e se al commit nuovo una non si applica
+  scripts/unpack si ferma (`set -e` da config/path: verificato) e il core
+  resta al commit vecchio, nell'issue. Nessun core costruito con una patch a
+  meta'.
+- **cores.yml in job paralleli.** Con un job solo da 350 minuti la prima
+  settimana non bastava: i commit di Lakka sono di maggio, i core cambiati
+  saranno quasi tutti, e mame da zero sono quasi 5 ore. `ci-build.sh
+  cores-matrix` divide: i pesanti uno per job (i nove in testa a
+  CORES_DEFAULT, piu' citra, flycast e play), gli altri a gruppi di 12, al
+  massimo 8 job insieme, ognuno con il suo sysroot. `merge-cores` riunisce i
+  risultati; un core il cui job e' morto senza risultato va fra i falliti.
+  Il job publish gira anche se qualche build e' fallita.
+- **Sysroot**: con `archive: false` l'artifact prende il nome del file e
+  `name:` viene ignorato (README di upload-artifact), quindi `sysroot.tar.zst`
+  non l'avrebbe mai trovato il `startswith("sysroot-")` di cores.yml. Ora il
+  file e' `sysroot-<versione>.tar.zst`. E il tar ha le stesse
+  `--anchored --no-wildcards-match-slash` dello stato.
+
+Prove: test-ci-build 90 (+5: matrice e merge), test-rf35h-cores 27,
+ci-check, actionlint, dry-run (243 verifiche, 162 core pinnati, 498 passi).

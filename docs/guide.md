@@ -831,14 +831,17 @@ Workflows in [`.github/workflows`](../.github/workflows):
   changed packages. Test builds only: the image mixes packages from two
   commits.
 
-Cores are pinned in `cores/pins.txt` (package, repository, commit, branch):
-`apply.sh` writes them into the Lakka packages, so an image always builds
-the cores the file names, and ships the list as `/usr/share/rf35h/cores.txt`.
-`tools/cores-bump.sh` prints which cores have moved upstream; `cores.yml`
-builds and publishes them one at a time, so a core that stops building
-upstream stays at its last good commit while the others move on. A core with
-Lakka patches points to a `debianita22/<core>` fork (branch `rf35h`:
-upstream plus the patches), which `apply.sh` builds without Lakka's patches.
+All 162 cores of the default set are pinned in `cores/pins.txt` (package,
+repository, commit, branch): `apply.sh` writes them into the Lakka packages,
+so an image always builds the cores the file names, and ships the list as
+`/usr/share/rf35h/cores.txt`. `tools/cores-bump.sh` prints which cores have
+moved upstream; `cores.yml` builds them in parallel jobs (the heavy ones, like
+MAME, alone; the others in groups of 12) and publishes them one at a time, so
+a core that stops building upstream stays at its last good commit while the
+others move on. The 37 cores with Lakka patches keep them: when a patch no
+longer applies to a newer upstream commit, that core fails and stays where it
+was, listed in an issue. A `debianita22/<core>` fork (branch `rf35h`: upstream
+plus the patches), if a pin points to one, is built without Lakka's patches.
 
 A release contains the `.img.gz`, the `.tar`, `update.txt` (version, file
 name, URL, SHA-256 and size of the `.tar`) and `SHA256SUMS`. Before

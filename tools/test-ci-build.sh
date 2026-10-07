@@ -503,5 +503,20 @@ ok "  ...commit e push sul ramo, changed=true" 'called "commit -q -m cores: 1 co
 fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
 ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && ! called "commit" && [ "$(outv changed)" = false ]'
 
+echo "cores-matrix e merge-cores (job cores in parallelo)"
+M="$(bash "${REPO}/tools/ci-build.sh" cores-matrix "fceumm mame a b c d e f g h i j k l flycast m")"
+ok "cores-matrix: i pesanti da soli e per primi, gli altri a gruppi di 12" '[ "${M}" = "{\"include\":[{\"g\":\"01\",\"cores\":\"mame\"},{\"g\":\"02\",\"cores\":\"flycast\"},{\"g\":\"03\",\"cores\":\"fceumm a b c d e f g h i j k\"},{\"g\":\"04\",\"cores\":\"l m\"}]}" ]'
+ok "  ...JSON valido, nessun core perso" 'printf "%s" "${M}" | python3 -c "import json,sys; d=json.load(sys.stdin); c=\" \".join(x[\"cores\"] for x in d[\"include\"]).split(); sys.exit(0 if sorted(c)==sorted(\"fceumm mame a b c d e f g h i j k l flycast m\".split()) else 1)"'
+ok "cores-matrix senza core: elenco vuoto" '[ "$(bash "${REPO}/tools/ci-build.sh" cores-matrix "")" = "{\"include\":[]}" ]'
+MP="${T}/parts"; rm -rf "${MP}"; mkdir -p "${MP}/cores-9-01" "${MP}/cores-9-02"
+printf 'core=mame so=mame commit=a file=mame_libretro-aaaaaaa.so.gz\n' > "${MP}/cores-9-01/built.txt"; : > "${MP}/cores-9-01/failed.txt"
+printf 'x' | gzip -n > "${MP}/cores-9-01/mame_libretro-aaaaaaa.so.gz"
+printf 'core=fceumm so=fceumm commit=b file=fceumm_libretro-bbbbbbb.so.gz\n' > "${MP}/cores-9-02/built.txt"
+printf '== mgba: fallito\nerror: x\n' > "${MP}/cores-9-02/failed.txt"
+printf 'y' | gzip -n > "${MP}/cores-9-02/fceumm_libretro-bbbbbbb.so.gz"
+bash "${REPO}/tools/ci-build.sh" merge-cores "${MP}" "${T}/merged" "mame fceumm mgba snes9x" > /dev/null; rc=$?
+ok "merge-cores: riusciti e falliti dei job in una cartella, con i .so.gz" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged/built.txt")" = 2 ] && [ -f "${T}/merged/mame_libretro-aaaaaaa.so.gz" ] && [ -f "${T}/merged/fceumm_libretro-bbbbbbb.so.gz" ] && grep -q "^== mgba: fallito" "${T}/merged/failed.txt"'
+ok "  ...il core del job morto senza risultato va fra i falliti" 'grep -q "^== snes9x: nessun risultato" "${T}/merged/failed.txt" && ! grep -q "^== mame:" "${T}/merged/failed.txt"'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

@@ -1,47 +1,178 @@
-# I core libretro dell'immagine e il commit da cui si costruiscono.
+# I core libretro dell'immagine e il commit da cui si costruiscono: tutti
+# quelli di CORES_DEFAULT (build-lakka-rf35h.sh), nello stesso ordine.
 #
 #   <pacchetto Lakka>  <repository>  <commit>  <ramo>
 #
-# Li legge apply.sh: PKG_SITE, PKG_URL e PKG_VERSION nel package.mk del core
-# (il package di Lakka resta, con le sue patch, salvo i fork sotto). Li
-# aggiorna cores.yml, ogni settimana, alla punta del ramo ("-": quello di
-# default del repository), uno per uno: solo se il core compila. Un core con
-# patch Lakka punta a un fork https://github.com/debianita22/<core>, ramo
-# rf35h (l'upstream piu' le patch): per quelli apply.sh toglie le patch del
-# package di Lakka, gia' dentro il fork.
+# Li legge apply.sh: PKG_SITE e PKG_VERSION nel package.mk del core (il
+# package di Lakka resta, con flag e patch). Li aggiorna cores.yml, ogni
+# settimana, alla punta del ramo ("-": quello di default del repository), uno
+# per uno: solo se il core compila. I 37 core con patch Lakka restano
+# sull'upstream con quelle patch: se al commit nuovo non si applicano piu', il
+# core non compila (scripts/unpack si ferma) e resta al commit vecchio, con
+# l'issue. Con un fork https://github.com/debianita22/<core>, ramo rf35h
+# (l'upstream piu' le patch), apply.sh toglie le patch del package.
 # Gli stessi finiscono nell'immagine in /usr/share/rf35h/cores.txt: la console
-# li confronta con l'indice delle release dei core (rf35h-update cores).
-gambatte          https://github.com/libretro/gambatte-libretro        9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2 -
-sameboy           https://github.com/LIJI32/SameBoy                    8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
-tgbdual           https://github.com/libretro/tgbdual-libretro         933707c0ba8f12360f6d79712f735a917713709a -
-fceumm            https://github.com/libretro/libretro-fceumm          5cd4a43e16a7f3cd35628d481c347a0a98cfdfa2 -
-nestopia          https://github.com/libretro/nestopia                 473d3072be67fa2542ca833c274ef6682cf0f0bc -
-genesis_plus_gx   https://github.com/ekeeke/Genesis-Plus-GX            751d6ddc06469389ea8f65c42a01839141d69734 -
-picodrive         https://github.com/irixxxx/picodrive                 2779ac9bf182649d5b21465f86b190cf0a7b68bd -
-gearsystem        https://github.com/drhelius/Gearsystem               5133ca740b701e12d4b00d715627248f8a545b47 -
-snes9x2010        https://github.com/libretro/snes9x2010               f9ae8fd28b13070a945a829ccf41cbf90a21d0f7 -
-snes9x            https://github.com/libretro/snes9x                   5a40cd5514e63e691e39141d64267798357a1424 -
-snes9x2005        https://github.com/libretro/snes9x2005               74d871db9b4dba6dbe6c5ecebc88cbf255be5349 -
-mgba              https://github.com/mgba-emu/mgba                     26b7884bc25a5933960f3cdcd98bac1ae14d42e2 -
-gpsp              https://github.com/libretro/gpsp                     6250979f01db3f9ee5ebca179316e1319f017b48 -
-beetle_pce_fast   https://github.com/libretro/beetle-pce-fast-libretro 52675734da114a19b3705f03906b1455f3d76644 -
-beetle_pce        https://github.com/libretro/beetle-pce-libretro      9a301c0773c53702a882bbaa42ee9cbc6d523787 -
-fbneo             https://github.com/libretro/fbneo                    af33e4d8f11336d6902bff0874309066a405cadf -
-fbalpha2012       https://github.com/libretro/fbalpha2012              c547d8cf3f7748f4094cee658a5d31ec1b79ece4 -
-mame2010          https://github.com/libretro/mame2010-libretro        c5b413b71e0a290c57fc351562cd47ba75bac105 -
-mame2015          https://github.com/libretro/mame2015-libretro        316cd06349f2b34b4719f04f7c0d07569a74c764 -
-mupen64plus_next  https://github.com/libretro/mupen64plus-libretro-nx  bc43bcedc276861254b48526f56799d63a30723b develop
-parallel_n64      https://github.com/libretro/parallel-n64             1da824e13e725a7144f3245324f43d59623974f8 -
-pcsx_rearmed      https://github.com/libretro/pcsx_rearmed             3a7850fdc6ac4ed0c323ade851b462504a3cbb79 -
-beetle_ngp        https://github.com/libretro/beetle-ngp-libretro      139fe34c8dfc5585d6ee1793a7902bca79d544de -
-race              https://github.com/libretro/RACE                     171950ea64c96ead503340ed60fa7ba18f56325c -
-beetle_wswan      https://github.com/libretro/beetle-wswan-libretro    2aeb47d3a58bf0360c686f842d9bb5bd201306fe -
-handy             https://github.com/libretro/libretro-handy           fca239207e9c111da3e85d2faf0b1b9d7524e498 -
-beetle_lynx       https://github.com/libretro/beetle-lynx-libretro     efd1797c7aa5a83c354507b1b61ac24222ebaa58 -
-stella2014        https://github.com/libretro/stella2014-libretro      3cc89f0d316d6c924a5e3f4011d17421df58e615 -
-stella            https://github.com/stella-emu/stella                 6efad98f0058e803ac675ead6dbe33c054db1492 -
-melonds           https://github.com/libretro/melonds                  7a3c11ff970cd36ca806961fae6db94b30dd5401 -
-melondsds         https://github.com/JesseTG/melonds-ds                bac0256dc6a8736c5a228f57c562257e45fd49f3 -
-cap32             https://github.com/libretro/libretro-cap32           54eabbb210a6149496b1d023bebddb3f0120bc33 -
-crocods           https://github.com/libretro/libretro-crocods         a320f6e38af49af84a63f81329a1bdb9322022b4 -
-flycast           https://github.com/flyinghead/flycast                22e28c0a7cde962f2e45863435b16334185a3a50 -
+# li confronta con l'indice della release dei core (rf35h-cores).
+# Il punto di partenza (7/10/2026): i commit del Lakka pinnato (LAKKA_COMMIT).
+mame                 https://github.com/libretro/mame                         b207f9c6fc93b9d21417a9e4424607840c71db6b -
+scummvm              https://github.com/libretro/scummvm                      a58821e3f8d6e0d22dd5652980b9428a9110b09b -
+mame2015             https://github.com/libretro/mame2015-libretro            316cd06349f2b34b4719f04f7c0d07569a74c764 -
+mame2010             https://github.com/libretro/mame2010-libretro            c5b413b71e0a290c57fc351562cd47ba75bac105 -
+same_cdi             https://github.com/libretro/same_cdi                     7ee1d8e9cb4307b7cd44ee1dd757e9b3f48f41d5 -
+vice                 https://github.com/libretro/vice-libretro                e9f8ac034ddef3025f0567768f7af8219f7cfdb8 -
+dolphin              https://github.com/libretro/dolphin                      990bffac731a86ecb075d5d786d4b348310beea6 -
+ppsspp               https://github.com/hrydgard/ppsspp                       e49c0bd8836a8a8f678565357773386f1174d3f5 -
+fbneo                https://github.com/libretro/fbneo                        af33e4d8f11336d6902bff0874309066a405cadf -
+gambatte             https://github.com/libretro/gambatte-libretro            9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2 -
+sameboy              https://github.com/LIJI32/SameBoy                        8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
+tgbdual              https://github.com/libretro/tgbdual-libretro             933707c0ba8f12360f6d79712f735a917713709a -
+fceumm               https://github.com/libretro/libretro-fceumm              5cd4a43e16a7f3cd35628d481c347a0a98cfdfa2 -
+nestopia             https://github.com/libretro/nestopia                     473d3072be67fa2542ca833c274ef6682cf0f0bc -
+genesis_plus_gx      https://github.com/ekeeke/Genesis-Plus-GX                751d6ddc06469389ea8f65c42a01839141d69734 -
+picodrive            https://github.com/irixxxx/picodrive                     2779ac9bf182649d5b21465f86b190cf0a7b68bd -
+gearsystem           https://github.com/drhelius/Gearsystem                   5133ca740b701e12d4b00d715627248f8a545b47 -
+snes9x2010           https://github.com/libretro/snes9x2010                   f9ae8fd28b13070a945a829ccf41cbf90a21d0f7 -
+snes9x               https://github.com/libretro/snes9x                       5a40cd5514e63e691e39141d64267798357a1424 -
+snes9x2005           https://github.com/libretro/snes9x2005                   74d871db9b4dba6dbe6c5ecebc88cbf255be5349 -
+mgba                 https://github.com/mgba-emu/mgba                         26b7884bc25a5933960f3cdcd98bac1ae14d42e2 -
+gpsp                 https://github.com/libretro/gpsp                         6250979f01db3f9ee5ebca179316e1319f017b48 -
+beetle_pce_fast      https://github.com/libretro/beetle-pce-fast-libretro     52675734da114a19b3705f03906b1455f3d76644 -
+beetle_pce           https://github.com/libretro/beetle-pce-libretro          9a301c0773c53702a882bbaa42ee9cbc6d523787 -
+fbalpha2012          https://github.com/libretro/fbalpha2012                  c547d8cf3f7748f4094cee658a5d31ec1b79ece4 -
+mupen64plus_next     https://github.com/libretro/mupen64plus-libretro-nx      bc43bcedc276861254b48526f56799d63a30723b develop
+parallel_n64         https://github.com/libretro/parallel-n64                 1da824e13e725a7144f3245324f43d59623974f8 -
+pcsx_rearmed         https://github.com/libretro/pcsx_rearmed                 3a7850fdc6ac4ed0c323ade851b462504a3cbb79 -
+beetle_ngp           https://github.com/libretro/beetle-ngp-libretro          139fe34c8dfc5585d6ee1793a7902bca79d544de -
+race                 https://github.com/libretro/RACE                         171950ea64c96ead503340ed60fa7ba18f56325c -
+beetle_wswan         https://github.com/libretro/beetle-wswan-libretro        2aeb47d3a58bf0360c686f842d9bb5bd201306fe -
+handy                https://github.com/libretro/libretro-handy               fca239207e9c111da3e85d2faf0b1b9d7524e498 -
+beetle_lynx          https://github.com/libretro/beetle-lynx-libretro         efd1797c7aa5a83c354507b1b61ac24222ebaa58 -
+stella2014           https://github.com/libretro/stella2014-libretro          3cc89f0d316d6c924a5e3f4011d17421df58e615 -
+stella               https://github.com/stella-emu/stella                     6efad98f0058e803ac675ead6dbe33c054db1492 -
+melonds              https://github.com/libretro/melonds                      7a3c11ff970cd36ca806961fae6db94b30dd5401 -
+melondsds            https://github.com/JesseTG/melonds-ds                    bac0256dc6a8736c5a228f57c562257e45fd49f3 -
+cap32                https://github.com/libretro/libretro-cap32               54eabbb210a6149496b1d023bebddb3f0120bc33 -
+crocods              https://github.com/libretro/libretro-crocods             a320f6e38af49af84a63f81329a1bdb9322022b4 -
+flycast              https://github.com/flyinghead/flycast                    22e28c0a7cde962f2e45863435b16334185a3a50 -
+2048                 https://github.com/libretro/libretro-2048                e70c3f82d2b861c64943aaff7fcc29a63013997d -
+81                   https://github.com/libretro/81-libretro                  ffc99f27f092addc9ddd34dd0e3a3d4d1c053cbf -
+a5200                https://github.com/libretro/a5200                        526404072821bb2021fab16f8c5dbbca300512c8 -
+amiarcadia           https://git.libretro.com/libretro/amiarcadia             4b84422985457b53dcc22ab46f525d7c34d3e51f -
+amiberry             https://github.com/BlitterStudio/amiberry                5a70ab7d579a1b29e7fb9bb8276021fcd81d413c libretro-core
+anarch               https://codeberg.org/iyzsong/anarch-libretro             512e562efe683489b7438cd13476aa84a506c8a7 -
+applewin             https://github.com/audetto/AppleWin                      e8eca6285c8f6a239959cc204760204e0bc17b1c -
+ardens               https://github.com/tiberiusbrown/Ardens                  e2f45e7ee11c3a6c903b07cf6eb105173f618e88 -
+atari800             https://github.com/libretro/libretro-atari800            630f2346a1dabefdcf534880a48e3e200e2cc551 -
+b2                   https://github.com/zoltanvb/b2-libretro                  9a00b26945a5945de8e2c36de9af47836b55bb79 -
+beetle_pcfx          https://github.com/libretro/beetle-pcfx-libretro         dd04cef9355286488a1d78ff18c4c848a1575540 -
+beetle_psx           https://github.com/libretro/beetle-psx-libretro          3a1184d1e1c7ed15752e9fe4a0594e68b4a41e11 -
+beetle_supafaust     https://github.com/libretro/supafaust                    e25f66765938d33f9ad5850e8d6cd597e55b7299 -
+beetle_supergrafx    https://github.com/libretro/beetle-supergrafx-libretro   a776133c34ae8da5daf7d9ccb43e3e292e2b07b0 -
+beetle_vb            https://github.com/libretro/beetle-vb-libretro           8f837ebc077afdd6652efb2827fd8308a07113ca -
+bluemsx              https://github.com/libretro/blueMSX-libretro             036376d6679c9e153712dbbb3fdca774afc49706 -
+bnes                 https://github.com/libretro/bnes-libretro                8e26e89a93bef8eb8992d1921b539dce1792660a -
+boom3                https://github.com/libretro/boom3                        0bea79abf5ec8262dfe9af73cb8c54ea6e2aeb98 -
+boytacean            https://github.com/joamag/boytacean                      2a0d2beb34f6cec016c227c16f57963612e5669e -
+bsnes                https://github.com/libretro/bsnes                        591b7e13b6914beffaa01084e4c0b7a5d9cc0673 -
+bsnes2014            https://github.com/libretro/bsnes2014                    3beff8ebfa91d6faaf8b854140fbcb7542a3c516 -
+bsnes_hd             https://github.com/DerKoun/bsnes-hd                      fc26b25ea236f0f877f0265d2a2c37dfd93dfde9 -
+bsnes_jg             https://github.com/libretro/bsnes-jg                     f729ad4074c1955bd8bfebbb2e1a3078794804c6 -
+cannonball           https://github.com/libretro/cannonball                   5137a791d229a5b9c7c089cf1edcce4db3c57d64 -
+chailove             https://github.com/libretro/libretro-chailove            467cd453e3b1761c5c3611746b35e709328a2ced -
+citra                https://github.com/libretro/citra                        5263fae3344e5e9af43036e0e38bec2d10fb2407 -
+clownmdemu           https://github.com/Clownacy/clownmdemu-libretro          a6728f34b7e38b3383c62778ba70128d17b09caf -
+craft                https://github.com/libretro/Craft                        675c5b2fc690d2e80f6099f46407bf23827c59d4 -
+daphne               https://github.com/libretro/daphne                       b5481bab34a51369b6749cd95f5f889e43aaa23f -
+desmume              https://github.com/libretro/desmume                      7f05a8d447b00acd9e0798aee97b4f72eb505ef9 -
+desmume_2015         https://github.com/libretro/desmume2015                  af397ff3d1f208c27f3922cc8f2b8e08884ba893 -
+dice                 https://github.com/mittonk/dice-libretro                 f41ed433ed90716521b05437c49684c370faa9df -
+dinothawr            https://github.com/libretro/Dinothawr                    d66dde551be8e68e47c05e88838b4f1c6b114c99 -
+dirksimple           https://github.com/icculus/DirkSimple                    a5b0ebca483cd10babe930a57e75b0e6094686fb -
+dosbox               https://github.com/libretro/dosbox-libretro              b7b24262c282c0caef2368c87323ff8c381b3102 -
+dosbox_core          https://github.com/realnc/dosbox-core                    7bcf083e8309660e2c598d6f7d5982d3851f2178 libretro
+dosbox_pure          https://github.com/libretro/dosbox-pure                  e8cb6683e8539757644d84278cf4deb2b0d0debc -
+dosbox_svn           https://github.com/libretro/dosbox-svn                   53ca2f6303a652d129321cfc521f000cd7ec5531 libretro
+doublecherrygb       https://github.com/TimOelrichs/doublecherryGB-libretro   36671c405a017e999581eb56efa6a597cfc14b03 -
+doukutsu_rs          https://github.com/DrGlaucous/doukutsu-rs-libretro       2e6504e46179561869e976a22f73d8ebb65a7d5c -
+easyrpg              https://github.com/EasyRPG/Player                        78328fa29f465315291e161130e6682f69410370 -
+emux_sms             https://github.com/libretro/emux                         640d4bae7d4757f5377dbeb42f2d02763895095c -
+ep128emu             https://github.com/libretro/ep128emu-core                812dd1b35225b64d9392a3e21de28c3a5861ddf7 core
+fake_08              https://github.com/jtothebell/fake-08                    f6bab5a7ba521ce440e45d1aeef6122674be6ee9 -
+fmsx                 https://github.com/libretro/fmsx-libretro                fbe4dfc4c3e3f7eb27089def3d663a905b181845 -
+freechaf             https://github.com/libretro/FreeChaF                     cdb8ad6fcecb276761b193650f5ce9ae8b878067 -
+freeintv             https://github.com/libretro/FreeIntv                     df5a5312985b66b1ec71b496868641e40b7ad1c9 -
+fuse_libretro        https://github.com/libretro/fuse-libretro                cad85b7b1b864c65734f71aa4a510b6f6536881c -
+gam4980              https://codeberg.org/iyzsong/gam4980                     3527822a6bb73bfd336a5f91ee7a772e4e8140a7 -
+gearboy              https://github.com/drhelius/Gearboy                      4e969b7bfb05ba314bf6f4cad3c7e4b531b1dc11 -
+gearcoleco           https://github.com/drhelius/Gearcoleco                   49b1c5b623deeacca54d28c445930cbd22f017a2 -
+geargrafx            https://github.com/drhelius/Geargrafx                    14b1cda0ba339e5346073a4d9cc47bf4cbaef524 -
+gearlynx             https://github.com/drhelius/Gearlynx                     d74f5b8085db54b021e2bfe716db4b63d04ddf24 -
+genesis_plus_gx_wide https://github.com/libretro/Genesis-Plus-GX-Wide         b7d314220d755537aebb7bc1750ac21f764365c4 -
+geolith              https://github.com/libretro/geolith-libretro             a137836711bbbd6e279310dc6e91bedc03904016 -
+gme                  https://github.com/libretro/libretro-gme                 de22a26ae9ed8f0eb739bce8990fe175677edcf8 -
+gw_libretro          https://github.com/libretro/gw-libretro                  435e5cfd4bf6aea03a84259e9b8dba3daf3ff5bd -
+hatari               https://github.com/libretro/hatari                       7008194d3f951a157997f67a820578f56f7feee0 -
+higan_sfc            https://gitlab.com/higan/higan                           d3f592013a27cb78f17d84f90a6be6cf6f6af1d1 libretro
+higan_sfc_balanced   https://github.com/libretro/nSide                        5e965d0db4c0d05e7e8fb6449035538781c73473 -
+jaxe                 https://github.com/kurtjd/jaxe                           e8e90e3d683bb560df5882f0ad62ed28f96a541a -
+jollycv              https://github.com/libretro/jollycv                      5b01c1e43f9040bfae25cc9f9dfb14d73951ec3c -
+jumpnbump            https://github.com/libretro/jumpnbump-libretro           4e68831f5576075c45c147f86865812afb816139 -
+lowres_nx            https://github.com/timoinutilis/lowres-nx                12aeb1690108c5fe3f404475d59f86a12a21949d retroarch
+lutro                https://github.com/libretro/libretro-lutro               b84d0605e847e07657a44a1a11374a03a6e8a489 -
+m2000                https://github.com/p2000t/M2000                          2ce44bcee941793b965ac09e313bdb4c50a001ab main
+mame2000             https://github.com/libretro/mame2000-libretro            2ec60f6e1078cf9ba173e80432cc28fd4eea200f -
+mame2003_plus        https://github.com/libretro/mame2003-plus-libretro       b9b7bfaa2d9e40ca5b94af1f6e9ec77332e4f6c3 -
+meowpc98             https://github.com/libretro/libretro-meowPC98            dc905d4e10470ff65a38e8b9e1a75b43b9b12149 -
+mesen                https://github.com/libretro/Mesen                        791c5e8153ee6e29691d45b5df2cf1151ff416f9 -
+mesen_s              https://github.com/libretro/Mesen-S                      d4fca31a6004041d99b02199688f84c009c55967 -
+mgba_fork            https://github.com/libretro/mgba                         c758314a639aa0066e7b65a8341448181b73c804 -
+mojozork             https://github.com/icculus/mojozork                      517ccff5ad6a811f948fadc0489b45c32f177c42 -
+mrboom               https://github.com/libretro/mrboom-libretro              d011acfbdb2d93ed38bd684ccfa0db79bda1c932 -
+mu                   https://github.com/libretro/Mu                           d9766f139ece646703b5785097374a3a68dd07ad -
+neocd                https://github.com/libretro/neocd_libretro               5eca2c8fd567b5261251c65ecafa8cf5b179d1d2 -
+noods                https://github.com/jonian/libretro-noods                 aae9dc6e5ae0d9187e8dea4b74e529a8e9c8b1d3 -
+numero               https://github.com/nbarkhina/numero                      867c40ad9cdfe5295e0be81e0a17b16964a4a33e -
+nxengine             https://github.com/libretro/nxengine-libretro            9adc032a5f6aa913d71d22042bb72cb11cf0f4a2 -
+o2em                 https://github.com/libretro/libretro-o2em                3ba4231c1dc8dcdf487428712856b790d2e4b8f3 -
+openlara             https://github.com/libretro/openlara                     72facbeaa33502af342e3c8f90ce0ccd79dbc765 -
+opera                https://github.com/libretro/opera-libretro               345f12b7d45d7013602a4a3b72287f529bd78042 -
+pd777                https://github.com/mittonk/PD777                         56097d6ac5ee5202f3bf73c4d5eac4d443fe0fb7 main
+play                 https://github.com/jpd002/Play-                          43d8cde41fbabd1e59c8eda2bf2e2a4b7a28c7d9 -
+pocketcdg            https://github.com/libretro/libretro-pocketcdg           c1fac9f7164e60e5c4b81705b65d65750abfe488 -
+pokemini             https://github.com/libretro/pokemini                     19095803f1434eb980db6e4004187a4b786e20b6 -
+potator              https://github.com/libretro/potator                      ad87bc6068ef126e48339b440465fb0bf5a2794f -
+prboom               https://github.com/libretro/libretro-prboom              93c8e7a2074e4fd8410398e3d571c6d9afec1d84 -
+prosystem            https://github.com/libretro/prosystem-libretro           acae250da8d98b8b9707cd499e2a0bf6d8500652 -
+puae                 https://github.com/libretro/libretro-uae                 0043cf9c061bd9b81dbc1869c2761017139cfc63 -
+puae2021             https://github.com/libretro/libretro-uae                 58527ce9e8cc5f19faae9e6010d2f06fc70b10de 2.6.1
+px68k                https://github.com/libretro/px68k-libretro               9dfa6abc25ddd6e597790f7a535cd0a1d7f9c385 -
+pzretro              https://github.com/nwhitehead/pzretro                    18b527180939775734a433fb8e96f7666c140416 -
+quasi88              https://github.com/libretro/quasi88-libretro             42be798db5585f62b4bd34ce49dd1e8063c9d7c1 -
+quicknes             https://github.com/libretro/QuickNES_Core                dbf19f73e3eb9701d1c7f5898f57c097e05c9fbd -
+reminiscence         https://github.com/libretro/REminiscence                 e80d7b1aa287010e30c54f72252a9303173f1c7e -
+retro8               https://github.com/libretro/retro8                       a235ff8e3ca1b44bcf88293748d5a492c76a2c7b -
+rustation_ng         https://gitlab.com/flio/rustation-ng                     59f50942f1c39d978602f8e8382a01b46d537a9f -
+sameduck             https://github.com/LIJI32/SameBoy                        5619abdb01cee6bedb47599cdb5532c318443b52 SameDuck
+skyemu               https://github.com/skylersaleh/SkyEmu                    46efbcbdb3b902373a09f4724e6d3b1a5acc4af3 -
+snes9x2002           https://github.com/libretro/snes9x2002                   a0709ec7dcd6de2fbebb43106bd757b649e3b7cf -
+snes9x2005_plus      https://github.com/libretro/snes9x2005                   74d871db9b4dba6dbe6c5ecebc88cbf255be5349 -
+superbroswar         https://github.com/libretro/superbroswar-libretro        ae824f626ad80c8b7ee848698b3d1dcebe9a5ccb -
+swanstation          https://github.com/libretro/swanstation                  4d309c05fd7bdc503d91d267bd542edb8d192b09 main
+tamalibretro         https://github.com/celerizer/tamalibretro                ec83dc1a5ea8bdbcd02cee81779c6dbe0e996ed2 -
+theodore             https://github.com/Zlika/theodore                        242e932d838284a61b81aa7641c60d813934025e -
+thepowdertoy         https://github.com/libretro/ThePowderToy                 cb3cd4c2e5beddb98b34e6b800fa24e8f96322d9 -
+tic80                https://github.com/libretro/TIC-80                       6412f72d0f4725c153ce3d245729b829e713542e -
+tyrquake             https://github.com/libretro/tyrquake                     471f2a72d2a7b0416f6a21eb945e5af831df06a4 -
+uae4arm              https://github.com/Chips-fr/uae4arm-rpi                  177c2f0e892adf2603ada9b150e31beffe0f76c3 -
+uzem                 https://github.com/libretro/libretro-uzem                cd6004ea143435cfdb6b12e7c6779dab499f7829 -
+vbam                 https://github.com/visualboyadvance-m/visualboyadvance-m ea8b08fe75e2c88ee07435a0dff39d5ceefb5e5f -
+vecx                 https://github.com/libretro/libretro-vecx                eacee1f6f029688b043ed802cece29dd3c320e21 -
+vircon32             https://github.com/vircon32/vircon32-libretro            d8a92430e887286b4e5351916ef0bd35d8cb40e8 -
+virtualjaguar        https://github.com/libretro/virtualjaguar-libretro       48096c1f6f8b98cfff048a5cb4e6a86686631072 -
+virtualxt            https://codeberg.org/virtualxt/virtualxt                 bdff2ce731c7d30d30e228d4dea9093f3d8eb481 -
+vitaquake2           https://github.com/libretro/vitaquake2                   5e3add960dcf63b48e0dd839fac2617ec0160609 -
+wasm4                https://github.com/aduros/wasm4                          dae7934e9a5495e72e3cfdd60b65fe2babf6140b -
+xmil                 https://github.com/libretro/xmil-libretro                6a52dc21a5ff106137670bb600ab2ce3fcebeb1b -
+xrick                https://github.com/libretro/xrick-libretro               34e4c3fc8a679d0209debc3738dc7264d3112a03 -
+yabasanshiro         https://github.com/libretro/yabause                      d2afc930613744ee7bea600bde8c9558f68dba60 yabasanshiro
+yabause              https://github.com/libretro/yabause                      65af22e96beb6d9b0b9a50a81a39c86a6d604c1c -

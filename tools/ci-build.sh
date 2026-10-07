@@ -19,10 +19,14 @@
 #   ci-build.sh publish D       job release: la release dai file in D, "latest"
 #                               solo se e' la versione piu' alta
 #   ci-build.sh pack-sysroot    a build finita: l'albero costruito senza sorgenti,
-#                               kernel e ccache (W/sysroot.tar.zst), per
-#                               compilare i soli core (cores.yml)
+#                               kernel e ccache (W/sysroot-<versione>.tar.zst),
+#                               per compilare i soli core (cores.yml)
+#   ci-build.sh cores-matrix "a b"  job cores: i core divisi fra i job paralleli
+#                               (JSON per strategy.matrix), i pesanti da soli
 #   ci-build.sh cores "a b"     compila i core dati sull'albero ripreso dal
 #                               sysroot; i file della release dei core in W/cores
+#   ci-build.sh merge-cores P D "a b"  job cores: i risultati dei job (P/*) in D;
+#                               un core senza risultato va fra i falliti
 #   ci-build.sh publish-cores D job cores: i core di D nella release "cores"
 #                               (uno per asset) e il suo index.txt
 #   ci-build.sh pins-merge D NP job cores: i pin nuovi (NP) dei core riusciti
@@ -843,12 +847,17 @@ cmd_publish() {
 # il sorgente del kernel (build/linux-*, tenuto da AUTOREMOVE solo per
 # verify-kernel). Restano toolchain, install_pkg e gli stamp: scripts/build di
 # un core trova le dipendenze fatte e compila solo lui.
+# Il nome del file e' quello dell'artifact (upload con archive: false):
+# sysroot-<versione>.tar.zst, che cores.yml cerca per prefisso.
 cmd_pack_sysroot() {
-	: "${W:?}"
+	: "${W:?}" "${RF35H_VERSION:?}"
+	local f="${W}/sysroot-${RF35H_VERSION}.tar.zst"
 	cd "${W}"
 	say "Sysroot per le build dei core"
 	drop_interrupted
-	tar -C "${W}" \
+	# --anchored --no-wildcards-match-slash come in cmd_pack: senza, build.*/image
+	# toglierebbe ogni cartella "image" dell'albero
+	tar -C "${W}" --anchored --no-wildcards-match-slash \
 		--exclude="${TREE_NAME}/sources" \
 		--exclude="${TREE_NAME}/target" \
 		--exclude="${TREE_NAME}/build-rf35h-*" \
@@ -857,10 +866,57 @@ cmd_pack_sysroot() {
 		--exclude="${TREE_NAME}/build.*/.ccache" \
 		--exclude="${TREE_NAME}/build.*/.ccache-local" \
 		--exclude="${TREE_NAME}/build.*/build/linux-[0-9]*" \
-		-I 'zstd -T0 -3' -cf "${W}/sysroot.tar.zst" "${TREE_NAME}"
-	ls -la "${W}/sysroot.tar.zst"
-	summ "- sysroot per i core: $(du -h "${W}/sysroot.tar.zst" | cut -f1) (artifact, 90 giorni)"
-	note notice "Sysroot" "sysroot.tar.zst $(du -h "${W}/sysroot.tar.zst" | cut -f1): le build dei core (cores.yml) partono da qui"
+		-I 'zstd -T0 -3' -cf "${f}" "${TREE_NAME}"
+	ls -la "${f}"
+	summ "- sysroot per i core: $(du -h "${f}" | cut -f1) (artifact, 90 giorni)"
+	note notice "Sysroot" "$(basename "${f}") $(du -h "${f}" | cut -f1): le build dei core (cores.yml) partono da qui"
+}
+
+# I core pesanti, ognuno in un job suo: quelli che CORES_DEFAULT mette in
+# testa (partono per primi nella build dell'immagine) e citra, flycast e play.
+# mame da zero sono quasi 5 ore. Gli altri a gruppi di CORES_PER_JOB.
+CORES_HEAVY="mame scummvm mame2015 mame2010 same_cdi vice dolphin ppsspp fbneo citra flycast play"
+CORES_PER_JOB=12
+
+# Job cores, setup: i core da compilare divisi fra i job paralleli, come JSON
+# per strategy.matrix: {"include":[{"g":"01","cores":"mame"},...]}. "g" da'
+# il nome ai job e ai loro artifact.
+cmd_cores_matrix() {
+	local cores="${1:-}" c n=0 g=0 batch="" items=""
+	add() { g=$((g + 1)); items="${items:+${items},}$(printf '{"g":"%02d","cores":"%s"}' "${g}" "$1")"; }
+	for c in ${cores}; do
+		case " ${CORES_HEAVY} " in *" ${c} "*) add "${c}" ;; esac
+	done
+	for c in ${cores}; do
+		case " ${CORES_HEAVY} " in *" ${c} "*) continue ;; esac
+		batch="${batch:+${batch} }${c}"; n=$((n + 1))
+		if [ "${n}" -ge "${CORES_PER_JOB}" ]; then add "${batch}"; batch=""; n=0; fi
+	done
+	[ -z "${batch}" ] || add "${batch}"
+	printf '{"include":[%s]}\n' "${items}"
+}
+
+# Job cores, publish: i risultati dei job paralleli (download-artifact ne
+# mette uno per cartella sotto <parts>) in <d>: built.txt, failed.txt, i
+# .so.gz. Un core senza risultato (il job del suo gruppo si e' fermato prima:
+# tempo, disco, un errore della CI) va fra i falliti: resta al commit vecchio
+# e finisce nell'issue come gli altri.
+cmd_merge_cores() {
+	local parts="${1:?cartella dei risultati}" d="${2:?cartella di uscita}" cores="${3:-}" p c
+	rm -rf "${d}"; mkdir -p "${d}"
+	: > "${d}/built.txt"; : > "${d}/failed.txt"
+	for p in "${parts}"/*/; do
+		[ -d "${p}" ] || continue
+		if [ -f "${p}built.txt" ]; then cat "${p}built.txt" >> "${d}/built.txt"; fi
+		if [ -f "${p}failed.txt" ]; then cat "${p}failed.txt" >> "${d}/failed.txt"; fi
+		find "${p}" -maxdepth 1 -name '*.so.gz' -exec mv -t "${d}" {} +
+	done
+	for c in ${cores}; do
+		grep -q "^core=${c} " "${d}/built.txt" && continue
+		grep -q "^== ${c}:" "${d}/failed.txt" && continue
+		echo "== ${c}: nessun risultato (il job del suo gruppo si e' fermato prima: vedi il run)" >> "${d}/failed.txt"
+	done
+	echo "  riusciti: $(grep -c '^core=' "${d}/built.txt" || true), falliti: $(grep -c '^==' "${d}/failed.txt" || true)"
 }
 
 # Il repository e il commit di un core in cores/pins.txt
@@ -1012,7 +1068,9 @@ case "${1:-}" in
 	logs)         cmd_logs "${2:-}" ;;
 	ccache-stats) cmd_ccache_stats ;;
 	pack-sysroot) cmd_pack_sysroot ;;
+	cores-matrix) cmd_cores_matrix "${2:-}" ;;
 	cores)        cmd_cores "${2:-}" ;;
+	merge-cores)  cmd_merge_cores "${2:-}" "${3:-}" "${4:-}" ;;
 	publish-cores) cmd_publish_cores "${2:-}" ;;
 	pins-merge)   cmd_pins_merge "${2:-}" "${3:-}" ;;
 	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;

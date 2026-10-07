@@ -190,7 +190,13 @@ echo "  core pinnati (cores/pins.txt)"
 		[ "${#sha}" -eq 40 ] || { echo "apply: pins.txt: $c: commit $sha non e' di 40 caratteri (get_git vuole lo sha intero)" >&2; exit 1; }
 		pm="$L/packages/lakka/libretro_cores/$c/package.mk"
 		[ -f "$pm" ] || { echo "apply: pins.txt: core $c non in Lakka" >&2; exit 1; }
-		grep -q '^PKG_URL="${PKG_SITE}.git"$' "$pm" || { echo "apply: $c: PKG_URL non e' \${PKG_SITE}.git, pin non applicabile" >&2; exit 1; }
+		# il clone git al commit, o (gearcoleco) l'archivio del commit da GitHub:
+		# quello va bene finche' il package non ha un PKG_SHA256, che dopo un
+		# cambio di commit sarebbe sbagliato
+		if ! grep -q '^PKG_URL="${PKG_SITE}.git"$' "$pm"; then
+			grep -q '^PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"$' "$pm" && ! grep -q '^PKG_SHA256=' "$pm" \
+				|| { echo "apply: $c: PKG_URL ne' \${PKG_SITE}.git ne' l'archivio del commit senza sha256: pin non applicabile" >&2; exit 1; }
+		fi
 		sed -i -e "s|^PKG_SITE=\".*\"|PKG_SITE=\"$site\"|" -e "s|^PKG_VERSION=\".*\"|PKG_VERSION=\"$sha\"|" "$pm"
 		grep -q "^PKG_VERSION=\"$sha\"" "$pm" && grep -q "^PKG_SITE=\"$site\"" "$pm" || { echo "apply: $c: pin non scritto" >&2; exit 1; }
 		case "$site" in

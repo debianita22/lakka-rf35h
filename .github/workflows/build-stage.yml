@@ -208,11 +208,13 @@ jobs:
         if: steps.build.outputs.result == 'done'
         run: ./tools/ci-build.sh pack-sysroot
 
+      # archive: false, quindi l'artifact si chiama come il file
+      # (sysroot-<versione>.tar.zst; "name" verrebbe ignorato): cores.yml lo
+      # cerca per prefisso
       - uses: actions/upload-artifact@v7
         if: steps.build.outputs.result == 'done'
         with:
-          name: sysroot-${{ inputs.version }}
-          path: ${{ env.W }}/sysroot.tar.zst
+          path: ${{ env.W }}/sysroot-${{ inputs.version }}.tar.zst
           archive: false
           retention-days: 90
           compression-level: 0

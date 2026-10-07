@@ -48,7 +48,7 @@ while IFS= read -r line; do
 		echo "${c} ${sha} ${new}"
 		changed=$((changed + 1))
 	fi
-	printf '%-17s %-52s %s %s\n' "${c}" "${site}" "${new}" "${br}" >> "${tmp}"
+	printf '%-20s %-56s %s %s\n' "${c}" "${site}" "${new}" "${br}" >> "${tmp}"
 done < "${P}"
 if [ -n "${OUT}" ]; then
 	cp "${tmp}" "${OUT}"

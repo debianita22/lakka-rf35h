@@ -13,11 +13,16 @@
 #                     ripubblicare un core dopo una correzione dell'overlay);
 #                     "dry_run": compila e basta, niente release ne' pin.
 #
-# Il sysroot: l'artifact sysroot-<versione> della release piu' recente
-# (build-stage.yml lo salva per 90 giorni). I core devono essere compilati
-# sullo stesso Lakka dell'immagine: la console lo controlla (lakka= nell'indice
-# contro /usr/share/rf35h/cores.txt), e "prepare" si ferma se il sysroot non e'
-# al commit pinnato.
+# Il sysroot: l'artifact sysroot-<versione>.tar.zst della build finita piu'
+# recente (build-stage.yml lo salva per 90 giorni). I core devono essere
+# compilati sullo stesso Lakka dell'immagine: la console lo controlla (lakka=
+# nell'indice contro /usr/share/rf35h/cores.txt), e "prepare" si ferma se il
+# sysroot non e' al commit pinnato.
+#
+# I core si compilano in job paralleli (ci-build.sh cores-matrix): i pesanti
+# uno per job (mame da zero sono quasi 5 ore), gli altri a gruppi di 12, ogni
+# job con il suo sysroot. Con 162 core un job solo non bastava: la prima volta
+# sono quasi tutti cambiati.
 name: Cores
 run-name: >-
   ${{ github.event_name == 'schedule' && 'Core: upstream della settimana'
@@ -56,6 +61,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       cores: ${{ steps.bump.outputs.cores }}
+      matrix: ${{ steps.bump.outputs.matrix }}
       sysroot_run: ${{ steps.sysroot.outputs.run }}
       sysroot_name: ${{ steps.sysroot.outputs.name }}
       sysroot_version: ${{ steps.sysroot.outputs.version }}
@@ -77,6 +83,7 @@ jobs:
           fi
           cores="$(tr -s ' ' <<< "${cores}" | sed 's/^ //; s/ $//')"
           echo "cores=${cores}" >> "${GITHUB_OUTPUT}"
+          echo "matrix=$(./tools/ci-build.sh cores-matrix "${cores}")" >> "${GITHUB_OUTPUT}"
           {
             echo "### Core da compilare: ${cores:-nessuno}"
             if [ -s changed.txt ]; then
@@ -107,15 +114,20 @@ jobs:
             exit 1
           fi
           read -r run name <<< "${art}"
-          { echo "run=${run}"; echo "name=${name}"; echo "version=${name#sysroot-}"; } >> "${GITHUB_OUTPUT}"
+          version="${name#sysroot-}"; version="${version%.tar.zst}"
+          { echo "run=${run}"; echo "name=${name}"; echo "version=${version}"; } >> "${GITHUB_OUTPUT}"
           echo "- sysroot: ${name} (run ${run})" >> "${GITHUB_STEP_SUMMARY}"
 
   build:
-    name: Compila
+    name: Compila ${{ matrix.g }}
     needs: setup
     if: needs.setup.outputs.cores != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     permissions:
       contents: read
       actions: read
@@ -170,33 +182,36 @@ jobs:
 
       - name: Core
         env:
-          CORES: ${{ needs.setup.outputs.cores }}
+          CORES: ${{ matrix.cores }}
         run: ./tools/ci-build.sh cores "${CORES}"
 
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: cores-${{ github.run_number }}
+          name: cores-${{ github.run_number }}-${{ matrix.g }}
           path: ${{ env.W }}/cores/
           retention-days: 14
           if-no-files-found: ignore
 
       - name: Log
         if: always()
-        run: ./tools/ci-build.sh logs cores
+        run: ./tools/ci-build.sh logs "cores-${{ matrix.g }}"
 
+      # archive: false, l'artifact si chiama come il file: uno per job
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          path: ${{ env.W }}/log-cores.tar.zst
+          path: ${{ env.W }}/log-cores-${{ matrix.g }}.tar.zst
           archive: false
           retention-days: 14
           if-no-files-found: ignore
 
+  # anche se qualche job di build e' fallito o finito il tempo: i riusciti si
+  # pubblicano, gli altri vanno nell'issue (merge-cores)
   publish:
     name: Release cores e pin
     needs: [setup, build]
-    if: needs.setup.outputs.cores != '' && !inputs.dry_run
+    if: always() && needs.setup.result == 'success' && needs.setup.outputs.cores != '' && !inputs.dry_run
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -210,22 +225,35 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
+      # un artifact per job, ognuno nella sua cartella sotto cores-parts
       - uses: actions/download-artifact@v8
         with:
-          name: cores-${{ github.run_number }}
-          path: cores-out
+          pattern: cores-${{ github.run_number }}-*
+          path: cores-parts
 
       - uses: actions/download-artifact@v8
         with:
           name: pins-new
           path: pins-new
 
+      - name: Risultati dei job
+        env:
+          CORES: ${{ needs.setup.outputs.cores }}
+        run: ./tools/ci-build.sh merge-cores cores-parts cores-out "${CORES}"
+
       - name: Release cores
-        run: ./tools/ci-build.sh publish-cores cores-out
+        run: |
+          if [ ! -s cores-out/built.txt ]; then
+            echo "::warning title=Core::nessun core compilato: niente da pubblicare"
+            exit 0
+          fi
+          ./tools/ci-build.sh publish-cores cores-out
 
       - name: Pin dei core riusciti
         id: pins
-        run: ./tools/ci-build.sh pins-merge cores-out pins-new/pins-new.txt
+        run: |
+          if [ ! -s cores-out/built.txt ]; then echo "nessun core riuscito: pin invariati"; exit 0; fi
+          ./tools/ci-build.sh pins-merge cores-out pins-new/pins-new.txt
 
       # i falliti: un issue solo, aggiornato, chiuso quando non ne restano
       - name: Issue per i core falliti
@@ -244,7 +272,7 @@ jobs:
           body="$(printf '%s\n\n```\n%s\n```\n\n%s\n' \
             "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}: questi core, alla punta del loro upstream, non compilano. Restano al commit vecchio in cores/pins.txt." \
             "$(cat cores-out/failed.txt)" \
-            "Il log completo e' fra gli artifact del run (log-cores.tar.zst). Quando l'upstream li sistema, il lunedi' dopo riprovano da soli; a mano: Run workflow con il nome del core.")"
+            "Il log completo e' fra gli artifact del run (log-cores-<gruppo>.tar.zst, il gruppo e' nel nome del job). Quando l'upstream li sistema, il lunedi' dopo riprovano da soli; a mano: Run workflow con il nome del core.")"
           if [ -n "${num}" ]; then
             gh issue edit "${num}" --title "${title}" --body "${body}"
           else
