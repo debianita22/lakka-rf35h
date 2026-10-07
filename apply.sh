@@ -147,6 +147,9 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/autoremove-
 # Rust, per aarch64 fallisce) e shellcheck (ogni avviso ferma la build).
 # NO_RUST=1 e NO_SHELLCHECK=1 accanto agli altri NO_*.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/perf-host-tools-rf35h.patch"
+# Kernel con -mtune per la CPU del device (prova per la v1.3.1: da misurare con
+# tools/rf35h-kbench.sh)
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/kernel-mtune-rf35h.patch"
 # L'hash dei pacchetti divideva sugli spazi i nomi dei nostri override
 # ("TGB Dual/TGB Dual.cfg"): errori sha256sum e file esclusi dall'hash.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/stamp-spaces-rf35h.patch"

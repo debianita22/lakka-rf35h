@@ -284,6 +284,7 @@ chk "perf senza strumenti dell'host (Rust)"   "[ \$(grep -c 'NO_RUST=1' '$LPK') 
 chk "perf senza strumenti dell'host (shellck)" "[ \$(grep -c 'NO_SHELLCHECK=1' '$LPK') -eq 2 ]"
 chk "hash dei pacchetti: nomi con spazi"       "grep 'xargs -d' '${W}/config/functions' | grep -q 'sha256sum'"
 chk "sorgenti GNU prima da mirrors.kernel.org"  "grep -q 'for url in \${GNU_MIRROR_URL} ' '${W}/scripts/get_archive' && grep -q 'https://ftp.gnu.org/pub/gnu/\*)' '${W}/scripts/get_archive'"
+chk "kernel: -mtune per la CPU del device"      "grep -qF 'export KCFLAGS+=\" -mtune=\${TARGET_CPU}\"' '${W}/packages/linux/package.mk'"
 chk "cargo: linker del target senza config.toml" "grep -qF 'export \"CARGO_TARGET_\${_rf35h_cargo_target//-/_}_LINKER=\${TARGET_PREFIX}gcc\"' '${W}/config/functions'"
 chk "sorgenti: per ultimo tarballs.nixos.org"    "grep -q '\"\${PACKAGE_MIRROR}\" \${HASHED_MIRROR_URL}; do' '${W}/scripts/get_archive' && grep -qF 'https://tarballs.nixos.org/sha256/\${PKG_SHA256}' '${W}/scripts/get_archive'"
 chk "audiotest: giri letti con validazione"    "grep -q 'ignorato:' '$P/scripts/rf35h-audiotest' && grep -q '^set -f$' '$P/scripts/rf35h-audiotest'"

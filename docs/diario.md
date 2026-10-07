@@ -188,10 +188,11 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              38 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              39 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sorgenti da mirrors.kernel.org e
                               tarballs.nixos.org, linker di cargo,
+                              -mtune del kernel,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, Samba senza condivisioni
@@ -5902,3 +5903,39 @@ Note della release: in cima le novita' scritte a mano, se c'e'
 tecnico); lo spazio che System Update chiede in `/storage`, due volte il
 `.tar` piu' 100 MB, calcolato da update.txt (il `.tar` ora supera il GB);
 "[skip ci]" tolto dai soggetti dei commit. Prove in test-ci-build.sh (77).
+
+## Prove per la v1.3.1: -mtune del kernel e huge page (7/10/2026)
+
+Domanda dell'utente: l'LTO c'e' anche sul kernel? No, e con GCC non puo'
+esserci: nel kernel l'LTO esiste solo con Clang (`LTO_CLANG_THIN/FULL`,
+clang + ld.lld), e Lakka lo compila con GCC 16 (`CONFIG_LTO_NONE=y`). Com'e'
+oggi: `-O2` (`CC_OPTIMIZE_FOR_PERFORMANCE`), armv8-a generico senza
+`-mcpu`/`-mtune` (LibreELEC mette `KCFLAGS` solo per L4T), `PREEMPT=y`,
+`HZ=300`, `NO_HZ_IDLE`, debug spento dove costa, `STACKPROTECTOR_STRONG`,
+PAC e BTI compilati ma NOP sull'A35 (ARMv8.0), governor `ondemand`, THP
+`always`. Due prove, chieste dall'utente, su `ci-test/kernel-tune`:
+
+- `integration/kernel-mtune-rf35h.patch`: `KCFLAGS += -mtune=${TARGET_CPU}`
+  (cortex-a35) per arm64, come i programmi hanno gia' da config/arch.aarch64.
+  Solo `-mtune`: l'architettura la sceglie il Makefile di arm64, un `-mcpu`
+  la cambierebbe. Effetto atteso piccolo.
+- THP `madvise` invece di `always`: non serve una build, si cambia a caldo
+  (`/sys/kernel/mm/transparent_hugepage/enabled`), quindi si prova sulla
+  stessa immagine prima di toccare la config.
+
+`tools/rf35h-kbench.sh` misura, dalla console via ssh: `salva <nome>` fa
+cinque giri di `perf bench` (sched pipe, sched messaging, syscall basic,
+futex hash, mem memcpy) e un `dd` da /dev/zero, con RetroArch fermo e il
+governor `performance` per tutta la misura (poi rimessi com'erano, anche se
+cade la ssh), e tiene la mediana; `--thp madvise` cambia le huge page solo
+per la misura. `gioco <nome> [minuti]` conta, mentre si gioca, le pause per
+compattare la memoria e le huge page create: e' li' che `always` puo'
+costare, non nelle prove di velocita', dove le huge page aiutano.
+`confronta <a> <b>` mette le mediane una accanto all'altra. perf e'
+nell'immagine (lo costruisce il pacchetto linux, `CONFIG_PERF_EVENTS`).
+Provato con la busybox e un perf finto (formati di output di perf bench),
+compreso il ripristino con SIGPIPE.
+
+La build di prova riparte dallo stato della parte 2 della #28: rifa' il
+kernel e cio' che ne dipende. Confronto: la stessa immagine senza `-mtune`
+(v1.3.0 o la #29) contro questa.
