@@ -5939,3 +5939,8 @@ compreso il ripristino con SIGPIPE.
 La build di prova riparte dallo stato della parte 2 della #28: rifa' il
 kernel e cio' che ne dipende. Confronto: la stessa immagine senza `-mtune`
 (v1.3.0 o la #29) contro questa.
+
+Build #31 (ripresa dallo stato della parte 2 della #28): 262 minuti, 498 passi
+su 498, niente lasciato fuori, `.img.gz` 976 MB e `.tar` 1002 MB come la #29.
+Il kernel con `-mtune=cortex-a35` compila (GCC 16); le misure spettano alla
+console.
