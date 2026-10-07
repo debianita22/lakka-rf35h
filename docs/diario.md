@@ -188,7 +188,7 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              38 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              39 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sorgenti da mirrors.kernel.org e
                               tarballs.nixos.org, linker di cargo,
@@ -5957,9 +5957,9 @@ che per caso succede 2 volte su 252 (0,8%).
   (0,382-0,391 s contro 0,393-0,411). `pipe` +15% di mediana ma i giri si
   sovrappongono (6,48-8,45 contro 7,87-9,32 us): rumore, come syscall,
   futex, dd e memcpy (memcpy e' spazio utente: uguale, come doveva, quindi
-  le condizioni erano confrontabili). **`-mtune` scartato**: niente di
-  misurabile dove conta, una patch in piu' da portarsi dietro. Non entra
-  nella v1.3.1; `ci-test/kernel-tune` resta come traccia.
+  le condizioni erano confrontabili). Guadagno piccolo, nessun costo
+  misurato: prima l'avevo scartato (una patch in piu' per un microbenchmark),
+  poi l'utente l'ha voluto. Vedi "-mtune su main" qui sotto.
 - **base -> madvise**: l'unica differenza vera e' memcpy +4,7%: con pagine
   da 2 MB fermo a 0,665 GB/s in tutti i giri, con pagine da 4 KB 0,688-0,726.
   Non e' la zero page: il perf di oggi (`tools/perf/bench/mem-functions.c`)
@@ -6025,3 +6025,26 @@ Lo strumento passa su `main` (`tools/rf35h-kbench.sh`), con tre cose nuove:
 Prove: `tools/test-rf35h-kbench.sh`, 41, con la busybox e con dash
 (retroarch, perf e systemctl finti, sysfs su file; `confronta` sui numeri
 veri di stasera).
+
+## -mtune su main (7/10/2026)
+
+L'utente: perche' non applicarlo? Giusto: `-mtune` tocca solo scheduling e
+allineamenti (il codice resta armv8-a, nessun rischio di istruzioni che
+l'A35 non ha), la patch e' gia' stata costruita e avviata sulla console
+(#31), e l'unica differenza misurata e' a favore (`sched messaging` -1,8%,
+tutti i giri). Scartarlo per "guadagno troppo piccolo" non aveva un costo
+dall'altra parte. Entra in `main` per la v1.3.1, testo della patch con le
+misure; la v1.3.0 (in build da e563026) resta senza.
+
+Un dubbio da chiudere sull'immagine finale: `pipe` +15% di mediana. Con il
+criterio dei giri e' rumore (si sovrappongono), ma con un test di Mann-Whitney
+5 contro 5 darebbe p di circa 0,03: un indizio debole, non una prova. Contro
+c'e' `messaging`, che e' anche lui fatto di risvegli e cambi di contesto e
+migliora. Sulla v1.3.1: `salva` e `confronta` con la v1.3.0; se `pipe`
+peggiora con tutti i giri separati, `-mtune` esce.
+
+Huge page: l'utente le vuole come sono, a meno che `madvise` non valga
+davvero la pena. Quindi `always` resta, e cambia solo se la prova `core`
+dice "meglio" sulla CPU (tutti i giri) o libera decine di MB su un gioco
+pesante senza peggiorare la CPU.
+

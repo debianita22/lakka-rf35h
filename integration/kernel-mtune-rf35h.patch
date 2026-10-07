@@ -1,0 +1,34 @@
+Subject: linux: -mtune per la CPU del device
+
+Il kernel si compila per armv8-a generico: LibreELEC non gli passa ne'
+-mcpu ne' -mtune (KCFLAGS solo per L4T), mentre ai programmi da'
+-mtune=${TARGET_CPU} (config/arch.aarch64). Il Cortex-A35 esegue in ordine:
+l'ordine delle istruzioni scelto dal compilatore pesa piu' che su un core
+fuori ordine. Qui KCFLAGS += -mtune=${TARGET_CPU} per arm64. Non -mcpu:
+l'architettura la sceglie il Makefile di arm64 in base alla config, e -mcpu
+la cambierebbe. -mtune cambia solo scheduling e allineamenti: il codice
+resta armv8-a.
+
+Misurato sulla console il 7/10/2026 (tools/rf35h-kbench.sh, 5 giri per
+prova, contro la stessa immagine senza): perf bench sched messaging -1,8%
+in tutti i giri; pipe, syscall, futex, dd e memcpy nel rumore. Guadagno
+piccolo, nessun costo misurato.
+
+---
+--- a/packages/linux/package.mk
++++ b/packages/linux/package.mk
+@@ -425,6 +425,14 @@
+      export KCFLAGS+=" -Wno-stringop-truncation -Wno-error=stringop-overflow -Wno-maybe-uninitialized -Wno-address-of-packed-member -Wno-packed-not-aligned -Wno-array-bounds"
+   fi
+ 
++  # devaOS RF35H: lo scheduling delle istruzioni per la CPU vera (TARGET_CPU,
++  # cortex-a35, che esegue in ordine), come gia' per i programmi. Solo
++  # -mtune: l'architettura (-march) la sceglie il Makefile di arm64 dalla
++  # config, e un -mcpu la cambierebbe. Misure: integration/kernel-mtune-rf35h.patch.
++  if [ "${TARGET_KERNEL_ARCH}" = "arm64" ] && [ -n "${TARGET_CPU}" ]; then
++    export KCFLAGS+=" -mtune=${TARGET_CPU}"
++  fi
++
+   DTC_FLAGS=-@ kernel_make ${KERNEL_TARGET} ${KERNEL_MAKE_EXTRACMD} modules
+ 
+   if [ ! "${LINUX}" = "L4T" ]; then
