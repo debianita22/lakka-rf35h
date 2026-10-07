@@ -61,10 +61,13 @@ jobs:
 
       - uses: actions/checkout@v7
 
+      # Di solito due minuti. Il limite: il 7/10/2026 una parte e' rimasta
+      # qui tre ore (apt o la pulizia), e senza sarebbe arrivata alle sei
+      # del job. tools/ci-apt.sh: tre tentativi, ognuno con il suo timeout.
       - name: Spazio su disco
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq zstd squashfs-tools >/dev/null
+          ./tools/ci-apt.sh zstd squashfs-tools
           ./tools/ci-build.sh disk
 
       - name: Stato della parte precedente

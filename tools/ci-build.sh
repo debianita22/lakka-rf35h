@@ -70,9 +70,11 @@ cmd_disk() {
 	         /usr/share/swift /opt/hostedtoolcache /usr/local/share/powershell \
 	         /usr/local/share/chromium /usr/local/lib/node_modules /opt/az \
 	         /opt/microsoft /opt/google /usr/lib/jvm /usr/share/java; do
-		[ -e "${d}" ] && sudo rm -rf "${d}" &
+		[ -e "${d}" ] && sudo timeout 600 rm -rf "${d}" &
 	done
-	docker image prune -af >/dev/null 2>&1 &
+	# con un limite: una pulizia appesa non deve fermare il job (il passo ha
+	# comunque il suo timeout-minutes, vedi build-stage.yml)
+	timeout 300 docker image prune -af >/dev/null 2>&1 &
 	wait
 	df -h / /mnt 2>/dev/null || df -h /
 

@@ -28,9 +28,9 @@ jobs:
       # busybox: le prove girano gli script con la sh della console;
       # squashfs-tools: verify-image apre un SYSTEM vero
       - name: Strumenti
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck busybox squashfs-tools >/dev/null
+          ./tools/ci-apt.sh shellcheck busybox squashfs-tools
           pip install -q --break-system-packages actionlint-py
           shellcheck --version | sed -n 2p
           actionlint -version | head -1

@@ -6059,3 +6059,22 @@ per le build di prova. Il gruppo di concurrency e' per versione, quindi le
 due girano insieme; "latest" va alla piu' alta (sort -V), cioe' alla v1.3.1
 quando esce. Note in `docs/release-notes/v1.3.1.md`: il kernel con `-mtune`
 e, per chi arriva dalla v1.2.0, il rimando alla v1.3.0.
+
+### v1.3.1, primo tentativo: tre ore ferma a "Spazio su disco" (7/10/2026)
+
+Al controllo delle 22:46 UTC la parte 1 della v1.3.1 (run 37676595387) era
+ancora nel passo "Spazio su disco", iniziato alle 19:46: di solito dura un
+minuto e mezzo (la parte 3 della v1.3.0, partita alle 22:28: 90 secondi).
+Il log di un job non si legge finche' non finisce e le annotazioni arrivano
+solo alla fine, quindi la causa non si vede: `apt-get update/install` o la
+pulizia del disco (rm in parallelo, `docker image prune`). Senza limiti il job
+sarebbe andato avanti fino ai suoi 358 minuti e poi fallito. Run annullato,
+release rilanciata da capo.
+
+Contro la prossima volta: `tools/ci-apt.sh` (tutti i workflow) fa update e
+install con `timeout` 240 s per tentativo, tre tentativi, e aspetta il lock
+di dpkg 60 s invece di fallire; i passi che lo usano hanno `timeout-minutes`
+(20 quello del disco, 15 gli altri); nella pulizia ogni `rm` ha 600 s e
+`docker image prune` 300. Un blocco cosi' costa al massimo 20 minuti e un
+errore leggibile, non sei ore. Prove in test-ci-build.sh (81): apt appeso e
+ucciso, install fallito, tre tentativi falliti.

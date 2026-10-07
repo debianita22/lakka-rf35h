@@ -115,9 +115,9 @@ jobs:
       # gli stessi controlli di check.yml: un errore qui costa un minuto,
       # dopo ore di build costerebbe la build
       - name: Strumenti
+        timeout-minutes: 15
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck busybox squashfs-tools >/dev/null
+          ./tools/ci-apt.sh shellcheck busybox squashfs-tools
           pip install -q --break-system-packages actionlint-py
       - name: tools/ci-check.sh
         run: ./tools/ci-check.sh
@@ -234,9 +234,8 @@ jobs:
       # manca qualcosa (--keep-going) toglierebbe quel core a ogni console che
       # aggiorna: si ferma qui, a meno di allow_incomplete.
       - name: Strumenti
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq squashfs-tools >/dev/null
+        timeout-minutes: 15
+        run: ./tools/ci-apt.sh squashfs-tools
       - name: re3, core rotti, core e giochi mancanti
         run: ./tools/ci-build.sh check-dist dist
 

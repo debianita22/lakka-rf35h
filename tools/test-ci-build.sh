@@ -428,5 +428,32 @@ ok "spazio: 1002 MB, ne servono 2104" '[ "${rc}" = 0 ] && grep -qF "**Free space
 ok "  ...soggetti senza [skip ci]" 'grep -qx -- "- only docs" "${T}/nnotes.md" && ! grep -qF "[skip ci]" "${T}/nnotes.md"'
 ok "  ...novita' della versione subito dopo il titolo" '[ "$(sed -n 3p "${T}/nnotes.md")" = "**What is new**" ] && [ "$(grep -c "^- a thing$" "${T}/nnotes.md")" = 1 ]'
 
+echo "ci-apt.sh (apt sul runner, con limite di tempo)"
+FA="${T}/fakeapt"; rm -rf "${FA}"; mkdir -p "${FA}"
+printf '#!/bin/sh\nexec "$@"\n' > "${FA}/sudo"
+# apt-get finto: il comportamento della chiamata N da $FA/modo ("appeso",
+# "errore" o "ok", una parola per chiamata; dopo l'ultima, l'ultima)
+cat > "${FA}/apt-get" <<'EOF'
+#!/bin/sh
+n=$(( $(cat "${FA_DIR}/n" 2>/dev/null || echo 0) + 1 )); echo "${n}" > "${FA_DIR}/n"
+echo "$*" >> "${FA_DIR}/chiamate"
+m="$(tr ' ' '\n' < "${FA_DIR}/modo" | sed -n "${n}p")"
+[ -n "${m}" ] || m="$(tr ' ' '\n' < "${FA_DIR}/modo" | grep . | tail -1)"
+case "${m}" in appeso) sleep 30 ;; errore) exit 100 ;; esac
+exit 0
+EOF
+chmod +x "${FA}/sudo" "${FA}/apt-get"
+apt_run() { rm -f "${FA}/n" "${FA}/chiamate"; echo "$1" > "${FA}/modo"
+	( export PATH="${FA}:${PATH}" FA_DIR="${FA}" CI_APT_TIMEOUT=1 CI_APT_SLEEP=0
+	  bash "${O}/tools/ci-apt.sh" zstd squashfs-tools > "${FA}/out" 2>&1 ); }
+apt_run "ok"; rc=$?
+ok "ci-apt: update e install, una volta" '[ "${rc}" = 0 ] && [ "$(cat "${FA}/n")" = 2 ] && grep -q "install -y -qq zstd squashfs-tools" "${FA}/chiamate" && grep -q "DPkg::Lock::Timeout=60 update" "${FA}/chiamate"'
+apt_run "appeso ok"; rc=$?
+ok "ci-apt: update appeso, ucciso dal timeout, secondo tentativo riuscito" '[ "${rc}" = 0 ] && [ "$(cat "${FA}/n")" = 3 ] && grep -q "tentativo 1 di 3" "${FA}/out"'
+apt_run "ok errore ok"; rc=$?
+ok "ci-apt: install fallito, si riparte da update" '[ "${rc}" = 0 ] && [ "$(cat "${FA}/n")" = 4 ]'
+apt_run "errore"; rc=$?
+ok "ci-apt: tre tentativi falliti, esce 1 con ::error" '[ "${rc}" = 1 ] && [ "$(cat "${FA}/n")" = 3 ] && grep -q "^::error title=apt::zstd squashfs-tools non installati" "${FA}/out"'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]
