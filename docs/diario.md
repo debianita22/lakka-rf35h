@@ -5874,3 +5874,15 @@ valore del file; cargo preferisce l'ambiente). Nessuna ricompilazione.
 pacchetto fallito nella parte (`dropped_logs`): la prossima volta il perche'
 si legge dall'API. La conferma e' una build ripresa dallo stato della parte 2
 della #28: rifa' la parte 3 coi core in Rust.
+
+### Build #29: 162 core su 162 (7/10/2026)
+
+Ripresa della #28 dallo stato della parte 2, con la correzione del linker di
+cargo, l'LTO su RetroArch e sui tre core in piu': una parte, 155 minuti di
+build, 498 passi su 498, niente lasciato fuori. Immagine `.img.gz` 976 MB,
+`.tar` 1002 MB, 174 `.so` nel SYSTEM (i 171 della #28 piu' i tre in Rust).
+boytacean, doukutsu_rs e rustation_ng compilano: l'unica cosa cambiata per
+loro e' il linker nell'ambiente, quindi la causa era quella. RetroArch
+ricompilato con `+lto` (GCC 16, aarch64) senza errori: gli avvisi `-Wodr`
+visti nella prova nativa restano avvisi anche qui. Immagine di prova
+(pacchetti di due commit), non da release.
