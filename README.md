@@ -37,8 +37,8 @@ need a port (device tree, boot loader, controls): see
 - RetroArch with 162 libretro cores: every core Lakka builds for RK3326 that
   compiles here. Many are too heavy for the Cortex-A35; the guide lists a
   main core and a fallback per system, chosen for this SoC (the base set, a
-  build option on its own). 19 interpreter cores are built with link-time
-  optimization.
+  build option on its own). 22 interpreter cores, RetroArch and Mesa are
+  built with link-time optimization.
 - Mesa Panfrost with OpenGL ES by default; Vulkan (PanVK) selectable in
   RetroArch.
 - *Device Settings* in RetroArch: brightness, sleep timer, stick and status

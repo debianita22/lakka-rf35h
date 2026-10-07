@@ -119,7 +119,8 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      --cores "gambatte fceumm genesis_plus_gx snes9x2010 mgba"
   --kms              applica anche optional/kms-no-compositor.patch
                      RetroArch su KMS senza sway. Non al primo tentativo.
-  --no-core-lto      toglie l'LTO ai 19 core a cui lo mette l'overlay
+  --no-core-lto      toglie l'LTO ai 22 core a cui lo mette l'overlay (Mesa e
+                     RetroArch lo tengono)
                      (+lto: -flto con i -Werror di LibreELEC). Se un core
                      con LTO si comporta male sulla console
   --no-vulkan        immagine senza Vulkan (Mesa senza PanVK, RetroArch senza

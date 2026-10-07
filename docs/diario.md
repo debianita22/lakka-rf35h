@@ -5812,3 +5812,36 @@ non `NR == FNR`), e un registro che manca da una parte conta come diverso.
 Provato con la busybox awk: file uguali, due registri diversi, un file vuoto
 da una parte e dall'altra. Le altre utility dei nostri script sulla console
 ci sono tutte (unica fuori dall'elenco base: `flock`, presente).
+
+## LTO anche su RetroArch e su tre core del set di base (7/10/2026)
+
+Domanda dell'utente: core e RetroArch sono compilati con l'LTO? Solo in
+parte: Mesa e 19 core interpreti si', RetroArch e gli altri core no (tutto il
+resto a `-O2 -march=armv8-a+crc+crypto -mtune=cortex-a35`; in RetroArch il
+codice NEON a 64 bit c'e' grazie alla 1004). Deciso con l'utente:
+
+- `+lto` a **beetle_wswan**, **handy** e **beetle_lynx**: interpreti in C/C++
+  senza dynarec come gli altri 19, rimasti fuori solo perche' entrati nel set
+  di base il 4/10, dopo la lista. Ora 22 (`RF35H_LTO_CORES` in apply.sh;
+  verify-claims ne pretende almeno 22).
+- **RetroArch** con `+lto`, sempre, come Mesa: una riga `PKG_BUILD_FLAGS` in
+  coda al suo package.mk (Lakka non gliene da'; apply.sh si ferma se un
+  giorno ce ne fosse gia' una). verify-claims lo controlla.
+
+Prova prima di metterlo su main, visto che RetroArch e' un pacchetto di
+sistema (se non compila si ferma la build, non lo salta `--keep-going`):
+RetroArch al commit pinnato (69a4f0ea) da GitHub, le stesse 16 patch
+nell'ordine di `scripts/unpack` (con il fuzz di default, come LibreELEC: la
+99 e la 999 di Lakka entrano solo cosi'), le opzioni di configure e di make
+del package.mk, compilato nativo x86_64 con GCC 13.3 e i flag di "+lto"
+(`-flto -fno-fat-lto-objects -Werror=odr -Werror=lto-type-mismatch
+-Werror=strict-aliasing`). Risultato: compila e linka, anche i 27 filtri
+video e gli 11 DSP che make_target costruisce con gli stessi CFLAGS; il
+binario parte (`--version`, `--features`). Al link 17 avvisi `-Wodr`, tutti
+tipi enum di `spv::`: RetroArch porta due copie di `spirv.hpp` (glslang e
+SPIRV-Cross). Restano avvisi perche' LibreELEC mette i `-Werror` solo nei
+CFLAGS e il link di RetroArch non li usa (con `-Werror=odr` anche al link il
+link fallisce: provato). Sono enum con lo stesso tipo sottostante, nessun
+effetto sul codice. Limiti della prova: GCC 13 e x86_64 invece di GCC 16 e
+aarch64; la conferma vera e' la prossima build. Se un giorno quegli avvisi
+diventassero errori: `+lto-off` nella riga di apply.sh.

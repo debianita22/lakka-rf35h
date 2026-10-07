@@ -195,7 +195,7 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/connman-bla
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/samba-shares-rf35h.patch"
 
 # Ottimizzazione: -O2 lo mette LibreELEC a tutto (CFLAGS_OPTIM_DEFAULT). Qui
-# l'LTO: Mesa sempre; i core solo quelli provati in C/C++ puro, senza
+# l'LTO: Mesa e RetroArch sempre; i core solo quelli in C/C++ puro, senza
 # dynarec. Il flag e' "+lto": questa LibreELEC conosce solo lto, lto-fat e
 # lto-off (config/functions, setup_toolchain), e "+lto" da' -flto=N piu' i
 # suoi -Werror=odr, lto-type-mismatch e strict-aliasing, che fermano un core
@@ -211,10 +211,12 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/cannonball-
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/sway-lean-rf35h.patch"
 if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 	# LTO solo su interpreti in C/C++ puro. Fuori: chi ha dynarec o JIT
-	# (picodrive, gpsp, mupen64plus_next, parallel_n64, melonds, melondsds,
-	# flycast) e i giganti dove il link con LTO mangia gigabyte di RAM per
-	# poco (fbneo, fbalpha2012, mame2010, mame2015).
-	for c in ${RF35H_LTO_CORES:-snes9x2010 snes9x snes9x2005 gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx gearsystem mgba beetle_pce_fast beetle_pce beetle_ngp race stella2014 stella cap32 crocods}; do
+	# (picodrive, gpsp, mupen64plus_next, parallel_n64, pcsx_rearmed, melonds,
+	# melondsds, flycast) e i giganti dove il link con LTO mangia gigabyte di
+	# RAM per poco (fbneo, fbalpha2012, mame2010, mame2015). beetle_wswan,
+	# handy e beetle_lynx (7/10/2026): interpreti come gli altri, entrati nel
+	# set di base il 4/10 dopo la lista.
+	for c in ${RF35H_LTO_CORES:-snes9x2010 snes9x snes9x2005 gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx gearsystem mgba beetle_pce_fast beetle_pce beetle_ngp race stella2014 stella cap32 crocods beetle_wswan handy beetle_lynx}; do
 		pm="$L/packages/lakka/libretro_cores/$c/package.mk"
 		[ -f "$pm" ] || { echo "  (core $c non presente, salto)"; continue; }
 		if grep -qE '^PKG_BUILD_FLAGS=.*lto' "$pm"; then
@@ -230,6 +232,21 @@ if [ "${RF35H_CORE_LTO:-yes}" = "yes" ]; then
 		fi
 	done
 fi
+# RetroArch con LTO (7/10/2026, come Mesa: sempre). In coda al package.mk:
+# Lakka non gli da' PKG_BUILD_FLAGS, e una riga a se' non dipende dal
+# contesto delle altre patch. Provato su un RetroArch nativo x86_64 (GCC 13,
+# stesse patch e opzioni di Lakka, i flag di "+lto"): compila e linka, filtri
+# video e DSP compresi; al link 17 avvisi -Wodr, tutti enum di spv:: (le due
+# copie di spirv.hpp, glslang e SPIRV-Cross), avvisi e non errori perche'
+# LibreELEC passa i -Werror solo in compilazione. Se un giorno diventassero
+# errori: "+lto-off" qui.
+RA_PM="$L/packages/lakka/retroarch_base/retroarch/package.mk"
+if grep -q '^PKG_BUILD_FLAGS=' "$RA_PM"; then
+	echo "apply: retroarch ha gia' PKG_BUILD_FLAGS ($(grep '^PKG_BUILD_FLAGS=' "$RA_PM")): da rivedere" >&2
+	exit 1
+fi
+printf '\n# devaOS RF35H: LTO, come Mesa (apply.sh). Toglierlo: "+lto-off".\nPKG_BUILD_FLAGS="+lto"\n' >> "$RA_PM"
+echo "  retroarch: +lto"
 
 # Vulkan: chi legge VULKAN_SUPPORT compila in modo diverso (Mesa con o senza
 # PanVK, RetroArch con o senza il driver vulkan; i core cambiano dipendenze
