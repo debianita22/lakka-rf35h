@@ -151,10 +151,11 @@ jobs:
           cp pins-new/pins-new.txt cores/pins.txt
           git diff --stat -- cores/pins.txt
 
+      # come in build-stage.yml: apt con limiti di tempo (tools/ci-apt.sh)
       - name: Spazio su disco
+        timeout-minutes: 20
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq zstd squashfs-tools >/dev/null
+          ./tools/ci-apt.sh zstd squashfs-tools
           ./tools/ci-build.sh disk
 
       - uses: actions/download-artifact@v8
