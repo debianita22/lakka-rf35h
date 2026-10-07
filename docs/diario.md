@@ -188,10 +188,10 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              37 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              38 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sorgenti da mirrors.kernel.org e
-                              tarballs.nixos.org,
+                              tarballs.nixos.org, linker di cargo,
                               sway snello, Vulkan, IKEMEN e giochi nelle options,
                               wlroots senza Vulkan, SDL host, core riparati,
                               stamp di RetroArch, Samba senza condivisioni
@@ -5845,3 +5845,32 @@ link fallisce: provato). Sono enum con lo stesso tipo sottostante, nessun
 effetto sul codice. Limiti della prova: GCC 13 e x86_64 invece di GCC 16 e
 aarch64; la conferma vera e' la prossima build. Se un giorno quegli avvisi
 diventassero errori: `+lto-off` nella riga di apply.sh.
+
+## Build #28: 162 core in tre parti, i tre in Rust fuori (7/10/2026)
+
+Prima build da zero con tutti i core (ci-test/allcores, 769f48d): tre parti,
+circa 15 ore (317 + 314 + 238 minuti di build, piu' stato e upload). La parte
+2 ha fatto solo 22 passi: quasi tutta mame, che nella parte 1 era rimasto a
+meta'. Immagine `.img.gz` 971 MB, `.tar` 997 MB (sotto i 2 GiB di GitHub),
+171 `.so` nel SYSTEM. Stato fra le parti 4,1 e 5,0 GB, ccache 3,9 GB su 6.
+
+Fuori, lasciati da `--keep-going`: **boytacean, doukutsu_rs,
+rustation_ng**, cioe' tutti i core in Rust che su aarch64 si costruiscono
+(holani e' solo x86). La causa piu' probabile, dedotta dal meccanismo perche'
+i log dei core falliti stanno solo negli artifact: il linker per il target
+(`linker = "${TARGET_PREFIX}gcc"`) LibreELEC lo mette in
+`cargo_home/config.toml`, dentro la cartella di build di rust:host, e
+`CARGO_HOME` punta li'. Con `AUTOREMOVE=yes` (la CI) quella cartella sparisce
+appena rust:host e' installato; cargo:host la riscompatta
+(`PKG_DEPENDS_UNPACK`) ma senza rifare la configurazione, e i core linkano
+per aarch64 con il `cc` dell'host. Nel resoconto della build del 21/9 (in
+locale, senza AUTOREMOVE) non erano fra i saltati. openxeenng aveva gia'
+aggirato la stessa cosa con le variabili d'ambiente di cargo.
+
+`integration/cargo-linker-rf35h.patch`: in config/functions, accanto a
+`CARGO_HOME`, `CARGO_TARGET_<TRIPLE>_LINKER=${TARGET_PREFIX}gcc` (lo stesso
+valore del file; cargo preferisce l'ambiente). Nessuna ricompilazione.
+`ci-build.sh` ora mette in un'annotazione errori e coda del log di ogni
+pacchetto fallito nella parte (`dropped_logs`): la prossima volta il perche'
+si legge dall'API. La conferma e' una build ripresa dallo stato della parte 2
+della #28: rifa' la parte 3 coi core in Rust.

@@ -154,6 +154,9 @@ patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/stamp-space
 # ftpmirror.gnu.org dai runner di GitHub vanno in timeout, build #22 e #24),
 # per ultimo tarballs.nixos.org per sha256 (savannah, build #25)
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/source-mirrors-rf35h.patch"
+# cargo: il linker del target anche quando AUTOREMOVE ha tolto la cartella di
+# build di rust (e con lei cargo_home/config.toml): i core in Rust, build #28
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/cargo-linker-rf35h.patch"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/retroarch-no-go2-rf35h.patch"
 # RF35H_ALL_CORES=1: include anche lr_moonlight e vitaquake3, che Lakka
 # esclude su ogni progetto. La patch sta in optional/ perche' quei due

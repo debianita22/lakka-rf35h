@@ -1,0 +1,38 @@
+Subject: config/functions: il linker del target per cargo anche con AUTOREMOVE
+
+I core libretro in Rust di Lakka (boytacean, doukutsu_rs, rustation_ng)
+compilano con cargo:host e CARGO_HOME="$(get_build_dir rust)/cargo_home".
+Il linker per il target (linker = "${TARGET_PREFIX}gcc") sta solo in
+cargo_home/config.toml, che rust:host scrive nella SUA cartella di build. Con
+AUTOREMOVE=yes, come in CI, quella cartella viene tolta appena rust:host e'
+installato (cargo:host la riscompatta con PKG_DEPENDS_UNPACK, ma senza
+rifare la configurazione che scrive config.toml): cargo linka la libreria per
+aarch64-libreelec-linux-gnu con il "cc" dell'host. Nella build di prova #28
+(162 core, AUTOREMOVE) i tre sono stati gli unici core a non compilare; nel
+resoconto della build del 21/9 (in locale, senza AUTOREMOVE) non erano fra i
+saltati. I log dei core falliti non si leggono da qui (stanno negli
+artifact), quindi la causa e' dedotta dal meccanismo; la prova e' la build
+successiva.
+
+Lo stesso valore, come variabile d'ambiente di cargo
+(CARGO_TARGET_<TRIPLE>_LINKER), che vale anche senza il file; dove il file
+c'e' i due coincidono. config/functions non entra negli stamp: nessuna
+ricompilazione.
+
+---
+--- a/config/functions
++++ b/config/functions
+@@ -495,6 +495,13 @@
+       export CARGO_TARGET_DIR="${PKG_BUILD}/.${TARGET_NAME}/target"
+       export CARGO_HOME="$(get_build_dir rust)/cargo_home"
+       export RUST_TARGET_PATH="${TOOLCHAIN}/lib/rustlib/"
++      # devaOS RF35H: il linker del target anche senza cargo_home/config.toml.
++      # Quel file lo scrive rust:host nella sua cartella di build, e con
++      # AUTOREMOVE=yes (la CI) la cartella sparisce appena rust e' installato:
++      # cargo linkerebbe per ${TARGET_NAME} con il "cc" dell'host.
++      _rf35h_cargo_target="${TARGET_NAME^^}"
++      export "CARGO_TARGET_${_rf35h_cargo_target//-/_}_LINKER=${TARGET_PREFIX}gcc"
++      unset _rf35h_cargo_target
+ 
+       ;;
+     host:*|bootstrap:*)

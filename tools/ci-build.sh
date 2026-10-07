@@ -181,6 +181,7 @@ cmd_build() {
 		fi
 		break
 	done
+	dropped_logs
 	echo "uscita ${rc}: ${result}"
 	out "result=${result}"
 	summ "- build: uscita ${rc} (${result}) dopo $(( ($(date +%s) - now) / 60 )) minuti, tentativi ${try}"
@@ -224,6 +225,26 @@ failure_report() {
 		| grep -av 'Werror\|error\.o\|_error\.' | tail -10 | cut -c1-180
 	echo "--- coda:"
 	tail -20 "${flog:-${log}}" | cut -c1-180
+}
+
+# I log dei pacchetti falliti in questa parte (build-rf35h-<data>-<pkg>-
+# fallito.log: core e giochi lasciati fuori da --keep-going, o il pacchetto che
+# ha fermato la build), errori e coda, uno per annotazione. Stanno anche
+# nell'artifact dei log, ma le annotazioni si leggono dall'API senza scaricare
+# niente: nella #28 i tre core in Rust risultavano solo "lasciati fuori", senza
+# un perche' leggibile. Ogni parte ha i suoi: lo stato non li porta (pack).
+dropped_logs() {
+	local f pkg
+	for f in "${W}/${TREE_NAME}"/build-rf35h-*-fallito.log; do
+		[ -f "${f}" ] || continue
+		pkg="${f##*/build-rf35h-}"; pkg="${pkg#*-*-}"; pkg="${pkg%-fallito.log}"
+		note warning "Log di ${pkg}" "$( {
+			grep -aE 'error|Error|FAILED|No such file|fatal:|Cannot get|curl: \(|unable to|Could not|could not compile|linking with|Failed to|timed out|Killed' "${f}" \
+				| grep -av 'Werror\|error\.o\|_error\.' | tail -12 | cut -c1-200
+			echo "--- coda:"
+			tail -12 "${f}" | cut -c1-200
+		} )"
+	done
 }
 
 # I pacchetti che la build stava facendo quando si e' fermata (scadenza della
