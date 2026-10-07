@@ -312,9 +312,10 @@ salva() {
 CORE=""; ROM=""; STATO=""; FRAMES=3600; THP_LISTA=""
 VMK='^(thp_fault_alloc|thp_fault_fallback|thp_collapse_alloc|compact_stall|pswpout) '
 
-# copia di retroarch.cfg per le corse: niente che scriva fuori da ${T}
+# copia di retroarch.cfg per le corse: niente che scriva fuori da ${T}, e il
+# log su stderr (cioe' nel log della misura) anche se la config lo manda su file
 core_config() {
-	grep -v -E '^[[:space:]]*(config_save_on_exit|savestate_auto_load|savestate_auto_save|cheevos_enable|history_list_enable|content_runtime_log|content_runtime_log_aggregate|savefile_directory|savefiles_in_content_dir)[[:space:]]*=' \
+	grep -v -E '^[[:space:]]*(config_save_on_exit|savestate_auto_load|savestate_auto_save|cheevos_enable|history_list_enable|content_runtime_log|content_runtime_log_aggregate|savefile_directory|savefiles_in_content_dir|log_to_file)[[:space:]]*=' \
 		"${RA_CFG}" > "${T}/ra.cfg"
 	cat >> "${T}/ra.cfg" <<EOF
 config_save_on_exit = "false"
@@ -326,6 +327,7 @@ content_runtime_log = "false"
 content_runtime_log_aggregate = "false"
 savefiles_in_content_dir = "false"
 savefile_directory = "${T}/sram"
+log_to_file = "false"
 EOF
 	# i salvataggi di questo gioco (stesso nome della rom, anche nelle
 	# sottocartelle per core), copiati: il gioco parte come sempre, ma quello

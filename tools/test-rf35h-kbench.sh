@@ -131,6 +131,7 @@ cat > "${T}/ra.cfg" <<EOF
 config_save_on_exit = "true"
 savestate_auto_save = "true"
 cheevos_enable = "true"
+log_to_file = "true"
 savefile_directory = "${T}/saves"
 savestate_directory = "${T}/states"
 video_vsync = "true"
@@ -160,7 +161,7 @@ ok "core: memoria del processo letta (Rss da smaps_rollup)" 'grep -qE "^memoria_
 ok "core: IPC assente se perf non ha i contatori" '! grep -q "^ipc_alto" "${T}/kb/ab-always.txt"'
 ok "core: argomenti a RetroArch" 'a="${T}/out/ra.2.args"; grep -qx -- "--verbose" "${a}" && grep -qx -- "-L" "${a}" && grep -qx "${T}/cores/finto_libretro.so" "${a}" && grep -qx -- "--entryslot=2" "${a}" && grep -qx -- "--max-frames=600" "${a}" && grep -qxF "${ROM}" "${a}"'
 ok "core: ambiente del servizio (Wayland, HOME)" 'grep -qx "WAYLAND_DISPLAY=wayland-1" "${T}/out/ra.2.args" && grep -qx "HOME=${T}/home" "${T}/out/ra.2.args"'
-ok "core: config di prova senza salvataggi, una sola riga per chiave" 'c="${T}/out/ra.2.cfg"; grep -qx "config_save_on_exit = \"false\"" "${c}" && grep -qx "savestate_auto_save = \"false\"" "${c}" && grep -qx "cheevos_enable = \"false\"" "${c}" && grep -qx "history_list_enable = \"false\"" "${c}" && [ "$(grep -c "^config_save_on_exit" "${c}")" = 1 ] && [ "$(grep -c "^savefile_directory" "${c}")" = 1 ] && grep -qx "video_vsync = \"true\"" "${c}"'
+ok "core: config di prova senza salvataggi, una sola riga per chiave" 'c="${T}/out/ra.2.cfg"; grep -qx "config_save_on_exit = \"false\"" "${c}" && grep -qx "savestate_auto_save = \"false\"" "${c}" && grep -qx "cheevos_enable = \"false\"" "${c}" && grep -qx "history_list_enable = \"false\"" "${c}" && grep -qx "log_to_file = \"false\"" "${c}" && [ "$(grep -c "^config_save_on_exit" "${c}")" = 1 ] && [ "$(grep -c "^savefile_directory" "${c}")" = 1 ] && grep -qx "video_vsync = \"true\"" "${c}"'
 ok "core: .srm del gioco copiati (anche nella sottocartella), non gli altri" 'grep -q "salvataggi del gioco: 2 file copiati da ${T}/saves" "${T}/out/core.txt"'
 ok "core: i salvataggi veri non toccati" 'grep -qx originale "${T}/saves/Gioco (USA) [!].srm" && grep -qx "originale sub" "${T}/saves/sub/Gioco (USA) [!].srm"'
 ok "core: retroarch.cfg vero non toccato" 'cmp -s "${T}/ra.cfg" "${T}/ra.cfg.prima"'

@@ -6011,7 +6011,8 @@ Lo strumento passa su `main` (`tools/rf35h-kbench.sh`), con tre cose nuove:
   slot (`<gioco>.state` per lo 0, `.stateN` per gli altri: se manca lo
   script si ferma prima, altrimenti RetroArch ripartirebbe da capo senza
   dirlo). Su una copia di retroarch.cfg: niente salvataggio della config,
-  stati automatici, achievement, cronologia, tempo di gioco; i `.srm` del
+  stati automatici, achievement, cronologia, tempo di gioco, log su file
+  (va nel log della misura); i `.srm` del
   gioco copiati in una cartella temporanea, che e' dove RetroArch li
   riscrive uscendo. Una corsa vale se dura almeno 0,9 x fotogrammi/60 s
   (con il vsync non puo' durare meno), anche se RetroArch va in crash
