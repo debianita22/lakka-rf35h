@@ -5902,3 +5902,125 @@ Note della release: in cima le novita' scritte a mano, se c'e'
 tecnico); lo spazio che System Update chiede in `/storage`, due volte il
 `.tar` piu' 100 MB, calcolato da update.txt (il `.tar` ora supera il GB);
 "[skip ci]" tolto dai soggetti dei commit. Prove in test-ci-build.sh (77).
+
+## Prove per la v1.3.1: -mtune del kernel e huge page (7/10/2026)
+
+Domanda dell'utente: l'LTO c'e' anche sul kernel? No, e con GCC non puo'
+esserci: nel kernel l'LTO esiste solo con Clang (`LTO_CLANG_THIN/FULL`,
+clang + ld.lld), e Lakka lo compila con GCC 16 (`CONFIG_LTO_NONE=y`). Com'e'
+oggi: `-O2` (`CC_OPTIMIZE_FOR_PERFORMANCE`), armv8-a generico senza
+`-mcpu`/`-mtune` (LibreELEC mette `KCFLAGS` solo per L4T), `PREEMPT=y`,
+`HZ=300`, `NO_HZ_IDLE`, debug spento dove costa, `STACKPROTECTOR_STRONG`,
+PAC e BTI compilati ma NOP sull'A35 (ARMv8.0), governor `ondemand`, THP
+`always`. Due prove, chieste dall'utente, su `ci-test/kernel-tune`:
+
+- `integration/kernel-mtune-rf35h.patch`: `KCFLAGS += -mtune=${TARGET_CPU}`
+  (cortex-a35) per arm64, come i programmi hanno gia' da config/arch.aarch64.
+  Solo `-mtune`: l'architettura la sceglie il Makefile di arm64, un `-mcpu`
+  la cambierebbe. Effetto atteso piccolo.
+- THP `madvise` invece di `always`: non serve una build, si cambia a caldo
+  (`/sys/kernel/mm/transparent_hugepage/enabled`), quindi si prova sulla
+  stessa immagine prima di toccare la config.
+
+`tools/rf35h-kbench.sh` misura, dalla console via ssh: `salva <nome>` fa
+cinque giri di `perf bench` (sched pipe, sched messaging, syscall basic,
+futex hash, mem memcpy) e un `dd` da /dev/zero, con RetroArch fermo e il
+governor `performance` per tutta la misura (poi rimessi com'erano, anche se
+cade la ssh), e tiene la mediana; `--thp madvise` cambia le huge page solo
+per la misura. `gioco <nome> [minuti]` conta, mentre si gioca, le pause per
+compattare la memoria e le huge page create: e' li' che `always` puo'
+costare, non nelle prove di velocita', dove le huge page aiutano.
+`confronta <a> <b>` mette le mediane una accanto all'altra. perf e'
+nell'immagine (lo costruisce il pacchetto linux, `CONFIG_PERF_EVENTS`).
+Provato con la busybox e un perf finto (formati di output di perf bench),
+compreso il ripristino con SIGPIPE.
+
+La build di prova riparte dallo stato della parte 2 della #28: rifa' il
+kernel e cio' che ne dipende. Confronto: la stessa immagine senza `-mtune`
+(v1.3.0 o la #29) contro questa.
+
+Build #31 (ripresa dallo stato della parte 2 della #28): 262 minuti, 498 passi
+su 498, niente lasciato fuori, `.img.gz` 976 MB e `.tar` 1002 MB come la #29.
+Il kernel con `-mtune=cortex-a35` compila (GCC 16); le misure spettano alla
+console.
+
+### Risultati sulla console (sera del 7/10)
+
+Misure dell'utente: `salva base` e `salva madvise --thp madvise`
+sull'immagine che aveva (kernel del 6/10, senza `-mtune`), poi `gioco
+partita-always 15` in THP `always`; poi la #31 e `salva mtune`. Rilette con
+il criterio nuovo di `confronta` (sotto): **meglio/peggio solo se tutti e
+cinque i giri di una parte stanno oltre tutti e cinque quelli dell'altra**,
+che per caso succede 2 volte su 252 (0,8%).
+
+- **base -> mtune**: l'unica differenza vera e' `sched messaging` -1,8%
+  (0,382-0,391 s contro 0,393-0,411). `pipe` +15% di mediana ma i giri si
+  sovrappongono (6,48-8,45 contro 7,87-9,32 us): rumore, come syscall,
+  futex, dd e memcpy (memcpy e' spazio utente: uguale, come doveva, quindi
+  le condizioni erano confrontabili). **`-mtune` scartato**: niente di
+  misurabile dove conta, una patch in piu' da portarsi dietro. Non entra
+  nella v1.3.1; `ci-test/kernel-tune` resta come traccia.
+- **base -> madvise**: l'unica differenza vera e' memcpy +4,7%: con pagine
+  da 2 MB fermo a 0,665 GB/s in tutti i giri, con pagine da 4 KB 0,688-0,726.
+  Non e' la zero page: il perf di oggi (`tools/perf/bench/mem-functions.c`)
+  mappa i buffer con `MAP_POPULATE` e scrive la sorgente prima di misurare.
+  Il perche' non e' verificato; e' comunque una copia sequenziale di 64 MB,
+  che dice poco dei giochi. Il resto e' rumore.
+- **Partita di 15 minuti in `always`**: 217 huge page ai page fault e 143
+  ripieghi su pagine da 4 KB; khugepaged ne ha fatte altre 21 (42 MB);
+  `compact_stall` 28 (10 fallite); swap su zram 61 MB in uscita (15686
+  pagine, di cui 15 huge page intere: 30 MB) e 4,5 MB in entrata, 1379 page
+  fault maggiori; alla fine 188 MB di memoria anonima in huge page e 179 MB
+  disponibili su 730.
+
+  Le 28 compattazioni **non vengono dai page fault del gioco**: con
+  `defrag` a `madvise`, il default (`transparent_hugepage_flags` in
+  `mm/huge_memory.c`), un page fault fuori dalle regioni `MADV_HUGEPAGE`
+  chiede la huge page con `GFP_TRANSHUGE_LIGHT`, senza reclaim ne'
+  compattazione diretti (`vma_thp_gfp_mask`): se non c'e' ripiega subito,
+  ed e' quello che dicono i 143 fallback. Compatta invece khugepaged
+  (`khugepaged/defrag` acceso di default: `GFP_TRANSHUGE`), un thread del
+  kernel, o un'altra allocazione grande (che ci sarebbe anche in
+  `madvise`). Quello che `always` costa qui e' memoria (huge page che
+  finiscono in swap intere; khugepaged riempie un blocco da 2 MB anche se ne
+  e' usata una pagina sola, `max_ptes_none` = 511) e CPU in background; il
+  vantaggio, meno miss del TLB quando un core salta nella RAM emulata,
+  nessuna di queste prove lo misura. La documentazione del kernel consiglia
+  `madvise` ai sistemi embedded ("Embedded systems should enable hugepages
+  only inside madvise regions", `Documentation/admin-guide/mm/transhuge.rst`),
+  ma su questa console decidono i numeri: prima la prova `core`.
+
+### rf35h-kbench: confronto piu' severo e un gioco vero
+
+Lo strumento passa su `main` (`tools/rf35h-kbench.sh`), con tre cose nuove:
+
+- **`confronta`**: il verdetto con la sovrapposizione dei giri, invece della
+  soglia fissa dell'1% (la prova vera: `pipe` +15% era rumore); le
+  condizioni una accanto all'altra; per i file di `gioco`, una misura sola,
+  i numeri senza verdetto.
+- **`core <nome> <core> <rom> [--stato N] --thp always,madvise`**: fermato
+  il servizio, RetroArch carica il core e il gioco (con `--stato` lo stato
+  salvato in quello slot, in un punto pesante), gira `--frames` fotogrammi
+  (3600) senza input ed esce da solo. perf stat da' il tempo di CPU per
+  quei fotogrammi: a 60 fps fissi, meno CPU vuol dire piu' margine. Al 90%
+  della corsa, la memoria del processo (Rss + swap) e quanta in huge page.
+  Una corsa di riscaldamento, poi le modalita' alternate per cinque giri, e
+  il confronto. Opzioni di RetroArch lette nel sorgente del commit che
+  costruiamo (69a4f0ea): `--max-frames` esce quando `frame_count` arriva al
+  limite (`RUNLOOP_TIME_TO_EXIT`), `-e/--entryslot` carica lo stato dello
+  slot (`<gioco>.state` per lo 0, `.stateN` per gli altri: se manca lo
+  script si ferma prima, altrimenti RetroArch ripartirebbe da capo senza
+  dirlo). Su una copia di retroarch.cfg: niente salvataggio della config,
+  stati automatici, achievement, cronologia, tempo di gioco; i `.srm` del
+  gioco copiati in una cartella temporanea, che e' dove RetroArch li
+  riscrive uscendo. Una corsa vale se dura almeno 0,9 x fotogrammi/60 s
+  (con il vsync non puo' durare meno), anche se RetroArch va in crash
+  chiudendo. Ctrl+C a meta': il RetroArch di prova viene chiuso (in uno
+  script i comandi in background ignorano SIGINT) e tutto torna com'era.
+- **`gioco --thp`**: riavvia prima RetroArch, cosi' tutta la sua memoria
+  segue la modalita'; alla fine anche la memoria e la CPU di RetroArch. Se
+  cade la ssh va avanti e scrive il file.
+
+Prove: `tools/test-rf35h-kbench.sh`, 41, con la busybox e con dash
+(retroarch, perf e systemctl finti, sysfs su file; `confronta` sui numeri
+veri di stasera).
