@@ -5884,5 +5884,6 @@ build, 498 passi su 498, niente lasciato fuori. Immagine `.img.gz` 976 MB,
 boytacean, doukutsu_rs e rustation_ng compilano: l'unica cosa cambiata per
 loro e' il linker nell'ambiente, quindi la causa era quella. RetroArch
 ricompilato con `+lto` (GCC 16, aarch64) senza errori: gli avvisi `-Wodr`
-visti nella prova nativa restano avvisi anche qui. Immagine di prova
-(pacchetti di due commit), non da release.
+della prova nativa, se GCC 16 li da' ancora (il log del pacchetto riuscito
+non si legge da qui), non fermano il link. Immagine di prova (pacchetti di
+due commit), non da release.
