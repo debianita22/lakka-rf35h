@@ -698,7 +698,7 @@ version is Lakka's `devel-<date>-<commit>`.
 | `--no-gtasa`, `--no-openxeenng`, `--no-deva-adventures` | without that game |
 | `--re3 <dir>`, `--no-re3` | with or without GTA III (re3), from a package you provide (see below) |
 | `--kms` | experimental: RetroArch on KMS without sway; currently fails at EGL initialisation |
-| `--no-core-lto` | drop the LTO flag the overlay adds to some cores (currently without effect) |
+| `--no-core-lto` | drop the LTO flag (`+lto`) the overlay adds to 22 interpreter cores; Mesa and RetroArch keep theirs |
 | `--deva <dir>` | another boot loader: a folder with `loader/known-good.bin` and `loader/known-good.sha256` |
 | `--overlay <dir or tar.gz>` | the overlay (default: the script's own folder) |
 | `--workdir <dir>` | the Lakka tree (default `./lakka-rf35h-build`) |
@@ -722,7 +722,7 @@ Environment variables:
 | `RF35H_VERSION` | image version: file names and `VERSION` in `/etc/os-release` (letters, digits, `. _ + -`) |
 | `RF35H_UPDATE_REPO` | `owner/repository` whose releases the console updates from (default `debianita22/lakka-rf35h`) |
 | `RF35H_ALL_CORES=1` | with `--all-cores`, also try `lr_moonlight` and `vitaquake3`, which Lakka excludes everywhere |
-| `RF35H_LTO_CORES` | the cores that get the LTO flag (currently without effect, like `--no-core-lto`) |
+| `RF35H_LTO_CORES` | the cores that get the LTO flag, instead of the 22 listed in `apply.sh` |
 | `DEVA_ADVENTURES_SRC` | build Deva's Awesome Adventures from a local source tree |
 | `RE3_PGO` | profile-guided optimisation for re3: `generate`, or a profile folder |
 
