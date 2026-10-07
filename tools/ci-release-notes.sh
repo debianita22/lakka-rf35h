@@ -14,8 +14,15 @@ lakka="$(sed -n 's/^LAKKA_COMMIT="\([0-9a-f]*\)".*/\1/p' "${O}/build-lakka-rf35h
 repo="${GITHUB_REPOSITORY:-debianita22/lakka-rf35h}"
 sha="${GITHUB_SHA:-$(git -C "${O}" rev-parse HEAD 2>/dev/null || echo unknown)}"
 
+echo "Lakka for the XiFan RF35H, ${v}."
+# Le novita' di questa versione, scritte a mano (docs/release-notes/<versione>.md),
+# se ci sono, in cima: l'elenco dei commit piu' sotto e' completo ma tecnico.
+if [ -f "${O}/docs/release-notes/${v}.md" ]; then
+	echo
+	cat "${O}/docs/release-notes/${v}.md"
+fi
+
 cat <<EOF
-Lakka for the XiFan RF35H, ${v}.
 
 | File | Use |
 |---|---|
@@ -31,6 +38,20 @@ is applied while the console starts. Or copy the \`.tar\` to
 **First install** (replace \`sdX\`): \`zcat ${img} | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress\`,
 or \`flash-sd.sh\` from the repository.
 EOF
+
+# Lo spazio che System Update chiede in /storage (rf35h-update): il .tar, che
+# l'init estrae accanto a se' prima di installarlo, quindi due volte la sua
+# dimensione piu' 100 MB. Dalla v1.3.0 (162 core) il .tar passa il GB.
+size="$(val size)"
+case "${size}" in
+	''|*[!0-9]*) ;;
+	*)
+		size_mb=$(( size / 1048576 ))
+		echo
+		echo "**Free space**: the update is ${size_mb} MB; System Update needs about $(( 2 * size_mb + 100 )) MB"
+		echo "free in \`/storage\` (the console unpacks the \`.tar\` next to itself before installing it)."
+		;;
+esac
 
 # gli extra che ci sono davvero (cores.txt: i core nel SYSTEM). Non tutti
 # stanno in Contentless Cores (OpenXeenNG no, col filtro di default): come si
@@ -77,7 +98,7 @@ fi
 if [ -n "${prev}" ]; then
 	echo
 	echo "Changes since ${prev}:"
-	git -C "${O}" log --no-merges --format='- %s' "${prev}..${sha}"
+	git -C "${O}" log --no-merges --format='- %s' "${prev}..${sha}" | sed 's/ \[skip ci\]$//'
 	# quelle di prima, per chi aggiorna da una release piu' vecchia (solo se
 	# prev e' una release vera: il link non va a vuoto)
 	if [ "${prev_rel}" = yes ]; then

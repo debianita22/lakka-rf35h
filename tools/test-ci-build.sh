@@ -417,6 +417,16 @@ ok "gh in errore: l'ultimo tag senza trattino, senza link" '[ "${rc}" = 0 ] && g
 ( unset GH_TOKEN; FAKE_STABLE="v1.0.0" notes ); rc=$?
 ok "senza GH_TOKEN (prove, a mano): l'ultimo tag senza trattino" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.1.0:" "${T}/nnotes.md"'
 ok "la nota per chi aggiorna dalla v1.0.0 o dalla rc1, con la versione giusta" 'grep -q "^\*\*Updating from v1.0.0 or v1.1.0-rc1\*\*" "${T}/nnotes.md" && grep -qF "*ready: v1.2.0, select to restart and install*" "${T}/nnotes.md"'
+ok "senza size= in update.txt: niente riga dello spazio" '! grep -q "Free space" "${T}/nnotes.md"'
+# lo spazio che System Update chiede (2 volte il .tar piu' 100 MB), "[skip ci]"
+# tolto dai soggetti, e le novita' scritte a mano in cima
+printf 'version=v1.2.0\ntar=x-v1.2.0.tar\nsize=1050673152\n' > "${T}/ndist/update.txt"
+mkdir -p "${NR}/docs/release-notes"; printf '**What is new**\n\n- a thing\n' > "${NR}/docs/release-notes/v1.2.0.md"
+nc "only docs [skip ci]"; NSHA="$(git -C "${NR}" rev-parse HEAD)"
+( unset GH_TOKEN; notes ); rc=$?
+ok "spazio: 1002 MB, ne servono 2104" '[ "${rc}" = 0 ] && grep -qF "**Free space**: the update is 1002 MB; System Update needs about 2104 MB" "${T}/nnotes.md"'
+ok "  ...soggetti senza [skip ci]" 'grep -qx -- "- only docs" "${T}/nnotes.md" && ! grep -qF "[skip ci]" "${T}/nnotes.md"'
+ok "  ...novita' della versione subito dopo il titolo" '[ "$(sed -n 3p "${T}/nnotes.md")" = "**What is new**" ] && [ "$(grep -c "^- a thing$" "${T}/nnotes.md")" = 1 ]'
 
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

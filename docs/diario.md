@@ -5887,3 +5887,18 @@ ricompilato con `+lto` (GCC 16, aarch64) senza errori: gli avvisi `-Wodr`
 della prova nativa, se GCC 16 li da' ancora (il log del pacchetto riuscito
 non si legge da qui), non fermano il link. Immagine di prova (pacchetti di
 due commit), non da release.
+
+## v1.3.0 (7/10/2026)
+
+L'utente ha provato lo standby sull'immagine di prova: funziona. Chiesta la
+v1.3.0 come release vera, visibile alle console. `main` va avanti fino a
+`ci-test/allcores` (fast-forward: contiene ci-test/panel e la LTO gia' su
+main), poi la build da zero con Run workflow, version v1.3.0, non
+pre-release: "latest" perche' e' piu' alta della v1.2.0, quindi le console
+la vedono in System Update.
+
+Note della release: in cima le novita' scritte a mano, se c'e'
+`docs/release-notes/<versione>.md` (l'elenco dei commit resta, ma e'
+tecnico); lo spazio che System Update chiede in `/storage`, due volte il
+`.tar` piu' 100 MB, calcolato da update.txt (il `.tar` ora supera il GB);
+"[skip ci]" tolto dai soggetti dei commit. Prove in test-ci-build.sh (77).
