@@ -127,7 +127,7 @@ mame2003_plus        https://github.com/libretro/mame2003-plus-libretro       10
 meowpc98             https://github.com/libretro/libretro-meowPC98            5fdbb2187f6b14ca7bf668dd52b36c820b989995 -
 mesen                https://github.com/libretro/Mesen                        0102910c39ad1a62bc3f784466f3f67ca9eae335 -
 mesen_s              https://github.com/libretro/Mesen-S                      9e4fdeb9b336470bc96beb8765b2e79c86a2da1e -
-mgba_fork            https://github.com/libretro/mgba                         c758314a639aa0066e7b65a8341448181b73c804 -
+mgba_fork            https://github.com/libretro/mgba                         7a12d6d4b9acb14c0ae62c9166b6a2f3d08007f6 -
 mojozork             https://github.com/icculus/mojozork                      ff7e00742a00acec8e175ddefb97520fb270df2d -
 mrboom               https://github.com/libretro/mrboom-libretro              40ac32020b540c4bb418c7d798a990932a65da04 -
 mu                   https://github.com/libretro/Mu                           afaeb157b8ba38a4a9bdf426ba663f7efb2cc6f8 -
