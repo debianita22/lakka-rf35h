@@ -227,6 +227,7 @@ jobs:
       # il commit della build: questo run, o quello di publish_from (target
       # del tag e note della release)
       RF35H_BUILD_SHA: ${{ needs.setup.outputs.build_sha }}
+      RF35H_FROM_RUN: ${{ needs.setup.outputs.from }}
     steps:
       # la storia intera e i tag: le note elencano i commit dall'ultima
       # release, e publish riguarda che il commit sia sul ramo principale

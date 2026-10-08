@@ -683,6 +683,14 @@ on_default_branch() {
 	git -C "${O}" merge-base --is-ancestor "${c}" "refs/remotes/origin/${DEFAULT_BRANCH}"
 }
 
+# Il commit $1 modifica file di .github/workflows (rispetto al suo genitore,
+# o ai suoi genitori se e' un merge)? Il GITHUB_TOKEN non ha il permesso
+# "workflows": non puo' creare un tag (ne' quindi una release) su un commit
+# cosi', anche se e' gia' sul ramo principale.
+touches_workflows() {
+	[ -n "$(git -C "${O}" diff-tree --no-commit-id --name-only -r -m "$1" -- .github/workflows 2>/dev/null)" ]
+}
+
 # Il commit del tag $1 su origin, vuoto se il tag non c'e': il ^{} di un tag
 # annotato, il tag stesso per uno leggero
 tag_commit() {
@@ -784,7 +792,19 @@ cmd_version() {
 		fi
 		if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
 			tag="$(tag_commit "${version}")" || fail "Versione" "origin non risponde (git ls-remote)"
-			[ -z "${tag}" ] || fail "Versione" "il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
+			if [ -n "${tag}" ]; then
+				# con publish_from il tag puo' esserci gia', ma sul commit della
+				# build (vedi sotto: va creato a mano se quel commit cambia i
+				# workflow)
+				[ -n "${from}" ] && [ "${tag}" = "${bsha}" ] \
+					|| fail "Versione" "il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
+			elif touches_workflows "${bsha}"; then
+				# Il GITHUB_TOKEN non puo' creare un ref su un commit che modifica
+				# .github/workflows (HTTP 403 "Resource not accessible by
+				# integration"): la v1.3.1, su b3c49f3, e' arrivata in fondo e si
+				# e' fermata li' tre volte. Meglio saperlo subito.
+				fail "Versione" "il commit ${bsha:0:12} modifica .github/workflows: il job Release non potrebbe creare il tag ${version} (403). Fai la release da un commit dopo, che non tocca i workflow (le note della versione), oppure crea prima il tag: git push origin ${bsha}:refs/tags/${version} (un push del tag fa partire la build da solo)"
+			fi
 		fi
 		rels="$(release_ids "${version}")" || fail "Versione" "elenco delle release illeggibile"
 		if grep -q ' false$' <<< "${rels}"; then
@@ -847,6 +867,9 @@ cmd_publish() {
 	tag="$(tag_commit "${VERSION}")" || fail "Pubblica" "origin non risponde (git ls-remote)"
 	if [ -n "${tag}" ] && [ "${tag}" != "${sha}" ]; then
 		fail "Pubblica" "il tag ${VERSION} e' su ${tag:0:12}, la build su ${sha:0:12}: non pubblico"
+	fi
+	if [ -z "${tag}" ] && touches_workflows "${sha}"; then
+		fail "Pubblica" "il commit ${sha:0:12} modifica .github/workflows: il GITHUB_TOKEN non puo' creare il tag ${VERSION} (403). Crea il tag (git push origin ${sha}:refs/tags/${VERSION}; ferma la build che il push fa partire), poi Run workflow con version ${VERSION} e publish_from ${RF35H_FROM_RUN:-${GITHUB_RUN_ID:-<il run della build>}}"
 	fi
 	# Una release gia' pubblicata con questo tag ferma tutto. Le bozze sono di
 	# un tentativo fallito (il job rilanciato, o un run di prima della stessa

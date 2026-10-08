@@ -6301,3 +6301,28 @@ Prove in test-ci-build (111): publish_from buono, non numerico, senza
 version, con resume_run, run non finito, non una build, senza artifact,
 inesistente, fuori da main; target sul commit della build; create fallito
 con il messaggio di gh.
+
+Il perche', con l'annotazione nuova (run 37719692251, publish_from): `gh
+release create: HTTP 403: Resource not accessible by integration`. Il
+GITHUB_TOKEN non ha il permesso "workflows" e non puo' creare un ref su un
+commit che modifica `.github/workflows`: b3c49f3 (i limiti di tempo della
+CI) ne cambia tre. Lo dicono anche i casi che sono passati: i commit della
+v1.3.0 (e563026), della v1.2.0 (de117e4) e del tag `cores` (eefdfd1) non
+toccano i workflow; nel mezzo, alle 02:17, il token ha creato senza problemi
+la release `cores`. Non e' quindi "il commit e' sul ramo principale" (lo e'),
+ne' "i workflow sono diversi da quelli di main" (la v1.3.0 lo era).
+
+Cosa cambia:
+- `cmd_version` (job setup): un Run workflow di release da un commit che
+  modifica i workflow, senza il tag, si ferma subito, con le due strade
+  (la release da un commit dopo, che non li tocca, come le note della
+  versione; oppure il push del tag, che con le credenziali di chi lo fa
+  passa e fa partire la build da solo). Prima si scopriva dopo tre ore di
+  build.
+- `cmd_publish`: stesso controllo prima di gh, con il da farsi
+  (`RF35H_FROM_RUN` per dire quale run pubblicare con publish_from).
+- publish_from accetta un tag che c'e' gia', se e' sul commit della build.
+
+Per la v1.3.1: tag `v1.3.1` su b3c49f3 creato con git push da qui (la build
+che il push del tag fa partire, annullata subito), poi publish_from
+37698948705. Prove: test-ci-build 117.

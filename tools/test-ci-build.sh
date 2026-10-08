@@ -291,6 +291,7 @@ case "$1 ${2:-}" in
 		case "${4:-}" in HEAD^{commit}|"${FAKE_SHA}"^{commit}) echo "${FAKE_SHA}" ;; *) exit 1 ;; esac ;;
 	"fetch "*) ;;
 	"merge-base --is-ancestor") [ "${FAKE_ON_MAIN:-yes}" = yes ] ;;
+	"diff-tree "*) [ -z "${FAKE_TOUCHES_WF:-}" ] || echo ".github/workflows/build.yml" ;;
 	"ls-remote --tags") [ -z "${FAKE_LS_REMOTE:-}" ] || printf '%b\n' "${FAKE_LS_REMOTE}" ;;
 	*) echo "git finto: $*" >&2; exit 2 ;;
 esac
@@ -391,6 +392,15 @@ FAKE_RUN="" IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "publish_from di un run che non c'e': si ferma" '[ "${rc}" != 0 ] && grep -q "il run 555 non si legge" "${T}/run.out"'
 FAKE_ON_MAIN=no FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "publish_from di una build fuori da main: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. su main" "${T}/run.out"'
+# un commit che modifica .github/workflows: il GITHUB_TOKEN non puo' crearne il tag
+FAKE_TOUCHES_WF=1 vers workflow_dispatch branch main v1.3.1 false; rc=$?
+ok "Run workflow da un commit che modifica i workflow: si ferma subito" '[ "${rc}" != 0 ] && grep -q "modifica .github/workflows" "${T}/run.out" && grep -q "git push origin ${SHA}:refs/tags/v1.3.1" "${T}/run.out"'
+FAKE_TOUCHES_WF=1 vers push tag v1.3.1; rc=$?
+ok "  ...con il push del tag invece: va (il tag c'e')" '[ "${rc}" = 0 ] && [ "$(outv publish)" = true ]'
+FAKE_TOUCHES_WF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "  ...publish_from con il tag gia' creato sul commit della build: va" '[ "${rc}" = 0 ] && [ "$(outv from)" = 555 ]'
+FAKE_LS_REMOTE="1111111111111111111111111111111111111111\trefs/tags/v1.3.1" FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from con il tag su un altro commit: si ferma" '[ "${rc}" != 0 ] && grep -q "il tag v1.3.1 esiste gia" "${T}/run.out"'
 
 echo "publish (job release)"
 PD="${T}/pubdist"; mkdir -p "${PD}"
@@ -427,6 +437,10 @@ FAKE_RELEASES="556 false" pub v1.2.0; rc=$?
 ok "release gia' pubblicata: si ferma, niente cancellato" '[ "${rc}" != 0 ] && ! called DELETE && ! called "release create"'
 FAKE_GITHUB_SHA=ffffffffffffffffffffffffffffffffffffffff RF35H_BUILD_SHA="${SHA}" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
 ok "publish_from: tag sul commit della build, non su quello del run" '[ "${rc}" = 0 ] && seq_ok true && called "release create v1.3.1 --repo o/r --draft --target ${SHA}"'
+FAKE_TOUCHES_WF=1 FAKE_LATEST=v1.3.0 RF35H_FROM_RUN=555 pub v1.3.1; rc=$?
+ok "commit che modifica i workflow, senza tag: si ferma prima di gh, con il da farsi" '[ "${rc}" != 0 ] && grep -q "git push origin ${SHA}:refs/tags/v1.3.1" "${T}/run.out" && grep -q "publish_from 555" "${T}/run.out" && ! called "release create"'
+FAKE_TOUCHES_WF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
+ok "  ...con il tag gia' creato sul commit: pubblica" '[ "${rc}" = 0 ] && seq_ok true'
 FAKE_CREATE_FAIL="Validation Failed" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
 ok "gh release create fallito: si ferma con il messaggio di gh" '[ "${rc}" != 0 ] && grep -q "gh release create: HTTP 422: Validation Failed" "${T}/run.out" && ! called "release upload"'
 
