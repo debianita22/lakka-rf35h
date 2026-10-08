@@ -6537,3 +6537,29 @@ superbroswar, thepowdertoy, tyrquake, parallel_n64 e mame2015 ora passano;
 flycast solo in CI (i sottomoduli). Restano: same_cdi (l'upstream ha tolto
 GENie: build nuova, package.mk da rifare), hatari e mgba_fork e vbam (ora
 CMake), dosbox (rifatto su dosbox-core).
+
+Esito della sera (cores.yml su main):
+
+- run 37832143102 (pre_patch): emux_sms, mupen64plus_next e daphne compilano
+  alla punta, pin in c784f18;
+- run 37833455610: 11 su 12, pin in 417897d (desmume, fbneo, flycast,
+  higan_sfc_balanced, mame2015, parallel_n64, puae, superbroswar,
+  thepowdertoy, tic80, tyrquake). easyrpg no: la patch aggiornata si applica,
+  ma il Player alla punta vuole un liblcf piu' nuovo (lcf::rpg::SaveSystem
+  senza i membri nuovi). liblcf e' un pacchetto di Lakka, non un core in
+  pins.txt: andrebbe portato avanti insieme al Player (da fare);
+- run 37833944061: citra e beetle_psx compilano, pin in 4e87b24.
+
+Dei 22 di stamattina ne compilano 16 al commit upstream piu' recente, e le
+loro versioni nuove entrano nella release dopo la v1.4.0. Restano easyrpg
+(liblcf), hatari e vbam (ora CMake), dosbox (dosbox-core), same_cdi (senza
+GENie); mgba_fork passa al CMake di mGBA (in integration/cores-build-layout,
+come il core mgba di Lakka), da provare.
+
+L'issue dei falliti: ogni corsa la riscriveva coi suoi soli falliti, cosi' la
+prova a mano sui tre core buoni ha chiuso la #3 coi 22 ("Tutti i core
+compilano"), e la corsa di citra e beetle_psx ha chiuso la #4 (aperta per il
+solo easyrpg). Ora `ci-build.sh issue-merge`: l'elenco dell'issue aperta,
+meno i core provati in questa corsa, piu' i falliti di questa corsa; un core
+non provato resta com'era, e ogni riga dice il run in cui e' fallito
+([run N]). Prove: test-ci-build 138 (4 nuove).

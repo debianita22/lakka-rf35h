@@ -183,9 +183,10 @@ cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 # Core il cui upstream ha cambiato il modo di compilare (fbneo: un meson.build
 # nella radice; higan_sfc_balanced e tic80: il .so con un altro nome o in
 # un'altra cartella; beetle_psx: un gitlink senza URL; citra: glslang senza
-# SPIRV-Tools): i package.mk di Lakka adattati in modo da andare sia al
-# commit pinnato sia a quelli nuovi. Prima del giro dei pin, che in fondo ai
-# package.mk con patch aggiunge cores/pre-patch.sh.
+# SPIRV-Tools; mgba_fork: senza Makefile.libretro, col CMake di mGBA): i
+# package.mk di Lakka adattati in modo da andare sia al commit pinnato sia a
+# quelli nuovi. Prima del giro dei pin, che in fondo ai package.mk con patch
+# aggiunge cores/pre-patch.sh.
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/cores-build-layout-rf35h.patch"
 echo "  core pinnati (cores/pins.txt)"
 npin=0; ncp=0

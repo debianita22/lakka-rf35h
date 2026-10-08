@@ -29,6 +29,8 @@
 #                               un core senza risultato va fra i falliti
 #   ci-build.sh pins-merge D NP job cores: i pin nuovi (NP) dei core riusciti
 #                               in cores/pins.txt, commit e push
+#   ci-build.sh issue-merge OLD F "a b"  job cores: l'elenco dei falliti per
+#                               l'issue, dal vecchio (OLD) e da questa corsa
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 162 core) ne chiede di
@@ -1059,7 +1061,7 @@ cmd_cores() {
 			# un core senza log (assente, senza .so, in piu' versioni) non ne ha
 			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1 || true)"
 			{
-				echo "== ${p}: $(grep "^${p} " "${rep}" || echo 'non compilato')"
+				echo "== ${p}: $(grep "^${p} " "${rep}" || echo 'non compilato') [run ${GITHUB_RUN_ID:-?}]"
 				[ -n "${f}" ] && core_why "${f}"
 			} >> "${out}/failed.txt"
 			continue
@@ -1099,6 +1101,25 @@ cmd_cores() {
 		note warning "Core ${c}" "$(awk -v c="${c}" '/^== / { on = (index($0, "== " c ":") == 1) } on' "${out}/failed.txt")"
 	done
 	[ -s "${out}/built.txt" ] || { note error "Core" "nessun core compilato"; die "nessun core compilato"; }
+}
+
+# Job cores, l'issue dei core che non compilano: l'elenco nuovo da quello
+# dell'issue aperta (<old>, i blocchi "== <core>: ..." fra i ``` del corpo;
+# vuoto se non ce n'e'), dai falliti di questa corsa (<failed>, failed.txt) e
+# dai core provati (<cores>). Un core provato adesso esce se ha compilato e
+# rientra coi motivi nuovi se no; uno non provato resta com'era. Prima l'issue
+# era solo questa corsa: una prova a mano su tre core che compilavano chiudeva
+# l'issue dei 22 ("Tutti i core compilano", run 37832143102, 8/10/2026), e la
+# successiva la riapriva con il solo easyrpg. Elenco vuoto: si chiude.
+cmd_issue_merge() {
+	local old="${1:?elenco vecchio}" failed="${2:?failed.txt}" cores="${3:-}"
+	[ -f "${old}" ] || die "manca ${old}"
+	[ -f "${failed}" ] || die "manca ${failed}"
+	awk -v tested=" ${cores} " '
+		/^== / { c = $2; sub(/:$/, "", c); keep = (index(tested, " " c " ") == 0) }
+		keep { print }
+	' "${old}"
+	cat "${failed}"
 }
 
 # Job cores, a build finite: in cores/pins.txt entrano i pin nuovi
@@ -1171,5 +1192,6 @@ case "${1:-}" in
 	cores)        cmd_cores "${2:-}" ;;
 	merge-cores)  cmd_merge_cores "${2:-}" "${3:-}" "${4:-}" ;;
 	pins-merge)   cmd_pins_merge "${2:-}" "${3:-}" ;;
+	issue-merge)  cmd_issue_merge "${2:-}" "${3:-}" "${4:-}" ;;
 	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac

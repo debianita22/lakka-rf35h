@@ -704,5 +704,19 @@ printf 'core=fceumm commit=b\ncore=mgba commit=c\n' > "${M1}/built.txt"; : > "${
 bash "${REPO}/tools/ci-build.sh" merge-cores "${M1}" "${T}/merged1" "fceumm mgba" > /dev/null; rc=$?
 ok "merge-cores con un artifact solo (file direttamente nella cartella)" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged1/built.txt")" = 2 ] && [ ! -s "${T}/merged1/failed.txt" ]'
 
+echo "issue-merge (job cores): l'issue dei falliti fra una corsa e l'altra"
+IM="${T}/im"; mkdir -p "${IM}"
+printf '== easyrpg: easyrpg fallito (uscita 1) [run 1]\nHunk #1 FAILED at 1430.\n== hatari: hatari fallito (uscita 2) [run 1]\nmake: *** No rule to make target\n== mgba_fork: mgba_fork fallito (uscita 2) [run 1]\n' > "${IM}/old"
+printf '== easyrpg: easyrpg fallito (uscita 2) [run 2]\nerror: x\n== dosbox: dosbox fallito (uscita 2) [run 2]\n' > "${IM}/failed"
+bash "${CB}" issue-merge "${IM}/old" "${IM}/failed" "easyrpg mgba_fork dosbox fbneo" > "${IM}/out"; rc=$?
+ok "issue-merge: provati ora coi motivi nuovi, i riusciti fuori, gli altri come erano" '[ "${rc}" = 0 ] && [ "$(grep "^==" "${IM}/out" | sed "s/^== //; s/:.*//" | tr "\n" " ")" = "hatari easyrpg dosbox " ] && grep -q "^make: \*\*\* No rule" "${IM}/out" && ! grep -q "1430" "${IM}/out" && grep -q "^error: x" "${IM}/out"'
+: > "${IM}/vuoto"; : > "${IM}/nessuno"
+bash "${CB}" issue-merge "${IM}/old" "${IM}/nessuno" "easyrpg hatari mgba_fork" > "${IM}/out2"
+ok "  ...tutti provati e compilati: elenco vuoto (si chiude)" '[ ! -s "${IM}/out2" ]'
+bash "${CB}" issue-merge "${IM}/vuoto" "${IM}/failed" "easyrpg dosbox" > "${IM}/out3"
+ok "  ...senza issue aperta: i falliti di questa corsa" 'cmp -s "${IM}/out3" "${IM}/failed"'
+bash "${CB}" issue-merge "${IM}/old" "${IM}/nessuno" "fceumm" > "${IM}/out4"
+ok "  ...una corsa che non tocca i falliti non li toglie (prima chiudeva l'issue)" 'cmp -s "${IM}/out4" "${IM}/old"'
+
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]
