@@ -315,15 +315,6 @@ case "$*" in
 	"release create "*)
 		[ -z "${FAKE_CREATE_FAIL:-}" ] || { echo "HTTP 422: ${FAKE_CREATE_FAIL} (https://api.github.com/repos/o/r/releases)" >&2; exit 1; } ;;
 	"api -X DELETE "*|"release upload "*|"release edit "*) ;;
-	# la release "cores" (publish-cores): id, l'indice che c'e', gli asset
-	"api repos/"*"/releases/tags/cores "*)
-		if [ -n "${FAKE_CORES_ID:-}" ]; then echo "${FAKE_CORES_ID}"
-		elif grep -q "^gh release create cores " "${CALLS}"; then echo 78   # appena creata
-		# come il gh vero: con un errore il corpo JSON va comunque su stdout
-		# (anche con --jq), il messaggio su stderr, uscita 1
-		else echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;
-	"release download cores "*) [ -n "${FAKE_CORES_INDEX:-}" ] || exit 1; a="$*"; o="${a##*--output }"; printf '%b\n' "${FAKE_CORES_INDEX}" > "${o}" ;;
-	"api --paginate repos/"*"/releases/"*"/assets?per_page=100 "*) [ -z "${FAKE_CORES_ASSETS:-}" ] || printf '%b\n' "${FAKE_CORES_ASSETS}" ;;
 	*) echo "gh finto: $*" >&2; exit 2 ;;
 esac
 EOF
@@ -489,6 +480,24 @@ ok "spazio: 1002 MB, ne servono 2104" '[ "${rc}" = 0 ] && grep -qF "**Free space
 ok "  ...soggetti senza [skip ci]" 'grep -qx -- "- only docs" "${T}/nnotes.md" && ! grep -qF "[skip ci]" "${T}/nnotes.md"'
 ok "  ...novita' della versione subito dopo il titolo" '[ "$(sed -n 3p "${T}/nnotes.md")" = "**What is new**" ] && [ "$(grep -c "^- a thing$" "${T}/nnotes.md")" = 1 ]'
 
+# i core aggiornati dalla release precedente (cores/pins.txt)
+mkdir -p "${NR}/cores"
+pc() { git -C "${NR}" add cores/pins.txt && git -C "${NR}" -c user.name=t -c user.email=t@t commit -q -m "$1"; }
+printf '# commento\nfceumm https://x/fceumm 1111111111111111111111111111111111111111 -\nmgba https://x/mgba 2222222222222222222222222222222222222222 -\n' > "${NR}/cores/pins.txt"; pc "pins: i commit di Lakka"
+printf '# commento\nfceumm https://x/fceumm 1111111111111111111111111111111111111111 -\nmgba https://x/mgba 2222222222222222222222222222222222222222 -\nsnes9x https://x/snes9x 3333333333333333333333333333333333333333 -\n' > "${NR}/cores/pins.txt"; pc "pins: un core in piu', al commit di Lakka"
+sed -i 's/^mgba .*/mgba https:\/\/x\/mgba 4444444444444444444444444444444444444444 -/' "${NR}/cores/pins.txt"; pc "cores: 1 core all'upstream"
+NSHA="$(git -C "${NR}" rev-parse HEAD)"
+( unset GH_TOKEN; notes ); rc=$?
+ok "core aggiornati: dalla v1.1.0 (senza pins.txt), rispetto alla prima versione di ogni core" '[ "${rc}" = 0 ] && grep -qx "\*\*Cores updated\*\* to a newer upstream commit since v1.1.0 (1): mgba." "${T}/nnotes.md"'
+git -C "${NR}" tag v1.2.0
+sed -i 's/^snes9x .*/snes9x https:\/\/x\/snes9x 5555555555555555555555555555555555555555 -/; s/^fceumm .*/fceumm https:\/\/x\/fceumm 6666666666666666666666666666666666666666 -/' "${NR}/cores/pins.txt"; pc "cores: 2 core all'upstream"
+NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.0\ntar=x-v1.3.0.tar\n' > "${T}/ndist/update.txt"
+( unset GH_TOKEN; notes ); rc=$?
+ok "  ...dalla v1.2.0 (con pins.txt): solo quelli cambiati da allora, nell'ordine del file" '[ "${rc}" = 0 ] && grep -qx "\*\*Cores updated\*\* to a newer upstream commit since v1.2.0 (2): fceumm, snes9x." "${T}/nnotes.md"'
+git -C "${NR}" tag v1.3.0; nc "docs"; NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.1\ntar=x-v1.3.1.tar\n' > "${T}/ndist/update.txt"
+( unset GH_TOKEN; notes ); rc=$?
+ok "  ...nessun core cambiato: nessuna riga" '[ "${rc}" = 0 ] && ! grep -q "Cores updated" "${T}/nnotes.md"'
+
 echo "ci-apt.sh (apt sul runner, con limite di tempo)"
 FA="${T}/fakeapt"; rm -rf "${FA}"; mkdir -p "${FA}"
 printf '#!/bin/sh\nexec "$@"\n' > "${FA}/sudo"
@@ -516,23 +525,13 @@ ok "ci-apt: install fallito, si riparte da update" '[ "${rc}" = 0 ] && [ "$(cat 
 apt_run "errore"; rc=$?
 ok "ci-apt: tre tentativi falliti, esce 1 con ::error" '[ "${rc}" = 1 ] && [ "$(cat "${FA}/n")" = 3 ] && grep -q "^::error title=apt::zstd squashfs-tools non installati" "${FA}/out"'
 
-echo "publish-cores e pins-merge (job cores)"
+echo "pins-merge (job cores)"
 CD="${T}/coresdist"; rm -rf "${CD}"; mkdir -p "${CD}" "${REPO}/cores"
-printf 'x' | gzip -n > "${CD}/fceumm_libretro-aaaaaaa.so.gz"; printf 'y' | gzip -n > "${CD}/mgba_libretro-bbbbbbb.so.gz"
 cat > "${CD}/built.txt" <<EOF
-core=fceumm so=fceumm commit=aaaaaaa0000000000000000000000000000000000 site=https://github.com/libretro/libretro-fceumm file=fceumm_libretro-aaaaaaa.so.gz sha256=11 size=1 lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
-core=mgba so=mgba commit=bbbbbbb0000000000000000000000000000000000 site=https://github.com/mgba-emu/mgba file=mgba_libretro-bbbbbbb.so.gz sha256=22 size=1 lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
+core=fceumm commit=aaaaaaa0000000000000000000000000000000000 site=https://github.com/libretro/libretro-fceumm lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
+core=mgba commit=bbbbbbb0000000000000000000000000000000000 site=https://github.com/mgba-emu/mgba lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
 EOF
 : > "${CD}/failed.txt"
-OLDIDX="core=fceumm so=fceumm commit=0000000111111111111111111111111111111111 site=https://github.com/libretro/libretro-fceumm file=fceumm_libretro-0000000.so.gz url=https://github.com/o/r/releases/download/cores/fceumm_libretro-0000000.so.gz sha256=00 size=1 lakka=e2cf2e5c sysroot=v1.1.0 date=20261001\ncore=snes9x so=snes9x commit=cccccccc111111111111111111111111111111111 site=https://github.com/libretro/snes9x file=snes9x_libretro-ccccccc.so.gz url=https://github.com/o/r/releases/download/cores/snes9x_libretro-ccccccc.so.gz sha256=33 size=1 lakka=e2cf2e5c sysroot=v1.1.0 date=20261001"
-ASSETS="1 fceumm_libretro-0000000.so.gz 2026-10-01T00:00:00Z\n2 fceumm_libretro-aaaaaaa.so.gz 2026-10-05T00:00:00Z\n3 fceumm_libretro-9999999.so.gz 2026-09-01T00:00:00Z\n4 snes9x_libretro-ccccccc.so.gz 2026-10-01T00:00:00Z\n5 mgba_libretro-bbbbbbb.so.gz 2026-10-05T00:00:00Z\n6 index.txt 2026-10-05T00:00:00Z"
-FAKE_CORES_ID=77 FAKE_CORES_INDEX="${OLDIDX}" FAKE_CORES_ASSETS="${ASSETS}" fake publish-cores "${CD}"; rc=$?
-ok "publish-cores: release esistente, upload dei .so.gz e dell'indice" '[ "${rc}" = 0 ] && ! called "release create" && called "release upload cores --repo o/r --clobber ./fceumm_libretro-aaaaaaa.so.gz ./mgba_libretro-bbbbbbb.so.gz index.txt"'
-ok "  ...indice: 3 core, fceumm al commit nuovo, snes9x tenuto, ordine stabile" '[ "$(grep -c "^core=" "${CD}/index.txt")" = 3 ] && [ "$(sed -n 1p "${CD}/index.txt" | cut -d" " -f1,3)" = "core=fceumm commit=aaaaaaa0000000000000000000000000000000000" ] && [ "$(sed -n 2p "${CD}/index.txt" | cut -d" " -f1)" = "core=snes9x" ] && [ "$(sed -n 3p "${CD}/index.txt" | cut -d" " -f1)" = "core=mgba" ]'
-ok "  ...ogni riga un solo url, con il nome del file" '[ "$(grep -c " url=https://github.com/o/r/releases/download/cores/" "${CD}/index.txt")" = 3 ] && ! grep -q "url=.*url=" "${CD}/index.txt" && grep -q "file=mgba_libretro-bbbbbbb.so.gz url=https://github.com/o/r/releases/download/cores/mgba_libretro-bbbbbbb.so.gz" "${CD}/index.txt"'
-ok "  ...asset vecchi: resta il terzo fceumm (9999999) da togliere, gli altri no" 'called "api -X DELETE repos/o/r/releases/assets/3" && ! called "assets/1$" && ! called "assets/2$" && ! called "assets/4$" && ! called "assets/5$" && ! called "assets/6$"'
-FAKE_CORES_ID="" FAKE_CORES_INDEX="" FAKE_CORES_ASSETS="" fake publish-cores "${CD}"; rc=$?
-ok "publish-cores: release assente, creata pre-release; indice solo dai nuovi" '[ "${rc}" = 0 ] && called "release create cores --repo o/r --prerelease" && [ "$(grep -c "^core=" "${CD}/index.txt")" = 2 ]'
 # pins-merge: solo i core riusciti cambiano, commit e push
 cat > "${REPO}/cores/pins.txt" <<EOF
 # commento
@@ -580,8 +579,8 @@ chmod +x "${CW}/lakka-rf35h/build-in-docker.sh"
 mkelf "${T}/so.fceumm" 2000; mkelf "${T}/so.gambatte" 1500
 ( export W="${CW}" RF35H_CONTAINER=x RF35H_SYSROOT_VERSION=ci-33-893a42f; bash "${CB}" cores "fceumm gambatte mgba" > "${T}/cores.out" 2>&1 ); rc=$?
 ok "cores: esce 0 con almeno un riuscito" '[ "${rc}" = 0 ]'
-ok "  ...fceumm nell'indice, al commit del pin, con il sysroot" '[ "$(grep -c "^core=" "${CW}/cores/built.txt")" = 1 ] && grep -q "^core=fceumm so=fceumm commit=${SF} " "${CW}/cores/built.txt" && grep -q " sysroot=ci-33-893a42f " "${CW}/cores/built.txt" && [ -f "${CW}/cores/fceumm_libretro-1111111.so.gz" ]'
-ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gambatte: compilato da install_pkg/gambatte-9fe223d" "${CW}/cores/failed.txt" && ! grep -q "core=gambatte" "${CW}/cores/built.txt" && ! ls "${CW}/cores/"gambatte* >/dev/null 2>&1'
+ok "  ...fceumm riuscito, al commit del pin, con il sysroot" '[ "$(grep -c "^core=" "${CW}/cores/built.txt")" = 1 ] && grep -q "^core=fceumm commit=${SF} " "${CW}/cores/built.txt" && grep -q " sysroot=ci-33-893a42f " "${CW}/cores/built.txt" && ! ls "${CW}/cores/"*.so.gz >/dev/null 2>&1'
+ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gambatte: compilato da install_pkg/gambatte-9fe223d" "${CW}/cores/failed.txt" && ! grep -q "core=gambatte" "${CW}/cores/built.txt"'
 ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
 
 echo "cores-matrix e merge-cores (job cores in parallelo)"
@@ -590,20 +589,17 @@ ok "cores-matrix: i pesanti da soli e per primi, gli altri a gruppi di 12" '[ "$
 ok "  ...JSON valido, nessun core perso" 'printf "%s" "${M}" | python3 -c "import json,sys; d=json.load(sys.stdin); c=\" \".join(x[\"cores\"] for x in d[\"include\"]).split(); sys.exit(0 if sorted(c)==sorted(\"fceumm mame a b c d e f g h i j k l flycast m\".split()) else 1)"'
 ok "cores-matrix senza core: elenco vuoto" '[ "$(bash "${REPO}/tools/ci-build.sh" cores-matrix "")" = "{\"include\":[]}" ]'
 MP="${T}/parts"; rm -rf "${MP}"; mkdir -p "${MP}/cores-9-01" "${MP}/cores-9-02"
-printf 'core=mame so=mame commit=a file=mame_libretro-aaaaaaa.so.gz\n' > "${MP}/cores-9-01/built.txt"; : > "${MP}/cores-9-01/failed.txt"
-printf 'x' | gzip -n > "${MP}/cores-9-01/mame_libretro-aaaaaaa.so.gz"
-printf 'core=fceumm so=fceumm commit=b file=fceumm_libretro-bbbbbbb.so.gz\n' > "${MP}/cores-9-02/built.txt"
+printf 'core=mame commit=a\n' > "${MP}/cores-9-01/built.txt"; : > "${MP}/cores-9-01/failed.txt"
+printf 'core=fceumm commit=b\n' > "${MP}/cores-9-02/built.txt"
 printf '== mgba: fallito\nerror: x\n' > "${MP}/cores-9-02/failed.txt"
-printf 'y' | gzip -n > "${MP}/cores-9-02/fceumm_libretro-bbbbbbb.so.gz"
 bash "${REPO}/tools/ci-build.sh" merge-cores "${MP}" "${T}/merged" "mame fceumm mgba snes9x" > /dev/null; rc=$?
-ok "merge-cores: riusciti e falliti dei job in una cartella, con i .so.gz" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged/built.txt")" = 2 ] && [ -f "${T}/merged/mame_libretro-aaaaaaa.so.gz" ] && [ -f "${T}/merged/fceumm_libretro-bbbbbbb.so.gz" ] && grep -q "^== mgba: fallito" "${T}/merged/failed.txt"'
+ok "merge-cores: riusciti e falliti dei job in una cartella" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged/built.txt")" = 2 ] && grep -q "^core=mame " "${T}/merged/built.txt" && grep -q "^== mgba: fallito" "${T}/merged/failed.txt"'
 ok "  ...il core del job morto senza risultato va fra i falliti" 'grep -q "^== snes9x: nessun risultato" "${T}/merged/failed.txt" && ! grep -q "^== mame:" "${T}/merged/failed.txt"'
 # un artifact solo: download-artifact lo scompatta direttamente nella cartella
 M1="${T}/parts1"; rm -rf "${M1}"; mkdir -p "${M1}"
-printf 'core=fceumm so=fceumm commit=b file=fceumm_libretro-bbbbbbb.so.gz\ncore=mgba so=mgba commit=c file=mgba_libretro-ccccccc.so.gz\n' > "${M1}/built.txt"; : > "${M1}/failed.txt"
-printf 'y' | gzip -n > "${M1}/fceumm_libretro-bbbbbbb.so.gz"; printf 'z' | gzip -n > "${M1}/mgba_libretro-ccccccc.so.gz"
+printf 'core=fceumm commit=b\ncore=mgba commit=c\n' > "${M1}/built.txt"; : > "${M1}/failed.txt"
 bash "${REPO}/tools/ci-build.sh" merge-cores "${M1}" "${T}/merged1" "fceumm mgba" > /dev/null; rc=$?
-ok "merge-cores con un artifact solo (file direttamente nella cartella)" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged1/built.txt")" = 2 ] && [ ! -s "${T}/merged1/failed.txt" ] && [ -f "${T}/merged1/mgba_libretro-ccccccc.so.gz" ]'
+ok "merge-cores con un artifact solo (file direttamente nella cartella)" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged1/built.txt")" = 2 ] && [ ! -s "${T}/merged1/failed.txt" ]'
 
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

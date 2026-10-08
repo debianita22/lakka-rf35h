@@ -11,8 +11,8 @@
 # core non compila (scripts/unpack si ferma) e resta al commit vecchio, con
 # l'issue. Con un fork https://github.com/debianita22/<core>, ramo rf35h
 # (l'upstream piu' le patch), apply.sh toglie le patch del package.
-# Gli stessi finiscono nell'immagine in /usr/share/rf35h/cores.txt: la console
-# li confronta con l'indice della release dei core (rf35h-cores).
+# Ogni release esce con i core a questi commit: niente aggiornamenti dei core
+# dalla console (8/10/2026), arrivano con l'aggiornamento di sistema.
 # Il punto di partenza (7/10/2026): i commit del Lakka pinnato (LAKKA_COMMIT).
 mame                 https://github.com/libretro/mame                         b207f9c6fc93b9d21417a9e4424607840c71db6b -
 scummvm              https://github.com/libretro/scummvm                      a58821e3f8d6e0d22dd5652980b9428a9110b09b -

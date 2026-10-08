@@ -143,8 +143,8 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      kernel (verify-kernel). Per un'immagine gia' fatta
   --no-pin           usa la punta di devel invece del commit pinnato
   --build-packages "a b"  compila solo questi pacchetti (e le loro dipendenze
-                     che mancano), niente immagine: i core, per le release
-                     dei core (cores.yml). I .so finiscono in
+                     che mancano), niente immagine: la prova dei core a un
+                     commit nuovo (cores.yml). I .so finiscono in
                      target/cores/<pacchetto>/; chi non compila non ferma
                      gli altri, e il resoconto e' in build-rf35h-*-pacchetti.txt
   -h, --help         questo messaggio

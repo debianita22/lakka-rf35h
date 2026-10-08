@@ -153,13 +153,12 @@ Prima build: alcune ore, ~100 GB di disco.
     patches/linux-default/    9901 di Lakka (suspend asincrono), rigenerata
     packages/rk915/           driver Wi-Fi SDIO + firmware, patch per 7.0 e 7.2
     packages/rocknix-joypad/  driver joypad ADC multiplexato (of_gpio per 7.2)
-    packages/rf35h-utils/     20 script e 19 unit: volume DAC, tasti volume,
+    packages/rf35h-utils/     19 script e 18 unit: volume DAC, tasti volume,
                               LED, luminosita', sospensione, idle, zram, USB,
                               caricamento Wi-Fi, crash log, override per-core
                               (overrides/: 10 .cfg portatili + 1 .opt N64),
                               ripiego da Vulkan a gl per RetroArch,
-                              aggiornamento dalle release (rf35h-update),
-                              core uno per uno (rf35h-cores)
+                              aggiornamento dalle release (rf35h-update)
     packages/ikemen-go/       IKEMEN GO 1.0 (3 patch: OpenGL ES su Linux, fix
                               GLES/Vulkan, Vulkan spegnibile), lanciatore
                               rf35h-ikemen, servizio, core ikemen_libretro per
@@ -6333,3 +6332,43 @@ Il push del tag fa partire da solo la build di release di b3c49f3, che con
 il tag gia' presente pubblica (il suo cmd_publish non deve creare niente);
 oppure quella build si ferma e publish_from 37698948705 pubblica in pochi
 minuti i file gia' fatti (14 giorni, fino al 22/10).
+
+## Core aggiornabili uno per uno: scartati (8/10/2026)
+
+L'utente: "Scarta la modifica dei core aggiornabili singolarmente, li
+forniremo noi aggiornati in ogni release". Quindi niente aggiornamenti dei
+core dalla console: arrivano con l'aggiornamento di sistema.
+
+Tolto: `rf35h-cores`, la sua unit, il passo in rf35h-update-boot e il suo
+posto in rf35h-idle; l'elenco `/usr/share/rf35h/cores.txt` nell'immagine;
+il menu *Core Updates* (la 1003 torna identica a quella di b3c49f3, cioe' a
+prima del terzo stadio del generatore); `gen-retroarch-rf35h-cores.py` e
+`test-rf35h-cores.sh`; nella CI la release `cores` (publish-cores, indice,
+.so.gz). La guida perde "Updating single cores", il README la riga.
+
+Resta, perche' "aggiornati in ogni release" vuol dire questo:
+- `cores/pins.txt` (162 core) applicato da apply.sh: ogni release costruisce
+  i core a quei commit;
+- `cores.yml`, ogni lunedi' o a mano prima di una release: cores-bump.sh
+  trova i core con commit nuovi upstream, si provano a compilare sul sysroot
+  di una build finita (in parallelo, i pesanti da soli), il pin nuovo entra
+  in pins.txt solo per quelli che compilano (commit su main), gli altri
+  restano dove sono e finiscono nell'issue. I .so non vanno da nessuna parte;
+- `--build-packages` con la pulizia delle versioni vecchie e il controllo
+  del commit, il sysroot a fine build, la matrice e merge-cores;
+- le note della release: "Cores updated ... since <release di prima>", i
+  core il cui pin e' cambiato da allora (se allora pins.txt non c'era, contro
+  la prima versione di ogni core nel file, cioe' il commit di Lakka). Per la
+  prossima: gambatte, fceumm, mgba, portati all'upstream la notte scorsa.
+- SameBoy con i CFLAGS di LibreELEC (non c'entra con gli aggiornamenti).
+
+La release `cores` (pre-release, i tre .so.gz e index.txt) e il suo tag
+restano su GitHub: da questa sessione non si cancellano (403). Nessuna
+console la legge piu' (non e' latest, e nessuna immagine pubblicata ha
+l'updater); va tolta dal sito. Solo l'immagine di prova #33 aveva l'updater:
+se li' e' stato aggiornato un core, `rf35h-cores reset all` prima di passare
+a un'altra immagine, altrimenti quel .so in /storage/cores resterebbe sopra
+quello di sistema.
+
+Prove: test-ci-build 115 (via publish-cores; cores e merge senza .so.gz; le
+note con i core aggiornati, 3), verify-claims (nessun updater nell'immagine).

@@ -107,6 +107,31 @@ if [ -n "${prev}" ]; then
 		echo "Earlier changes: [${prev} release notes](https://github.com/${repo}/releases/tag/${prev})."
 	fi
 fi
+
+# I core portati a un commit upstream piu' nuovo da questa versione: i pin di
+# cores/pins.txt (cores.yml li sposta quando il core compila) rispetto alla
+# release precedente. Se allora pins.txt non c'era (fino alla v1.3.1), per
+# ogni core la prima versione in cui compare nel file, cioe' il commit del
+# Lakka pinnato, che e' quello che quella release aveva.
+if [ -n "${prev}" ] && git -C "${O}" cat-file -e "${sha}:cores/pins.txt" 2>/dev/null; then
+	pins_tmp="$(mktemp -d)"
+	pins_of() { git -C "${O}" show "$1:cores/pins.txt" | awk '$2 ~ /^https?:/ { print $1, $3 }'; }
+	if git -C "${O}" cat-file -e "${prev}:cores/pins.txt" 2>/dev/null; then
+		pins_of "${prev}" > "${pins_tmp}/base"
+	else
+		for c in $(git -C "${O}" log --reverse --format=%H "${sha}" -- cores/pins.txt); do
+			pins_of "${c}"
+		done | awk '!($1 in seen) { seen[$1] = 1; print }' > "${pins_tmp}/base"
+	fi
+	pins_of "${sha}" > "${pins_tmp}/now"
+	upd="$(awk 'FILENAME == ARGV[1] { b[$1] = $2; next } ($1 in b) && b[$1] != $2 { print $1 }' "${pins_tmp}/base" "${pins_tmp}/now")"
+	rm -rf "${pins_tmp}"
+	if [ -n "${upd}" ]; then
+		echo
+		echo "**Cores updated** to a newer upstream commit since ${prev} ($(wc -l <<< "${upd}")): $(tr '\n' ' ' <<< "${upd}" | sed 's/ $//; s/ /, /g')."
+		echo "Each core is at the newest commit of its upstream that compiles here (\`cores/pins.txt\`)."
+	fi
+fi
 # Il menu della v1.0.0 e della v1.1.0-rc1, durante il download, scrive
 # "interrupted": il controllo "sta girando?" seguiva il link invocation:<unit>
 # di systemd, che punta a un percorso che non esiste (corretto da eaaa503,

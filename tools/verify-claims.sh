@@ -364,7 +364,9 @@ U="${P}/scripts/rf35h-update"
 chk "rf35h-update: script e due unit"          "[ -x '$U' ] && [ -f '$P/system.d/rf35h-update.service' ] && [ -f '$P/system.d/rf35h-update-boot.service' ]"
 # I core uno per uno: lo script, la sua unit (la avvia il menu), il controllo
 # al boot, il vincolo sul Lakka dell'immagine, l'idle che aspetta.
-chk "rf35h-cores: script, unit, boot, vincolo Lakka" "[ -x '$P/scripts/rf35h-cores' ] && [ -f '$P/system.d/rf35h-cores.service' ] && grep -q 'rf35h-cores boot' '$P/system.d/rf35h-update-boot.service' && grep -q 'needs system update' '$P/scripts/rf35h-cores' && grep -q 'rf35h-cores.service' '$P/sources/rf35h-idle.c'"
+# gli aggiornamenti dei core singoli dalla console, scartati l'8/10/2026: i
+# core arrivano aggiornati con le release
+chk "nessun aggiornamento di core singoli nell'immagine" "[ ! -e '$P/scripts/rf35h-cores' ] && [ ! -e '$P/system.d/rf35h-cores.service' ] && ! grep -rq 'rf35h-cores' '$P' && ! grep -q 'Core Updates' '$O/patches/retroarch/retroarch-1003-rf35h-settings-menu.patch'"
 chk "rf35h-update.service la avvia il menu"    "! grep -q 'enable_service rf35h-update.service' '$P/package.mk' && grep -q 'enable_service rf35h-update-boot.service' '$P/package.mk'"
 chk "repository delle release nell'immagine"   "grep -q 'usr/share/rf35h/update-repo' '$P/package.mk' && grep -q '^PKG_STAMP=\"update-repo=' '$P/package.mk'"
 chk "aggiornamento: dimensione e sha256 prima del pronto" "grep -q 'checksum mismatch' '$U' && grep -q 'wrong size' '$U' && [ \$(grep -n 'checksum mismatch' '$U' | cut -d: -f1) -lt \$(grep -n 'mv -f \"\${part}\" \"\${target}\"' '$U' | cut -d: -f1) ]"
@@ -380,17 +382,17 @@ chk "CI: re3 cercato nel SYSTEM prima della release" "grep -q 're3 nel SYSTEM' '
 # Scrive solo il job release (build.yml) e il job kernel di upstream.yml (che
 # spinge soltanto un ramo ci-test/kernel-*): le parti della build e i
 # controlli no.
-chk "CI: contents: write solo in release, kernel e cores/publish" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 3 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/cores.yml') = 1 ]"
+chk "CI: contents: write solo in release, kernel e pin dei core" "[ \$(cat '$O'/.github/workflows/*.yml | grep -c 'contents: write') = 3 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/build.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/upstream.yml') = 1 ] && [ \$(grep -c 'contents: write' '$O/.github/workflows/cores.yml') = 1 ]"
 # I core: pins.txt copre CORES_DEFAULT (ogni core dell'immagine ha il suo
-# commit), apply.sh li scrive e li porta nell'immagine, il sysroot si salva.
+# commit), apply.sh li scrive nei package, il sysroot si salva (cores.yml ci
+# prova i core all'upstream prima di cambiarne il pin).
 chk "core: ogni core di CORES_DEFAULT ha un pin"  "( for c in \$(sed -n 's/^CORES_DEFAULT=\"\(.*\)\"$/\1/p' '$O/build-lakka-rf35h.sh'); do grep -qE \"^\${c} +https?://[^ ]+ +[0-9a-f]{40} \" '$O/cores/pins.txt' || exit 1; done )"
 chk "core: pin applicati nell'albero"            "( for c in \$(sed -n 's/^CORES_DEFAULT=\"\(.*\)\"$/\1/p' '$O/build-lakka-rf35h.sh'); do sha=\$(awk -v c=\"\${c}\" '\$1 == c { print \$3 }' '$O/cores/pins.txt'); grep -q \"^PKG_VERSION=\\\"\${sha}\\\"\" \"${W}/packages/lakka/libretro_cores/\${c}/package.mk\" || exit 1; done )"
-chk "core: elenco nell'immagine (cores.txt)"     "grep -q '^lakka=[0-9a-f]\{40\}$' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt' && [ \$(grep -c ' https' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt') -ge 34 ] && grep -q 'cores.txt' '$P/package.mk'"
 chk "core: sysroot salvato a fine build"         "grep -q 'pack-sysroot' '$O/.github/workflows/build-stage.yml' && grep -q 'sysroot-' '$O/.github/workflows/cores.yml'"
 # --build-packages su un sysroot: le versioni vecchie via prima della build, e
 # un .so pubblicato solo se viene dal commit del pin (8/10/2026)
 chk "core: scripts/clean prima della build, una versione installata" "grep -q './scripts/clean \"\${p}\"' '$O/build-lakka-rf35h.sh' && grep -q \"installato in piu' versioni\" '$O/build-lakka-rf35h.sh'"
-chk "core: il .so pubblicato viene dal commit del pin" "grep -qF 'non dal commit del pin' '$O/tools/ci-build.sh'"
+chk "core: il pin cambia solo se il core compila a quel commit" "grep -qF 'non dal commit del pin' '$O/tools/ci-build.sh'"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir

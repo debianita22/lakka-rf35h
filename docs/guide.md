@@ -197,7 +197,6 @@ at boot.
 | Compressed RAM (zram) | on/off (on) | half the RAM as LZ4-compressed swap; keeps large cores from running out of memory |
 | Thumbnail Scraper | *Scrape Thumbnails*, *Scrape Only Missing Thumbnails* (on), *Scraper Region* (`eu`) | see [Thumbnails](#thumbnails) |
 | Network Time | *Network Time (NTP)* (on), *Time Server* (`pool.ntp.org`; also `time.cloudflare.com`, `time.google.com`) | the console has no battery-backed clock |
-| Core Updates | *Check for Updates*, *Update All Cores*, *Use System Cores*, then one entry per core | see [Updating single cores](#updating-single-cores) |
 | System Update | action | see [Updating](#updating) |
 
 The Bluetooth menus are hidden (there is no Bluetooth hardware), and so is
@@ -472,37 +471,12 @@ ssh root@<console-ip> reboot
 Never install Lakka's own RK3326 updates: they carry a different kernel and
 boot loader, and the console would no longer start.
 
-### Updating single cores
+### Updated cores
 
-Besides whole system updates, each emulator core can be updated on its own
-from the `cores` release of the repository, which CI rebuilds every Monday
-from each core's upstream (see [Releases and CI](#releases-and-ci)).
-*Device Settings > Core Updates*:
-
-- *Check for Updates* downloads the list of available cores and shows, under
-  each core, what you have and what is available;
-- select a core with an update to install it; select an updated core to go
-  back to the system core;
-- *Update All Cores* installs every available update; *Use System Cores*
-  removes all updated cores.
-
-An updated core goes to `/storage/cores` and is used the next time that
-core is loaded, with no restart. Only cores built against the same Lakka
-version as the installed system are offered: a core marked *needs a system
-update* comes with the next release. A system update removes the updated
-cores that the new image already has, and any built for the previous system.
-The `.info` files stay those of the image. Over SSH:
-
-```sh
-rf35h-cores list                 # core, installed version, available version
-rf35h-cores update fceumm mgba   # these cores
-rf35h-cores update-all
-rf35h-cores reset fceumm         # back to the system core (reset all: every core)
-rf35h-cores rollback fceumm      # the previously updated version
-```
-
-`CORES_URL=https://.../index.txt` in `update.conf` reads another index;
-`REPO=` applies here too.
+Cores are not updated on their own: each release ships every core at the
+newest commit of its upstream that compiles here (see
+[Releases and CI](#releases-and-ci)), and the release notes list the cores
+updated since the previous release. A System Update brings them.
 
 ### What an update keeps
 
@@ -810,7 +784,7 @@ Workflows in [`.github/workflows`](../.github/workflows):
 |---|---|---|
 | Check (`check.yml`) | push to `main`, pull requests, manual | `tools/ci-check.sh` (shellcheck, actionlint, Python syntax, patch hunk counts, `tools/test-*.sh`) and a dry run on the pinned Lakka commit |
 | Build (`build.yml`) | tag `v*`, *Run workflow*, push to `ci-test/**` | the full image in the same Ubuntu 24.04 container, in up to eight jobs of at most 6 hours each |
-| Cores (`cores.yml`) | every Monday, manual | asks each core's upstream for its branch tip, builds the changed cores on the latest release's tree (the `sysroot-<version>` artifact), publishes each one in the rolling `cores` pre-release (`index.txt` + `<core>-<commit>.so.gz`), commits the new pins (`cores/pins.txt`) of the cores that built, and keeps an issue for those that did not |
+| Cores (`cores.yml`) | every Monday, manual | asks each core's upstream for its branch tip, test-builds the changed cores on the latest finished build's tree (the `sysroot-<version>` artifact), commits the new pins (`cores/pins.txt`) of the cores that built, so the next release has them, and keeps an issue for those that did not |
 | Upstream (`upstream.yml`) | every Monday, manual | a newer Linux 7.2.y whose signature (kernel.org keys), SHA-256 and kernel patches (fuzz 0) check out gets a `ci-test/kernel-<version>` branch, a test build and an issue; Lakka `devel` moving past the pinned commit gets an issue. Merging and releasing stay manual |
 
 - **Release**: `git tag v1.0.0 && git push origin v1.0.0`, or *Run workflow*
@@ -839,12 +813,12 @@ Workflows in [`.github/workflows`](../.github/workflows):
 
 All 162 cores of the default set are pinned in `cores/pins.txt` (package,
 repository, commit, branch): `apply.sh` writes them into the Lakka packages,
-so an image always builds the cores the file names, and ships the list as
-`/usr/share/rf35h/cores.txt`. `tools/cores-bump.sh` prints which cores have
-moved upstream; `cores.yml` builds them in parallel jobs (the heavy ones, like
-MAME, alone; the others in groups of 12) and publishes them one at a time, so
-a core that stops building upstream stays at its last good commit while the
-others move on. The 37 cores with Lakka patches keep them: when a patch no
+so an image always builds the cores the file names. `tools/cores-bump.sh`
+prints which cores have moved upstream; `cores.yml` (every Monday, or by hand
+before a release) test-builds them in parallel jobs (the heavy ones, like
+MAME, alone; the others in groups of 12) and moves the pin of each core that
+builds, so a core that stops building upstream stays at its last good commit
+while the others move on, and the next release ships the new ones. The 37 cores with Lakka patches keep them: when a patch no
 longer applies to a newer upstream commit, that core fails and stays where it
 was, listed in an issue. A `debianita22/<core>` fork (branch `rf35h`: upstream
 plus the patches), if a pin points to one, is built without Lakka's patches.

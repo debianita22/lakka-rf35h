@@ -1,23 +1,23 @@
-# I core libretro da soli: alla punta del loro upstream, compilati sull'albero
-# dell'ultima release (sysroot) e pubblicati uno per uno nella release "cores"
-# (index.txt + <core>-<commit>.so.gz), da cui la console li aggiorna
-# singolarmente (Device Settings > Core Updates, rf35h-update cores).
+# I core libretro all'upstream, per le release: ogni release esce con i core
+# ai commit di cores/pins.txt, e questo workflow li porta alla punta del loro
+# upstream solo quando li' compilano. Niente aggiornamenti dalla console: i
+# core arrivano con l'aggiornamento di sistema (8/10/2026).
 #
 #   ogni lunedi'      cores-bump.sh: quali core hanno commit nuovi upstream;
-#                     quelli si compilano; i riusciti vanno nella release e
-#                     il loro pin in cores/pins.txt (commit sul ramo
-#                     principale: la prossima immagine li ha); i falliti in
-#                     un issue, al commit vecchio.
+#                     quelli si provano a compilare sull'albero di una build
+#                     finita (sysroot); dei riusciti il pin nuovo entra in
+#                     cores/pins.txt (commit sul ramo principale: la prossima
+#                     release li ha), i falliti restano al commit vecchio e
+#                     finiscono in un issue.
 #   Run workflow      "cores": solo questi (vuoto: tutti quelli cambiati);
-#                     "rebuild": anche se il pin non e' cambiato (per
-#                     ripubblicare un core dopo una correzione dell'overlay);
-#                     "dry_run": compila e basta, niente release ne' pin.
+#                     "rebuild": anche se il pin non e' cambiato (per vedere
+#                     se compilano ancora dopo una correzione dell'overlay);
+#                     "dry_run": compila e basta, niente pin ne' issue.
+#                     Prima di una release, per averla con i core piu' nuovi.
 #
 # Il sysroot: l'artifact sysroot-<versione>.tar.zst della build finita piu'
-# recente (build-stage.yml lo salva per 90 giorni). I core devono essere
-# compilati sullo stesso Lakka dell'immagine: la console lo controlla (lakka=
-# nell'indice contro /usr/share/rf35h/cores.txt), e "prepare" si ferma se il
-# sysroot non e' al commit pinnato.
+# recente (build-stage.yml lo salva per 90 giorni), allo stesso Lakka
+# ("prepare" si ferma se l'albero non e' al commit pinnato).
 #
 # I core si compilano in job paralleli (ci-build.sh cores-matrix): i pesanti
 # uno per job (mame da zero sono quasi 5 ore), gli altri a gruppi di 12, ogni
@@ -43,7 +43,7 @@ on:
         type: boolean
         default: false
       dry_run:
-        description: "Solo compilare: niente release, pin ne' issue"
+        description: "Solo compilare: niente pin ne' issue"
         type: boolean
         default: false
 
@@ -207,16 +207,16 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
-  # anche se qualche job di build e' fallito o finito il tempo: i riusciti si
-  # pubblicano, gli altri vanno nell'issue (merge-cores)
-  publish:
-    name: Release cores e pin
+  # anche se qualche job di build e' fallito o finito il tempo: i riusciti
+  # cambiano il pin, gli altri vanno nell'issue (merge-cores)
+  pins:
+    name: Pin dei core che compilano
     needs: [setup, build]
     if: always() && needs.setup.result == 'success' && needs.setup.outputs.cores != '' && !inputs.dry_run
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
-      contents: write   # la release "cores" e il commit dei pin
+      contents: write   # il commit dei pin
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
@@ -241,14 +241,6 @@ jobs:
         env:
           CORES: ${{ needs.setup.outputs.cores }}
         run: ./tools/ci-build.sh merge-cores cores-parts cores-out "${CORES}"
-
-      - name: Release cores
-        run: |
-          if [ ! -s cores-out/built.txt ]; then
-            echo "::warning title=Core::nessun core compilato: niente da pubblicare"
-            exit 0
-          fi
-          ./tools/ci-build.sh publish-cores cores-out
 
       - name: Pin dei core riusciti
         id: pins
