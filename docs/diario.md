@@ -6204,3 +6204,21 @@ SameBoy). Il codice si unisce da solo; le patch di integrazione sono 40.
 
 Prove: test-ci-build 90 (+5: matrice e merge), test-rf35h-cores 27,
 ci-check, actionlint, dry-run (243 verifiche, 162 core pinnati, 498 passi).
+
+### Build #33 e v1.3.0 pubblicata (8/10/2026)
+
+Build di prova #33 (ci-test/cores 893a42f, ripresa dallo stato 2 della #28):
+una parte, 211 minuti, 498 passi su 498, niente lasciato fuori, 174 `.so`,
+`.img.gz` 976 MB e `.tar` 1002 MB come le altre. A fine build il primo
+sysroot: `sysroot-ci-33-893a42f.tar.zst`, 2,7 GB, tenuto fino al 5/1/2027;
+il nome giusto (con `archive: false` conta quello del file) e cores.yml lo
+trova per prefisso. L'immagine ha il menu Core Updates e `rf35h-cores`.
+
+Release v1.3.0 (run 37615284866, e563026, da zero): tre parti (318 + 311 +
+154 minuti di build), pubblicata alle 01:17 UTC, non pre-release e "latest":
+`.img.gz` 976 MB, `.tar` 1002 MB, SHA256SUMS, update.txt; 174 core, niente
+fuori. Le console la vedono in System Update.
+
+Il ramo dei core su `main` (fast-forward su b3c49f3: rispetto all'893a42f
+provato cambiano solo i limiti di tempo della CI); la v1.3.1 in corso resta
+su b3c49f3 e non ha l'updater, che arriva con la release dopo.
