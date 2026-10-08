@@ -6372,3 +6372,35 @@ quello di sistema.
 
 Prove: test-ci-build 115 (via publish-cores; cores e merge senza .so.gz; le
 note con i core aggiornati, 3), verify-claims (nessun updater nell'immagine).
+
+## Tutti i core all'upstream, poi la v1.4.0 (8/10/2026)
+
+L'utente: "Vai con la 1.4.0". Prima i core: cores.yml a mano su tutti (run
+37751801268, dopo un primo tentativo annullato perche' i gruppi leggeri
+aspettavano dietro ai pesanti con 8 posti: ora 16). Sul runner 151 core su
+162 avevano commit nuovi upstream rispetto a quelli di maggio; 24 gruppi,
+tre ore (mame da solo dalle 08:52 alle 11:49 UTC). Compilano 129, e il loro
+pin e' entrato in pins.txt (c6307ba, github-actions); con fceumm e gambatte
+della notte prima fanno 131 core aggiornati rispetto alla v1.3.0. Restano al
+commit di maggio 22 che alla punta non compilano, nell'issue #3:
+
+- patch di Lakka che non si applicano piu': mame2015, flycast, desmume,
+  easyrpg, emux_sms, puae, superbroswar, thepowdertoy, tyrquake (e
+  probabilmente same_cdi, mupen64plus_next, parallel_n64, higan_sfc_balanced:
+  il motivo nel resoconto non e' chiaro);
+- citra: CMake di glslang; beetle_psx: un sottomodulo (deps/lightning/gnulib)
+  senza URL in .gitmodules;
+- fbneo, dosbox, hatari, mgba_fork, tic80, vbam, daphne: errori di
+  compilazione.
+
+Un limite visto qui: in `--build-packages` il log del pacchetto fallito e'
+la coda del log comune (o il log di un thread di un altro pacchetto), quindi
+le righe d'errore nell'issue possono essere di un core compilato prima (i
+"SQLite create_query" sotto daphne e desmume). Le righe "Hunk FAILED" sono
+affidabili. Da sistemare dopo la release: un log per pacchetto.
+
+La v1.4.0 (note in `docs/release-notes/v1.4.0.md`): i 131 core aggiornati
+(l'elenco lo scrive ci-release-notes.sh), il kernel con `-mtune` (era la
+v1.3.1, mai pubblicata: il suo tag non serve piu'), SameBoy con i flag di
+sistema e l'LTO. Il commit della release tocca solo note e diario, non i
+workflow.
