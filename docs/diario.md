@@ -6526,11 +6526,14 @@ Poi, per i core che si fermavano su una patch o sul layout (stessa sera):
   in ${PKG_BUILD}: con il meson.build LibreELEC compilerebbe in
   .aarch64-libreelec-linux-gnu), higan_sfc_balanced (installa
   nside_sfc_balanced_libretro.so col nome di sempre) e tic80 (il .so in bin/
-  o in lib/). Vanno anche ai commit pinnati di adesso.
+  o in lib/); poi beetle_psx (PKG_GIT_SKIP_SUBMODULE: nessun sottomodulo
+  vero, ma un gitlink deps/lightning/gnulib senza URL che ferma
+  "git submodule update --recursive") e citra (-DENABLE_OPT=OFF: il glslang
+  nuovo si ferma con l'ottimizzatore acceso e senza SPIRV-Tools). Vanno
+  anche ai commit pinnati di adesso.
 
 scripts/unpack di LibreELEC alla punta: easyrpg, desmume, puae,
 superbroswar, thepowdertoy, tyrquake, parallel_n64 e mame2015 ora passano;
 flycast solo in CI (i sottomoduli). Restano: same_cdi (l'upstream ha tolto
 GENie: build nuova, package.mk da rifare), hatari e mgba_fork e vbam (ora
-CMake), dosbox (rifatto su dosbox-core), citra (glslang), beetle_psx
-(sottomodulo senza URL).
+CMake), dosbox (rifatto su dosbox-core).

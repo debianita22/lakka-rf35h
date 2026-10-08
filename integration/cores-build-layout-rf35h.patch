@@ -1,3 +1,33 @@
+diff -ruN a/packages/lakka/libretro_cores/beetle_psx/package.mk b/packages/lakka/libretro_cores/beetle_psx/package.mk
+--- a/packages/lakka/libretro_cores/beetle_psx/package.mk	2026-10-08 21:39:44.462814803 +0200
++++ b/packages/lakka/libretro_cores/beetle_psx/package.mk	2026-10-08 21:39:55.007576947 +0200
+@@ -3,6 +3,10 @@
+ PKG_LICENSE="GPLv2"
+ PKG_SITE="https://github.com/libretro/beetle-psx-libretro"
+ PKG_URL="${PKG_SITE}.git"
++# rf35h: nessun sottomodulo vero (niente .gitmodules), ma da ottobre 2026
++# l'upstream ha un gitlink in deps/lightning/gnulib senza URL, e
++# "git submodule update --init --recursive" di scripts/get_git si ferma li'
++PKG_GIT_SKIP_SUBMODULE="yes"
+ PKG_DEPENDS_TARGET="toolchain"
+ PKG_LONGDESC="Standalone port of Mednafen PSX to libretro."
+ PKG_TOOLCHAIN="make"
+diff -ruN a/packages/lakka/libretro_cores/citra/package.mk b/packages/lakka/libretro_cores/citra/package.mk
+--- a/packages/lakka/libretro_cores/citra/package.mk	2026-10-08 21:39:44.468028375 +0200
++++ b/packages/lakka/libretro_cores/citra/package.mk	2026-10-08 21:39:55.007699406 +0200
+@@ -18,7 +18,11 @@
+                        -DENABLE_LIBUSB=OFF \
+                        -DCITRA_ENABLE_BUNDLE_TARGET=OFF \
+                        -DCITRA_WARNINGS_AS_ERRORS=OFF \
+-                       -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
++                       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
++                       -DENABLE_OPT=OFF"
++# rf35h: ENABLE_OPT=OFF, il glslang di settembre 2026 (sottomodulo di citra)
++# si ferma se l'ottimizzatore SPIR-V e' acceso senza SPIRV-Tools, che citra
++# non porta: come prima, senza ottimizzatore
+ 
+ if [ "${OPENGL_SUPPORT}" = "yes" ]; then
+   PKG_DEPENDS_TARGET+=" ${OPENGL}"
 diff -ruN a/packages/lakka/libretro_cores/fbneo/package.mk b/packages/lakka/libretro_cores/fbneo/package.mk
 --- a/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:32.874544413 +0200
 +++ b/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:47.426373875 +0200
