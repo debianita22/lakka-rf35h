@@ -180,6 +180,12 @@ cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 # patch) resta suo. Per un fork debianita22/<core> (upstream piu' le patch di
 # Lakka, ramo rf35h) le patch del package si tolgono: sono gia' nel sorgente,
 # e scripts/unpack le applicherebbe di nuovo senza fermarsi.
+# Core il cui upstream ha cambiato il modo di compilare (fbneo: un meson.build
+# nella radice; higan_sfc_balanced e tic80: il .so con un altro nome o in
+# un'altra cartella): i package.mk di Lakka adattati in modo da andare sia al
+# commit pinnato sia a quelli nuovi. Prima del giro dei pin, che in fondo ai
+# package.mk con patch aggiunge cores/pre-patch.sh.
+patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/cores-build-layout-rf35h.patch"
 echo "  core pinnati (cores/pins.txt)"
 npin=0; ncp=0
 while read -r c site sha _; do
@@ -224,6 +230,9 @@ while read -r c site sha _; do
 				if grep -qE '^ *pre_patch *\(\)' "$pd/package.mk"; then
 					echo "apply: $c: il package.mk di Lakka ha gia' un pre_patch" >&2; exit 1
 				fi
+				# chi nel package.mk usa una patch per nome (desmume: la 002
+				# al contrario, con OpenGL) la trova dove e' adesso
+				sed -i 's|\${PKG_DIR}/patches/|${PKG_DIR}/patches-lakka/|g' "$pd/package.mk"
 				cat "$O/cores/pre-patch.sh" >> "$pd/package.mk"
 				ncp=$((ncp + 1))
 			fi ;;

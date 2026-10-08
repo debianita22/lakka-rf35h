@@ -1,0 +1,1 @@
+Superata: l'upstream ha gia' cmake_minimum_required(VERSION 3.5.0) in externals/zlib/CMakeLists.txt (la patch di Lakka portava 2.4.4 a 3.5, per CMake 4).

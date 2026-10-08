@@ -1,0 +1,1 @@
+Superata: l'upstream ha portato mupen64plus-core alla struttura di mupen64plus (src/device/r4300/new_dynarec): new_dynarec.c e new_dynarec_64.c di src/r4300 non ci sono piu', e nullf non esiste nel codice nuovo.

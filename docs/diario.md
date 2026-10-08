@@ -188,7 +188,7 @@ Prima build: alcune ore, ~100 GB di disco.
                               toggle dei servizi che non svuota la config;
                               connmanctl che non va in SEGV; lock sulla lista
                               delle reti; salvataggio atomico della config)
-    integration/              40 patch all'albero Lakka (kernel 7.2.y, perf,
+    integration/              41 patch all'albero Lakka (kernel 7.2.y, perf,
                               sorgente del kernel tenuto per verify-kernel,
                               sorgenti da mirrors.kernel.org e
                               tarballs.nixos.org, linker di cargo,
@@ -6509,3 +6509,28 @@ apply, la patch di git format-patch con il suo "---", una riga tolta che
 comincia con "-- " dentro un hunk, i due modi di fallire, core_why sul
 risultato); verify-claims 245 (nessuna patch dei core pinnati resta a
 scripts/unpack).
+
+Poi, per i core che si fermavano su una patch o sul layout (stessa sera):
+
+- patch aggiornate in cores/patches: easyrpg (CMakeLists: manpage,
+  bash-completion e Doxygen tolti, nel testo nuovo), desmume (002: OpenGL
+  spento nel ramo unix generico, dopo il nuovo ramo webOS), puae (-g e niente
+  -s, col nuovo -Wno-free-nonheap-object), superbroswar (gcc14: senza
+  SDL_libretroaudio.c, dove l'upstream ha gia' il cast), flycast (-g nel
+  blocco LIBRETRO, che ha perso -Wno-misleading-indentation);
+- superate (solo testo, col perche'): thepowdertoy (zlib gia' a CMake 3.5.0),
+  tyrquake (qtypes.h riscritto con boolean.h), parallel_n64 (nullf e fsqrt:
+  mupen64plus-core ora ha la struttura di mupen64plus, quei file non ci sono
+  piu'), mame2015 (gli script Python aprono gia' con "r");
+- `integration/cores-build-layout-rf35h.patch`: fbneo (pre_make_target torna
+  in ${PKG_BUILD}: con il meson.build LibreELEC compilerebbe in
+  .aarch64-libreelec-linux-gnu), higan_sfc_balanced (installa
+  nside_sfc_balanced_libretro.so col nome di sempre) e tic80 (il .so in bin/
+  o in lib/). Vanno anche ai commit pinnati di adesso.
+
+scripts/unpack di LibreELEC alla punta: easyrpg, desmume, puae,
+superbroswar, thepowdertoy, tyrquake, parallel_n64 e mame2015 ora passano;
+flycast solo in CI (i sottomoduli). Restano: same_cdi (l'upstream ha tolto
+GENie: build nuova, package.mk da rifare), hatari e mgba_fork e vbam (ora
+CMake), dosbox (rifatto su dosbox-core), citra (glslang), beetle_psx
+(sottomodulo senza URL).

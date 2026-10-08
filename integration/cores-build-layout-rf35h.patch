@@ -1,0 +1,52 @@
+diff -ruN a/packages/lakka/libretro_cores/fbneo/package.mk b/packages/lakka/libretro_cores/fbneo/package.mk
+--- a/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:32.874544413 +0200
++++ b/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:47.426373875 +0200
+@@ -19,6 +19,14 @@
+   PKG_MAKE_OPTS_TARGET+=" profile=accuracy"
+ fi
+ 
++# rf35h: dall'ottobre 2026 FBNeo ha un meson.build nella radice, e allora
++# LibreELEC compila in .${TARGET_NAME}: il -C src/burner/libretro qui sopra e
++# i percorsi di makeinstall_target sono relativi alla radice del sorgente.
++# Si torna li', che ci sia o no il meson.build.
++pre_make_target() {
++  cd "${PKG_BUILD}"
++}
++
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
+     cp -v src/burner/libretro/fbneo_libretro.so ${INSTALL}/usr/lib/libretro/
+diff -ruN a/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk b/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk
+--- a/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk	2026-10-08 21:34:32.884400982 +0200
++++ b/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk	2026-10-08 21:34:47.426496811 +0200
+@@ -16,7 +16,13 @@
+   PKG_MAKE_OPTS_TARGET+=" compiler=${CXX}"
+ }
+ 
++# rf35h: dal 2026 nSide chiama il .so nside_sfc_balanced_libretro.so; si
++# installa col nome di sempre, quello del core info e delle playlist
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
++  if [ -f nSide/out/nside_sfc_balanced_libretro.so ]; then
++    cp -v nSide/out/nside_sfc_balanced_libretro.so ${INSTALL}/usr/lib/libretro/higan_sfc_balanced_libretro.so
++  else
+     cp -v nSide/out/higan_sfc_balanced_libretro.so ${INSTALL}/usr/lib/libretro/
++  fi
+ }
+diff -ruN a/packages/lakka/libretro_cores/tic80/package.mk b/packages/lakka/libretro_cores/tic80/package.mk
+--- a/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:32.950544417 +0200
++++ b/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:47.426537735 +0200
+@@ -20,7 +20,13 @@
+   PKG_CMAKE_SCRIPT="${PKG_BUILD}/core/CMakeLists.txt"
+ }
+ 
++# rf35h: il TIC-80 di settembre 2026 mette il .so in bin/
++# (CMAKE_LIBRARY_OUTPUT_DIRECTORY), quello di prima in lib/
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
++  if [ -f bin/tic80_libretro.so ]; then
++    cp -v bin/tic80_libretro.so ${INSTALL}/usr/lib/libretro/
++  else
+     cp -v lib/tic80_libretro.so ${INSTALL}/usr/lib/libretro/
++  fi
+ }

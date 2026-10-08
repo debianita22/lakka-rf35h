@@ -1,0 +1,1 @@
+Superata: l'upstream apre gia' i file con open(fname, "r") (con with) nei quattro script Python che la patch di Lakka correggeva per Python 3 ("rU" non esiste piu').

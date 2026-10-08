@@ -1,0 +1,1 @@
+Superata: l'upstream ha riscritto common/qtypes.h (boolean.h di libretro-common e typedef int qboolean): non c'e' piu' l'enum con false/true che con C23 non compila.

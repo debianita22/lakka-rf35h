@@ -1,0 +1,1 @@
+Superata: hacktarux_dynarec di src/r4300 (assemble.h, con la sua fsqrt) non c'e' piu'; il dynarec nuovo (src/device/r4300) usa emit_fsqrt e non va in conflitto con fsqrt di math.h.
