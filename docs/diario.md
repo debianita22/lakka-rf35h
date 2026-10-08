@@ -6422,3 +6422,41 @@ quello che passa da qui.
 Prove: test-ci-build 122 (6 nuove: scripts/clean e scripts/build finti, un
 core da 600 righe prima di uno che si ferma su un hunk, il log di un thread,
 un clean che fallisce). Con la logica di prima due di queste falliscono.
+
+## Il perche' dei core falliti, e i pin sulla punta del ramo (8/10/2026)
+
+La prova del log per pacchetto: cores.yml a mano (run 37784137585, 473bb22)
+sui 22 rimasti indietro, piu' mame, ppsspp e swanstation che intanto si
+erano mossi upstream: compilano, e il loro pin e' in caf5cad (mame da solo
+4 ore e mezza, dalle 13:26 alle 17:55 UTC; i 22 restano). Questi tre
+entrano nella release dopo la v1.4.0, che e' partita da 0dc6872. Il log e'
+quello giusto: sotto daphne e desmume
+niente piu' righe di SQLite, sotto emux_sms niente piu' l'hunk di easyrpg,
+sotto beetle_psx solo il suo sottomodulo. Ma per 12 core l'annotazione aveva
+soltanto i banner "FAILED COMMAND": il filtro cercava "error" e scartava
+ogni riga con "Werror" (per togliere le righe di comando di gcc), e cosi'
+perdeva un `make: *** No rule to make target` o `No such file or directory`
+(niente "error"), una patch gia' entrata upstream (`Reversed (or previously
+applied) patch detected`, `hunk ignored`) e gli errori di gcc marcati
+`[-Werror=...]`. Ora `core_why` in ci-build.sh: "error" come parola
+("error:", "Error 1"), quelle forme in piu', fuori le righe di comando (un
+flag ` -Werror` o ` -Wno-error`), il codice citato da gcc e i banner; poi il
+passo di LibreELEC fermo ("FAILURE: ... during make_target") e il comando
+sotto il primo banner, il piu' interno; se nessuna riga e' un errore
+riconoscibile, le ultime sei prima del banner.
+
+Preparando il push e' venuto fuori un altro difetto: il job dei pin faceva il
+commit sul checkout del run (il commit da cui era partito, ore prima) e il
+push di quel HEAD. Un qualsiasi commit sul ramo durante la corsa (anche solo
+il diario) lo faceva rifiutare: job fallito, pin dei core compilati persi,
+issue non aggiornata. Ora pins-merge applica i pin a pins.txt della punta del
+ramo com'e' in quel momento, in un worktree a parte, e se il ramo si muove
+fra fetch e push riprova (3 volte). Per questo il push di queste correzioni
+e' aspettato la fine della corsa: con il codice vecchio, il suo job dei pin
+sarebbe fallito.
+
+Prove: test-ci-build 133. core_why con le forme viste (patch gia' upstream,
+make senza la cartella, errore di gcc marcato, nessun errore riconoscibile,
+righe lunghe) e dentro `cores`; pins-merge con git vero (un origin nudo, un
+commit arrivato intanto, un push rifiutato una volta, sempre rifiutato) al
+posto delle prove col git finto. Con il codice di prima le nuove falliscono.

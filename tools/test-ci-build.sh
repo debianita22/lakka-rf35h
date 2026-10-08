@@ -532,24 +532,60 @@ core=fceumm commit=aaaaaaa0000000000000000000000000000000000 site=https://github
 core=mgba commit=bbbbbbb0000000000000000000000000000000000 site=https://github.com/mgba-emu/mgba lakka=e2cf2e5c sysroot=v1.2.0 date=20261005
 EOF
 : > "${CD}/failed.txt"
-# pins-merge: solo i core riusciti cambiano, commit e push
-cat > "${REPO}/cores/pins.txt" <<EOF
+# pins-merge con git vero: un origin nudo, il checkout del run al commit da
+# cui e' partito, e intanto un altro commit sul ramo. Il commit dei pin deve
+# andare sopra quello, non al posto (prima: push di HEAD, rifiutato).
+PG="${T}/pg"; rm -rf "${PG}"; mkdir -p "${PG}"
+# senza la configurazione globale di chi lancia le prove (firma dei commit,
+# push.negotiate): in CI non c'e'
+gt() { GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@t -c init.defaultBranch=main -c advice.detachedHead=false "$@"; }
+gt init -q --bare "${PG}/origin.git"
+gt clone -q "${PG}/origin.git" "${PG}/a" 2>/dev/null
+mkdir -p "${PG}/a/tools" "${PG}/a/cores"; cp "${CB}" "${PG}/a/tools/ci-build.sh"
+cat > "${PG}/a/cores/pins.txt" <<EOF
 # commento
 fceumm            https://github.com/libretro/libretro-fceumm          0000000111111111111111111111111111111111 -
 mgba              https://github.com/mgba-emu/mgba                     bbbbbbb0000000000000000000000000000000000 -
 snes9x            https://github.com/libretro/snes9x                   cccccccc111111111111111111111111111111111 -
 EOF
+echo uno > "${PG}/a/README"
+gt -C "${PG}/a" add -A && gt -C "${PG}/a" commit -q -m base && gt -C "${PG}/a" push -q origin HEAD:main
+gt clone -q "${PG}/origin.git" "${PG}/run"
+gt clone -q "${PG}/origin.git" "${PG}/b" && echo due >> "${PG}/b/README" && gt -C "${PG}/b" commit -qam intanto && gt -C "${PG}/b" push -q origin HEAD:main
 cat > "${T}/pins-new.txt" <<EOF
 # commento
 fceumm            https://github.com/libretro/libretro-fceumm          aaaaaaa0000000000000000000000000000000000 -
 mgba              https://github.com/mgba-emu/mgba                     bbbbbbb0000000000000000000000000000000000 -
 snes9x            https://github.com/libretro/snes9x                   dddddddd111111111111111111111111111111111 -
 EOF
-fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
-ok "pins-merge: fceumm al nuovo, snes9x (non compilato) resta, mgba uguale" '[ "${rc}" = 0 ] && grep -q "^fceumm .* aaaaaaa0000000000000000000000000000000000 -" "${REPO}/cores/pins.txt" && grep -q "^snes9x .* cccccccc111111111111111111111111111111111 -" "${REPO}/cores/pins.txt" && grep -q "^# commento" "${REPO}/cores/pins.txt"'
-ok "  ...commit e push sul ramo, changed=true" 'called "commit -q -m cores: 1 core all.upstream" && called "push -q origin HEAD:main" && [ "$(outv changed)" = true ]'
-fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
-ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && ! called "commit" && [ "$(outv changed)" = false ]'
+pm() { : > "${PG}/out.txt"; ( cd "${PG}/run" && unset GITHUB_ACTIONS && export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 && DEFAULT_BRANCH=main GITHUB_OUTPUT="${PG}/out.txt" PINS_RETRY_SLEEP=0 bash tools/ci-build.sh pins-merge "$@" ) > "${PG}/run.out" 2>&1; }
+opins() { git -C "${PG}/origin.git" show main:cores/pins.txt; }
+pm "${CD}" "${T}/pins-new.txt"; rc=$?
+ok "pins-merge: fceumm al nuovo, snes9x (non compilato) resta, mgba uguale" '[ "${rc}" = 0 ] && opins | grep -q "^fceumm .* aaaaaaa0000000000000000000000000000000000 -" && opins | grep -q "^snes9x .* cccccccc111111111111111111111111111111111 -" && opins | grep -q "^# commento"'
+ok "  ...sopra il commit arrivato intanto sul ramo, non al posto" '[ "$(git -C "${PG}/origin.git" log --format=%s -2 main | tr "\n" "|")" = "cores: 1 core all'"'"'upstream|intanto|" ] && [ "$(git -C "${PG}/origin.git" show main:README | tr "\n" " ")" = "uno due " ]'
+ok "  ...da github-actions, changed=true, niente worktree rimasti" '[ "$(git -C "${PG}/origin.git" log -1 --format=%an main)" = "github-actions[bot]" ] && [ "$(sed -n "s/^changed=//p" "${PG}/out.txt")" = true ] && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ]'
+h="$(git -C "${PG}/origin.git" rev-parse main)"
+pm "${CD}" "${T}/pins-new.txt"; rc=$?
+ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && [ "$(git -C "${PG}/origin.git" rev-parse main)" = "${h}" ] && [ "$(sed -n "s/^changed=//p" "${PG}/out.txt")" = false ]'
+# il ramo si muove fra fetch e push: l'origin rifiuta il primo push
+cat > "${PG}/origin.git/hooks/pre-receive" <<'EOF'
+#!/bin/sh
+f="$(pwd)/rifiuta"
+[ -f "${f}" ] || exit 0
+n="$(cat "${f}")"; [ "${n}" = sempre ] || rm -f "${f}"
+echo "rifiutato per la prova" >&2; exit 1
+EOF
+chmod +x "${PG}/origin.git/hooks/pre-receive"
+printf 'core=snes9x commit=dddddddd111111111111111111111111111111111 site=x lakka=x sysroot=x date=x\n' > "${T}/built-snes9x.txt"
+mkdir -p "${T}/cd2" && cp "${T}/built-snes9x.txt" "${T}/cd2/built.txt"
+echo una > "${PG}/origin.git/rifiuta"
+pm "${T}/cd2" "${T}/pins-new.txt"; rc=$?
+ok "push rifiutato una volta: riprova dalla punta e passa" '[ "${rc}" = 0 ] && grep -q "push rifiutato (tentativo 1 di 3)" "${PG}/run.out" && opins | grep -q "^snes9x .* dddddddd111111111111111111111111111111111 -"'
+echo sempre > "${PG}/origin.git/rifiuta"
+sed -i 's/aaaaaaa0000000000000000000000000000000000/eeeeeee0000000000000000000000000000000000/' "${T}/pins-new.txt"
+pm "${CD}" "${T}/pins-new.txt"; rc=$?
+ok "push sempre rifiutato: esce 1 dopo 3 tentativi, niente worktree rimasti" '[ "${rc}" = 1 ] && grep -q "tentativo 3 di 3" "${PG}/run.out" && grep -q "non riuscito dopo 3 tentativi" "${PG}/run.out" && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ]'
+rm -f "${PG}/origin.git/rifiuta"
 
 echo "cores (job cores): il .so deve venire dal commit del pin"
 CW="${T}/cw"; rm -rf "${CW}"; mkdir -p "${CW}/lakka-rf35h" "${CW}/lakka-rf35h-build"
@@ -573,6 +609,8 @@ cp "${T}/so.gambatte" "\${t}/target/cores/gambatte/gambatte_libretro.so"
 	echo "gambatte ok: gambatte_libretro.so (install_pkg/gambatte-9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2)"
 	echo "mgba fallito (uscita 2)    log: x"
 } > "\${t}/build-rf35h-20261008-010000-pacchetti.txt"
+printf '%s\n' "patching file src/a.c" "Reversed (or previously applied) patch detected!  Skipping patch." \
+	"*********** FAILED COMMAND ***********" 'cat \${i} | patch -d "\${PKG_BUILD}" -p1' > "\${t}/build-rf35h-20261008-010000-mgba-fallito.log"
 exit 1
 EOF
 chmod +x "${CW}/lakka-rf35h/build-in-docker.sh"
@@ -582,6 +620,7 @@ ok "cores: esce 0 con almeno un riuscito" '[ "${rc}" = 0 ]'
 ok "  ...fceumm riuscito, al commit del pin, con il sysroot" '[ "$(grep -c "^core=" "${CW}/cores/built.txt")" = 1 ] && grep -q "^core=fceumm commit=${SF} " "${CW}/cores/built.txt" && grep -q " sysroot=ci-33-893a42f " "${CW}/cores/built.txt" && ! ls "${CW}/cores/"*.so.gz >/dev/null 2>&1'
 ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gambatte: compilato da install_pkg/gambatte-9fe223d" "${CW}/cores/failed.txt" && ! grep -q "core=gambatte" "${CW}/cores/built.txt"'
 ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
+ok "  ...e il perche' dal suo log (core_why): la patch gia' applicata, il comando" 'grep -q "^Reversed (or previously applied) patch detected" "${CW}/cores/failed.txt" && grep -qF "comando: cat \${i} | patch" "${CW}/cores/failed.txt"'
 ok "  ...un'annotazione per fallito, col perche'" 'grep -q "^::warning title=Core mgba::== mgba: mgba fallito (uscita 2)" "${T}/cores.out" && grep -q "^::warning title=Core gambatte::== gambatte: compilato da install_pkg/gambatte-9fe223d" "${T}/cores.out" && ! grep -q "title=Core fceumm::" "${T}/cores.out"'
 
 echo "build-lakka-rf35h.sh --build-packages: il log del fallito e' solo suo"
@@ -611,6 +650,40 @@ ok "  ...thr: il log del suo thread" '[ "$(cat "${PBL%.log}-thr-fallito.log")" =
 ok "  ...nopulito: fallito con l'uscita di clean, nel suo log" 'grep -q "^clean rotto" "${PBL%.log}-nopulito-fallito.log" && grep -q "^scripts/clean nopulito: uscita 4" "${PBL%.log}-nopulito-fallito.log"'
 ok "  ...niente fallito.log per chi compila, nessun log per pacchetto rimasto" '[ ! -e "${PBL%.log}-lungo-fallito.log" ] && [ -z "$(ls "${PB}" | grep -v "fallito.log$" | grep "^build-rf35h-20261008-120000-")" ]'
 ok "  ...il log comune ha tutto, in ordine" '[ "$(grep -c "^lungo riga" "${PBL}")" = 600 ] && [ "$(grep -n "^CLEAN lungo\|^CLEAN thr\|^Hunk #1\|^clean rotto" "${PBL}" | cut -d: -f2 | tr "\n" "|")" = "CLEAN lungo|CLEAN thr|Hunk #1 FAILED at 12.|clean rotto|" ]'
+
+echo "core_why: il perche' di un core fallito, dal suo log"
+# Le forme viste nella corsa dell'8/10/2026, dove per meta' dei falliti
+# l'issue mostrava solo i banner "FAILED COMMAND"
+eval "$(sed -n '/^core_why() {/,/^}/p' "${CB}")"
+WY="${T}/why"; mkdir -p "${WY}"
+printf '%s\n' "Applying patch x-001.patch" "patching file Makefile" \
+	"Reversed (or previously applied) patch detected!  Skipping patch." \
+	"1 out of 1 hunk ignored -- saving rejects to file Makefile.rej" \
+	"*********** FAILED COMMAND ***********" 'cat ${i} | patch -d "${PKG_BUILD}" -p1' "**************************************" \
+	"*********** FAILED COMMAND ***********" '${SCRIPTS}/unpack "${PKG_NAME}" "${PARENT_PKG}"' "**************************************" > "${WY}/patch.log"
+core_why "${WY}/patch.log" > "${WY}/patch.out"
+ok "patch gia' upstream: le righe di patch e il comando piu' interno" 'grep -q "^Reversed (or previously applied)" "${WY}/patch.out" && grep -q "^1 out of 1 hunk ignored" "${WY}/patch.out" && grep -qxF "comando: cat \${i} | patch -d \"\${PKG_BUILD}\" -p1" "${WY}/patch.out" && ! grep -q "FAILED COMMAND\|unpack" "${WY}/patch.out"'
+printf '%s\n' "Executing (target): make -C src/burner/libretro" \
+	"/work/b/toolchain/bin/aarch64-libreelec-linux-gnu-gcc -c -O2 -Wno-error -Werror=format-security src/a.c -o a.o" \
+	"make: *** src/burner/libretro: No such file or directory.  Stop." \
+	$'\e[1;31mFAILURE: scripts/build fbneo during make_target (package.mk)\e[0m' "" \
+	"*********** FAILED COMMAND ***********" "make -C src/burner/libretro -j4" "**************************************" > "${WY}/make.log"
+core_why "${WY}/make.log" > "${WY}/make.out"
+ok "make senza la cartella: la riga di make, il passo senza colori, il comando" 'grep -qxF "make: *** src/burner/libretro: No such file or directory.  Stop." "${WY}/make.out" && grep -qxF "passo: scripts/build fbneo during make_target (package.mk)" "${WY}/make.out" && grep -qxF "comando: make -C src/burner/libretro -j4" "${WY}/make.out"'
+ok "  ...non la riga di comando del compilatore (-Wno-error, -Werror=)" '! grep -q "toolchain/bin" "${WY}/make.out"'
+printf '%s\n' "src/a.c:12:3: error: format not a string literal and no format arguments [-Werror=format-security]" \
+	'  147 |      LOG_ERROR("Error running SQLite create_query: %d: %s\n", rc,' "      |      ^~~~~~~~~" \
+	"[30/74] Building C object common/source/error.c.o" "deps/zstd/lib/common/error_private.o" \
+	"make[1]: *** [Makefile:10: a.o] Error 1" "*********** FAILED COMMAND ***********" "make" > "${WY}/gcc.log"
+core_why "${WY}/gcc.log" > "${WY}/gcc.out"
+ok "errore di gcc marcato [-Werror=...]: c'e' (prima si scartava)" 'grep -q "^src/a.c:12:3: error: format not a string literal" "${WY}/gcc.out" && grep -qxF "make[1]: *** [Makefile:10: a.o] Error 1" "${WY}/gcc.out"'
+ok "  ...senza il codice citato da gcc ne' i file che si chiamano error" '! grep -q "SQLite\|\^~\|error\.c\.o\|error_private" "${WY}/gcc.out"'
+{ for i in $(seq 9); do echo "riga ${i}"; done; echo "FAILURE: scripts/build y during makeinstall_target (package.mk)"
+  echo "*********** FAILED COMMAND ***********"; echo 'mkdir -p ${INSTALL}/usr/lib/libretro'; } > "${WY}/none.log"
+core_why "${WY}/none.log" > "${WY}/none.out"
+ok "nessun errore riconoscibile: le ultime 6 righe prima del banner, passo e comando" '[ "$(grep -c "^riga" "${WY}/none.out")" = 6 ] && grep -qx "riga 4" "${WY}/none.out" && grep -qx "riga 9" "${WY}/none.out" && grep -q "^(nessuna riga d.errore" "${WY}/none.out" && grep -qxF "passo: scripts/build y during makeinstall_target (package.mk)" "${WY}/none.out" && grep -qxF "comando: mkdir -p \${INSTALL}/usr/lib/libretro" "${WY}/none.out"'
+printf 'error: %0300d\n' 0 > "${WY}/long.log"
+ok "righe tagliate a 180 caratteri" '[ "$(core_why "${WY}/long.log" | awk "{ print length }" | sort -n | tail -1)" = 180 ]'
 
 echo "cores-matrix e merge-cores (job cores in parallelo)"
 M="$(bash "${REPO}/tools/ci-build.sh" cores-matrix "fceumm mame a b c d e f g h i j k l flycast m")"

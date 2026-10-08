@@ -995,6 +995,39 @@ cmd_merge_cores() {
 # Il repository e il commit di un core in cores/pins.txt
 pin_of() { awk -v c="$1" '$1 == c && $2 ~ /^https?:/ { print $2, $3 }' "${O}/cores/pins.txt"; }
 
+# Perche' un core non compila, dal suo *-fallito.log: le righe d'errore
+# (compilatore, make, patch, cmake, git), il passo di LibreELEC che si e'
+# fermato ("FAILURE: ... during make_target") e il comando sotto il primo
+# banner "FAILED COMMAND", il piu' interno (con una patch: quello di
+# scripts/unpack, non la chiamata a scripts/unpack). Se nessuna riga e' un
+# errore riconoscibile, le ultime prima del banner. Nella corsa dell'8/10/2026
+# per meta' dei falliti si vedevano solo i banner: un "make: *** No rule to
+# make target", una patch gia' entrata upstream ("Reversed (or previously
+# applied) patch detected") o un errore di gcc marcato [-Werror=...] non
+# contengono "error" o lo contenevano solo dentro "Werror", che si scartava per
+# togliere le righe di comando del compilatore. Ora "error" conta solo come
+# parola ("error:", "Error 1"); restano fuori le righe di comando (un flag
+# " -Werror" o " -Wno-error", non il "[-Werror=...]" in coda a un errore), il
+# codice citato da gcc ("  147 |") e i banner. Senza i colori di print_color,
+# righe a 180 caratteri.
+core_why() {
+	local f="$1" plain errs
+	plain="$(sed 's/\x1b\[[0-9;]*m//g' "${f}")"
+	errs="$(printf '%s\n' "${plain}" \
+		| grep -aE '(^|[^A-Za-z_])(error|Error|ERROR)( |:)|FAILED|fatal:|Cannot get|undefined reference|Reversed \(or previously applied\)|hunk ignored|No rule to make target|No such file or directory|cannot stat|command not found|No package .* found|Stop\.$|Killed|Segmentation fault|Illegal instruction' \
+		| grep -avE '^ *[0-9]+ \||^ *\| |FAILED COMMAND|^FAILURE: |(^| )-W(no-)?error' | tail -8 || true)"
+	{
+		if [ -n "${errs}" ]; then
+			printf '%s\n' "${errs}"
+		else
+			echo "(nessuna riga d'errore riconosciuta, le ultime prima del FAILED COMMAND:)"
+			printf '%s\n' "${plain}" | awk '/\*+ FAILED COMMAND \*+/ { exit } NF && !/^FAILURE: / { b[++n] = $0 } END { for (i = (n > 6 ? n - 5 : 1); i <= n; i++) print b[i] }'
+		fi
+		printf '%s\n' "${plain}" | awk '/^FAILURE: / { sub(/^FAILURE: /, ""); print "passo: " $0; exit }'
+		printf '%s\n' "${plain}" | awk 'c { print "comando: " $0; exit } /\*+ FAILED COMMAND \*+/ { c = 1 }'
+	} | cut -c1-180
+}
+
 # Job cores: i core dati, al commit nuovo dei loro pin, con lo script di build
 # in --build-packages (stesso overlay, stesse verifiche, stessi flag della
 # release), sull'albero di una build finita. Una prova, non un'uscita: i .so
@@ -1027,7 +1060,7 @@ cmd_cores() {
 			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1 || true)"
 			{
 				echo "== ${p}: $(grep "^${p} " "${rep}" || echo 'non compilato')"
-				[ -n "${f}" ] && grep -aE 'error|Error|FAILED|fatal:|Cannot get|undefined reference' "${f}" | grep -av 'Werror\|error\.o\|_error\.' | tail -8 | cut -c1-180
+				[ -n "${f}" ] && core_why "${f}"
 			} >> "${out}/failed.txt"
 			continue
 		fi
@@ -1068,33 +1101,54 @@ cmd_cores() {
 
 # Job cores, a build finite: in cores/pins.txt entrano i pin nuovi
 # (<newpins>, da cores-bump.sh) dei soli core riusciti (built.txt in <d>); gli
-# altri restano al commit vecchio. Poi il commit sul ramo, se e' cambiato
-# qualcosa: un push del GITHUB_TOKEN non avvia altri workflow.
+# altri restano al commit vecchio. Il commit va sulla punta del ramo com'e'
+# adesso, in un worktree a parte, non sul commit da cui e' partito il run: il
+# run dura ore, e se intanto sul ramo e' arrivato altro il push di quel HEAD
+# veniva rifiutato (non fast-forward), il job falliva e i pin compilati
+# andavano persi, issue compresa. Se il ramo si muove fra fetch e push, si
+# riprova (3 volte). Un push del GITHUB_TOKEN non avvia altri workflow.
 cmd_pins_merge() {
-	local d="${1:?cartella con built.txt}" np="${2:?pins nuovi}" c line n=0
+	local d="${1:?cartella con built.txt}" np="${2:?pins nuovi}" c line n try wt cores
 	[ -f "${np}" ] || die "manca ${np}"
-	for c in $(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u); do
-		line="$(awk -v c="${c}" '$1 == c && $2 ~ /^https?:/' "${np}")"
-		[ -n "${line}" ] || { echo "  ${c}: non nei pin nuovi, resta"; continue; }
-		if grep -qxF "${line}" "${O}/cores/pins.txt"; then continue; fi
-		awk -v c="${c}" -v l="${line}" '$1 == c && $2 ~ /^https?:/ { print l; next } { print }' "${O}/cores/pins.txt" > "${O}/cores/pins.txt.new"
-		mv "${O}/cores/pins.txt.new" "${O}/cores/pins.txt"
-		n=$((n + 1))
-		echo "  ${c}: $(awk '{ print substr($3, 1, 7) }' <<< "${line}")"
+	: "${DEFAULT_BRANCH:?}"
+	cores="$(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u)"
+	wt="$(mktemp -d)/pins"
+	for try in 1 2 3; do
+		git -C "${O}" fetch -q --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+		git -C "${O}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
+		git -C "${O}" worktree add -q --detach "${wt}" "refs/remotes/origin/${DEFAULT_BRANCH}"
+		n=0
+		for c in ${cores}; do
+			line="$(awk -v c="${c}" '$1 == c && $2 ~ /^https?:/' "${np}")"
+			[ -n "${line}" ] || { echo "  ${c}: non nei pin nuovi, resta"; continue; }
+			if grep -qxF "${line}" "${wt}/cores/pins.txt"; then continue; fi
+			awk -v c="${c}" -v l="${line}" '$1 == c && $2 ~ /^https?:/ { print l; next } { print }' "${wt}/cores/pins.txt" > "${wt}/cores/pins.txt.new"
+			mv "${wt}/cores/pins.txt.new" "${wt}/cores/pins.txt"
+			n=$((n + 1))
+			echo "  ${c}: $(awk '{ print substr($3, 1, 7) }' <<< "${line}")"
+		done
+		if [ "${n}" -eq 0 ]; then
+			echo "  nessun pin da cambiare"
+			git -C "${O}" worktree remove --force "${wt}"
+			out "changed=false"
+			return 0
+		fi
+		git -C "${wt}" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+			commit -q -m "cores: ${n} core all'upstream" \
+			-m "$(tr '\n' ' ' <<< "${cores}")" \
+			-m "Compilati da cores.yml (run ${GITHUB_RUN_ID:-?}) al commit nuovo: la prossima release li ha." -- cores/pins.txt
+		if git -C "${wt}" push -q origin "HEAD:${DEFAULT_BRANCH}"; then
+			git -C "${O}" worktree remove --force "${wt}"
+			out "changed=true"
+			echo "  ${n} pin aggiornati e pushati su ${DEFAULT_BRANCH}"
+			note notice "Pin" "${n} core aggiornati in cores/pins.txt: la prossima immagine li avra'"
+			return 0
+		fi
+		echo "  push rifiutato (tentativo ${try} di 3): il ramo si e' mosso, riprovo dalla punta nuova"
+		[ "${try}" -lt 3 ] && sleep "${PINS_RETRY_SLEEP:-10}"
 	done
-	if [ "${n}" -eq 0 ]; then
-		echo "  nessun pin da cambiare"
-		out "changed=false"
-		return 0
-	fi
-	out "changed=true"
-	git -C "${O}" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-		commit -q -m "cores: ${n} core all'upstream" \
-		-m "$(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u | tr '\n' ' ')" \
-		-m "Compilati e pubblicati nella release cores da cores.yml (run ${GITHUB_RUN_ID:-?})." -- cores/pins.txt
-	git -C "${O}" push -q origin "HEAD:${DEFAULT_BRANCH:?}"
-	echo "  ${n} pin aggiornati e pushati su ${DEFAULT_BRANCH}"
-	note notice "Pin" "${n} core aggiornati in cores/pins.txt: la prossima immagine li avra'"
+	git -C "${O}" worktree remove --force "${wt}" 2>/dev/null || true
+	fail "Pin" "push dei pin su ${DEFAULT_BRANCH} non riuscito dopo 3 tentativi"
 }
 
 case "${1:-}" in
