@@ -41,7 +41,7 @@ gpsp                 https://github.com/libretro/gpsp                         58
 beetle_pce_fast      https://github.com/libretro/beetle-pce-fast-libretro     3f946f277aef3aa99a95551618bbcd1dd2bda0d9 -
 beetle_pce           https://github.com/libretro/beetle-pce-libretro          b96c11e095b6a40a412d2da02766ae1c3f4fd539 -
 fbalpha2012          https://github.com/libretro/fbalpha2012                  0ce31536bef3162fe7e69ff5f555334ec4913cef -
-mupen64plus_next     https://github.com/libretro/mupen64plus-libretro-nx      bc43bcedc276861254b48526f56799d63a30723b develop
+mupen64plus_next     https://github.com/libretro/mupen64plus-libretro-nx      12edd2c74a517ff86dfa8cfc71ad75e4c10486d5 develop
 parallel_n64         https://github.com/libretro/parallel-n64                 1da824e13e725a7144f3245324f43d59623974f8 -
 pcsx_rearmed         https://github.com/libretro/pcsx_rearmed                 c8816799b50388e61cfe237fe2cdbb7d8175f20a -
 beetle_ngp           https://github.com/libretro/beetle-ngp-libretro          a50d5ac288a81f2104ddf43195a4efdd15c72227 -
@@ -84,7 +84,7 @@ chailove             https://github.com/libretro/libretro-chailove            52
 citra                https://github.com/libretro/citra                        5263fae3344e5e9af43036e0e38bec2d10fb2407 -
 clownmdemu           https://github.com/Clownacy/clownmdemu-libretro          d43c2708b0a31c285ce16724b6c4a2e92af07346 -
 craft                https://github.com/libretro/Craft                        f30e7b4b1d1406c750a504583adf0cc88449a699 -
-daphne               https://github.com/libretro/daphne                       b5481bab34a51369b6749cd95f5f889e43aaa23f -
+daphne               https://github.com/libretro/daphne                       6f1695dd1f376060666eec0a416ff56bb6c9cccc -
 desmume              https://github.com/libretro/desmume                      7f05a8d447b00acd9e0798aee97b4f72eb505ef9 -
 desmume_2015         https://github.com/libretro/desmume2015                  422b688009ccb9f2917c086a8fe79c8cecb030ae -
 dice                 https://github.com/mittonk/dice-libretro                 ab766aa25c6ed970ece28f2df5be7daa26b9e439 -
@@ -97,7 +97,7 @@ dosbox_svn           https://github.com/libretro/dosbox-svn                   46
 doublecherrygb       https://github.com/TimOelrichs/doublecherryGB-libretro   03f58ca3dfb4b716f7e66a0e0467f9e85ef82abb -
 doukutsu_rs          https://github.com/DrGlaucous/doukutsu-rs-libretro       2e6504e46179561869e976a22f73d8ebb65a7d5c -
 easyrpg              https://github.com/EasyRPG/Player                        78328fa29f465315291e161130e6682f69410370 -
-emux_sms             https://github.com/libretro/emux                         640d4bae7d4757f5377dbeb42f2d02763895095c -
+emux_sms             https://github.com/libretro/emux                         3e558cb15157fcb1944846a845547d369605c963 -
 ep128emu             https://github.com/libretro/ep128emu-core                6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e core
 fake_08              https://github.com/jtothebell/fake-08                    814991a2571ad3970e386cef48f3b148aa1c27b9 -
 fmsx                 https://github.com/libretro/fmsx-libretro                4de11755ce4f196ac1c8a7bb20bb4eccbc87a7d4 -
