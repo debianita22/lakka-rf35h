@@ -852,6 +852,36 @@ if [ -z "${PKG_JOBS}" ]; then
 fi
 
 # --- solo alcuni pacchetti (--build-packages) ---------------------------------
+# scripts/clean e scripts/build di un pacchetto, nella cartella dell'albero. Il
+# pacchetto ha un log suo (${LOG%.log}-<pacchetto>.log, tolto alla fine) oltre
+# al LOG di tutta la build: se fallisce, ${LOG%.log}-<pacchetto>-fallito.log e'
+# la coda del suo. Prima era la coda del LOG comune, e un core che si ferma
+# presto (una patch che non si applica: poche righe) si portava dietro gli
+# errori del core compilato prima (cores.yml dell'8/10/2026, gli "SQLite
+# create_query" sotto daphne e desmume). scripts/build chiamato da solo e'
+# sequenziale (THREADCOUNT=1, niente .threads/logs); se un log di thread
+# comparisse, conta solo quello nominato nell'output di questo pacchetto.
+# Restituisce l'uscita di clean o di build: va chiamata con "|| RC=$?".
+pkg_build_logged() {
+	local p="$1" rc tlog
+	local plog="${LOG%.log}-${1}.log" flog="${LOG%.log}-${1}-fallito.log"
+	env "${BENV[@]}" ./scripts/clean "${p}" > "${plog}" 2>&1
+	rc=$?
+	cat "${plog}" >> "${LOG}"
+	if [ "${rc}" -eq 0 ]; then
+		env "${BENV[@]}" ./scripts/build "${p}" 2>&1 | tee -a "${LOG}" "${plog}"
+		rc=${PIPESTATUS[0]}
+	else
+		echo "scripts/clean ${p}: uscita ${rc}" | tee -a "${LOG}" "${plog}"
+	fi
+	if [ "${rc}" -ne 0 ]; then
+		tlog="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${plog}" | tail -1)"
+		if [ -n "${tlog}" ] && [ -r "${tlog}" ]; then cp -f "${tlog}" "${flog}"; else tail -1000 "${plog}" > "${flog}"; fi
+	fi
+	rm -f "${plog}"
+	return "${rc}"
+}
+
 # scripts/build <pacchetto> costruisce il pacchetto e, in sequenza, le
 # dipendenze che non hanno ancora lo stamp: su un albero gia' costruito
 # (toolchain e sistema fatti) resta il solo pacchetto. Un pacchetto che non
@@ -882,19 +912,9 @@ if [ -n "${BUILD_PACKAGES}" ]; then
 		# cioe' a caso il vecchio o il nuovo). E cosi' "rebuild" ricompila
 		# davvero, anche con lo stesso commit.
 		say "scripts/clean e scripts/build ${p}"
-		set +e
-		env "${BENV[@]}" ./scripts/clean "${p}" >> "${LOG}" 2>&1
-		RC=$?
-		if [ "${RC}" -eq 0 ]; then
-			env "${BENV[@]}" ./scripts/build "${p}" 2>&1 | tee -a "${LOG}"
-			RC=${PIPESTATUS[0]}
-		else
-			echo "scripts/clean ${p}: uscita ${RC}" | tee -a "${LOG}"
-		fi
-		set -e
+		RC=0
+		pkg_build_logged "${p}" || RC=$?
 		if [ "${RC}" -ne 0 ]; then
-			TLOG="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${LOG}" | tail -1)"
-			if [ -n "${TLOG}" ] && [ -r "${TLOG}" ]; then cp -f "${TLOG}" "${LOG%.log}-${p}-fallito.log"; else tail -400 "${LOG}" > "${LOG%.log}-${p}-fallito.log" 2>/dev/null || true; fi
 			echo "${p} fallito (uscita ${RC})    log: $(hp "${LOG%.log}-${p}-fallito.log")" >> "${REPORT}"
 			PK_FAILED="${PK_FAILED} ${p}"
 			# lo stamp parziale e la cartella a meta' non devono passare per buoni

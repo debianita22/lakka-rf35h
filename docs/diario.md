@@ -6404,3 +6404,21 @@ La v1.4.0 (note in `docs/release-notes/v1.4.0.md`): i 131 core aggiornati
 v1.3.1, mai pubblicata: il suo tag non serve piu'), SameBoy con i flag di
 sistema e l'LTO. Il commit della release tocca solo note e diario, non i
 workflow.
+
+## Un log per pacchetto in --build-packages (8/10/2026)
+
+Il limite visto con cores.yml: in `--build-packages` il `*-fallito.log` di un
+pacchetto era la coda (400 righe) del log comune, e il log di un thread si
+cercava in tutto il log comune. Un core che si ferma presto, su una patch che
+non si applica, si portava dietro le righe del core compilato prima. Ora
+(`pkg_build_logged` in build-lakka-rf35h.sh) clean e build di ogni pacchetto
+scrivono anche in un log suo, `build-rf35h-<data>-<pacchetto>.log`: se il
+pacchetto fallisce, il `*-fallito.log` e' la coda (1000 righe) di quello, o
+il log di un thread nominato li'; poi il log del pacchetto va via (il log
+comune ha tutto). scripts/build chiamato da solo e' sequenziale (Lakka:
+`is_sequential_build`, THREADCOUNT=1), quindi l'output del pacchetto e'
+quello che passa da qui.
+
+Prove: test-ci-build 122 (6 nuove: scripts/clean e scripts/build finti, un
+core da 600 righe prima di uno che si ferma su un hunk, il log di un thread,
+un clean che fallisce). Con la logica di prima due di queste falliscono.

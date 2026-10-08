@@ -820,7 +820,7 @@ MAME, alone; the others in groups of 12) and moves the pin of each core that
 builds, so a core that stops building upstream stays at its last good commit
 while the others move on, and the next release ships the new ones. The 37 cores with Lakka patches keep them: when a patch no
 longer applies to a newer upstream commit, that core fails and stays where it
-was, listed in an issue. A `debianita22/<core>` fork (branch `rf35h`: upstream
+was, listed in an issue with the error lines of its own build log. A `debianita22/<core>` fork (branch `rf35h`: upstream
 plus the patches), if a pin points to one, is built without Lakka's patches.
 
 A release contains the `.img.gz`, the `.tar`, `update.txt` (version, file

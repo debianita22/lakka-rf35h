@@ -584,6 +584,34 @@ ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gamb
 ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
 ok "  ...un'annotazione per fallito, col perche'" 'grep -q "^::warning title=Core mgba::== mgba: mgba fallito (uscita 2)" "${T}/cores.out" && grep -q "^::warning title=Core gambatte::== gambatte: compilato da install_pkg/gambatte-9fe223d" "${T}/cores.out" && ! grep -q "title=Core fceumm::" "${T}/cores.out"'
 
+echo "build-lakka-rf35h.sh --build-packages: il log del fallito e' solo suo"
+# scripts/clean e scripts/build finti: "lungo" compila con 600 righe che
+# contengono "error:", "thr" fallisce col log di un thread, "corto" si ferma
+# subito su una patch. Col log comune, la coda di "corto" erano le righe di
+# "lungo" (cores.yml dell'8/10/2026).
+PB="${T}/pb"; rm -rf "${PB}"; mkdir -p "${PB}/scripts" "${PB}/build.x/.threads/logs"
+cat > "${PB}/scripts/build" <<EOF
+#!/bin/bash
+case "\$1" in
+	lungo) for i in \$(seq 600); do echo "lungo riga \${i}: warning, error: niente"; done ;;
+	thr)   echo "errore nel thread di thr" > "${PB}/build.x/.threads/logs/7.log"; echo "    ${PB}/build.x/.threads/logs/7.log"; exit 2 ;;
+	corto) echo "Hunk #1 FAILED at 12."; echo "1 out of 1 hunk FAILED"; exit 1 ;;
+	nopulito) exit 0 ;;
+esac
+EOF
+printf '#!/bin/bash\n[ "$1" = nopulito ] && { echo "clean rotto"; exit 4; }\necho "CLEAN $1"\n' > "${PB}/scripts/clean"
+chmod +x "${PB}/scripts/clean" "${PB}/scripts/build"
+eval "$(sed -n '/^pkg_build_logged() {/,/^}/p' "${O}/build-lakka-rf35h.sh")"
+PBL="${PB}/build-rf35h-20261008-120000.log"
+( cd "${PB}" || exit 9; LOG="${PBL}"; BENV=(X=1); set -e
+  for p in lungo thr corto nopulito; do r=0; pkg_build_logged "${p}" > /dev/null || r=$?; echo "${p} ${r}"; done ) > "${T}/pb.out" 2>&1
+ok "pkg_build_logged: l'uscita di build o di clean, anche sotto set -e" '[ "$(tr "\n" " " < "${T}/pb.out")" = "lungo 0 thr 2 corto 1 nopulito 4 " ]'
+ok "  ...corto: solo le sue righe, non la coda di lungo ne' il thread di thr" 'grep -q "^Hunk #1 FAILED" "${PBL%.log}-corto-fallito.log" && ! grep -q "lungo riga\|thr" "${PBL%.log}-corto-fallito.log"'
+ok "  ...thr: il log del suo thread" '[ "$(cat "${PBL%.log}-thr-fallito.log")" = "errore nel thread di thr" ]'
+ok "  ...nopulito: fallito con l'uscita di clean, nel suo log" 'grep -q "^clean rotto" "${PBL%.log}-nopulito-fallito.log" && grep -q "^scripts/clean nopulito: uscita 4" "${PBL%.log}-nopulito-fallito.log"'
+ok "  ...niente fallito.log per chi compila, nessun log per pacchetto rimasto" '[ ! -e "${PBL%.log}-lungo-fallito.log" ] && [ -z "$(ls "${PB}" | grep -v "fallito.log$" | grep "^build-rf35h-20261008-120000-")" ]'
+ok "  ...il log comune ha tutto, in ordine" '[ "$(grep -c "^lungo riga" "${PBL}")" = 600 ] && [ "$(grep -n "^CLEAN lungo\|^CLEAN thr\|^Hunk #1\|^clean rotto" "${PBL}" | cut -d: -f2 | tr "\n" "|")" = "CLEAN lungo|CLEAN thr|Hunk #1 FAILED at 12.|clean rotto|" ]'
+
 echo "cores-matrix e merge-cores (job cores in parallelo)"
 M="$(bash "${REPO}/tools/ci-build.sh" cores-matrix "fceumm mame a b c d e f g h i j k l flycast m")"
 ok "cores-matrix: i pesanti da soli e per primi, gli altri a gruppi di 12" '[ "${M}" = "{\"include\":[{\"g\":\"01\",\"cores\":\"mame\"},{\"g\":\"02\",\"cores\":\"flycast\"},{\"g\":\"03\",\"cores\":\"fceumm a b c d e f g h i j k\"},{\"g\":\"04\",\"cores\":\"l m\"}]}" ]'
