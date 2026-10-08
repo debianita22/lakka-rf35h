@@ -67,7 +67,7 @@ ardens               https://github.com/tiberiusbrown/Ardens                  ba
 atari800             https://github.com/libretro/libretro-atari800            4e7fbc73765c1a9670c7506616046ad1d4ccda51 -
 b2                   https://github.com/zoltanvb/b2-libretro                  9793f6a8040c416d147003cada29363b955b54e7 -
 beetle_pcfx          https://github.com/libretro/beetle-pcfx-libretro         c1650bad5fbdcc3c3ccd45e29e3983e1ccf16cff -
-beetle_psx           https://github.com/libretro/beetle-psx-libretro          3a1184d1e1c7ed15752e9fe4a0594e68b4a41e11 -
+beetle_psx           https://github.com/libretro/beetle-psx-libretro          10e4b0c6ceae20daa65ddf436a4445dddd0982d2 -
 beetle_supafaust     https://github.com/libretro/supafaust                    642d1d1b6684aa7e306a02a89885f3f5456a5157 -
 beetle_supergrafx    https://github.com/libretro/beetle-supergrafx-libretro   9c11dcd213a79d57d2c86313971631af801f2cdc -
 beetle_vb            https://github.com/libretro/beetle-vb-libretro           cd885872ff6decc5d8b9084ce44ca47f51411d52 -
@@ -81,7 +81,7 @@ bsnes_hd             https://github.com/DerKoun/bsnes-hd                      fc
 bsnes_jg             https://github.com/libretro/bsnes-jg                     aa11568fff267fca3424cbdfa6da788ddc42e468 -
 cannonball           https://github.com/libretro/cannonball                   0d83575d920ea4c0a280847a19d7802f673e6a68 -
 chailove             https://github.com/libretro/libretro-chailove            524ef951abbd07464830ee12a3f6f5e2aba9efd3 -
-citra                https://github.com/libretro/citra                        5263fae3344e5e9af43036e0e38bec2d10fb2407 -
+citra                https://github.com/libretro/citra                        a0483e9abe8134ae6b290cdca7d49cb77689f05b -
 clownmdemu           https://github.com/Clownacy/clownmdemu-libretro          d43c2708b0a31c285ce16724b6c4a2e92af07346 -
 craft                https://github.com/libretro/Craft                        f30e7b4b1d1406c750a504583adf0cc88449a699 -
 daphne               https://github.com/libretro/daphne                       6f1695dd1f376060666eec0a416ff56bb6c9cccc -
