@@ -1057,6 +1057,12 @@ cmd_cores() {
 	summ "- core riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' ')"
 	[ ! -s "${out}/failed.txt" ] || summ "- core falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
 	note notice "Core" "riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' '); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
+	# il perche' di ogni fallito in un'annotazione: si legge dall'API, il
+	# failed.txt solo scaricando l'artifact (la prima corsa completa ne aveva
+	# sedici, e da fuori se ne vedevano solo i nomi)
+	for c in $(sed -n 's/^== \([^:]*\):.*/\1/p' "${out}/failed.txt"); do
+		note warning "Core ${c}" "$(awk -v c="${c}" '/^== / { on = (index($0, "== " c ":") == 1) } on' "${out}/failed.txt")"
+	done
 	[ -s "${out}/built.txt" ] || { note error "Core" "nessun core compilato"; die "nessun core compilato"; }
 }
 

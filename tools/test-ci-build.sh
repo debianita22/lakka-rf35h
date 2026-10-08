@@ -577,11 +577,12 @@ exit 1
 EOF
 chmod +x "${CW}/lakka-rf35h/build-in-docker.sh"
 mkelf "${T}/so.fceumm" 2000; mkelf "${T}/so.gambatte" 1500
-( export W="${CW}" RF35H_CONTAINER=x RF35H_SYSROOT_VERSION=ci-33-893a42f; bash "${CB}" cores "fceumm gambatte mgba" > "${T}/cores.out" 2>&1 ); rc=$?
+( export W="${CW}" RF35H_CONTAINER=x RF35H_SYSROOT_VERSION=ci-33-893a42f GITHUB_ACTIONS=true; bash "${CB}" cores "fceumm gambatte mgba" > "${T}/cores.out" 2>&1 ); rc=$?
 ok "cores: esce 0 con almeno un riuscito" '[ "${rc}" = 0 ]'
 ok "  ...fceumm riuscito, al commit del pin, con il sysroot" '[ "$(grep -c "^core=" "${CW}/cores/built.txt")" = 1 ] && grep -q "^core=fceumm commit=${SF} " "${CW}/cores/built.txt" && grep -q " sysroot=ci-33-893a42f " "${CW}/cores/built.txt" && ! ls "${CW}/cores/"*.so.gz >/dev/null 2>&1'
 ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gambatte: compilato da install_pkg/gambatte-9fe223d" "${CW}/cores/failed.txt" && ! grep -q "core=gambatte" "${CW}/cores/built.txt"'
 ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
+ok "  ...un'annotazione per fallito, col perche'" 'grep -q "^::warning title=Core mgba::== mgba: mgba fallito (uscita 2)" "${T}/cores.out" && grep -q "^::warning title=Core gambatte::== gambatte: compilato da install_pkg/gambatte-9fe223d" "${T}/cores.out" && ! grep -q "title=Core fceumm::" "${T}/cores.out"'
 
 echo "cores-matrix e merge-cores (job cores in parallelo)"
 M="$(bash "${REPO}/tools/ci-build.sh" cores-matrix "fceumm mame a b c d e f g h i j k l flycast m")"
