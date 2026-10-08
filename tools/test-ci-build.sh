@@ -549,6 +549,12 @@ printf 'y' | gzip -n > "${MP}/cores-9-02/fceumm_libretro-bbbbbbb.so.gz"
 bash "${REPO}/tools/ci-build.sh" merge-cores "${MP}" "${T}/merged" "mame fceumm mgba snes9x" > /dev/null; rc=$?
 ok "merge-cores: riusciti e falliti dei job in una cartella, con i .so.gz" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged/built.txt")" = 2 ] && [ -f "${T}/merged/mame_libretro-aaaaaaa.so.gz" ] && [ -f "${T}/merged/fceumm_libretro-bbbbbbb.so.gz" ] && grep -q "^== mgba: fallito" "${T}/merged/failed.txt"'
 ok "  ...il core del job morto senza risultato va fra i falliti" 'grep -q "^== snes9x: nessun risultato" "${T}/merged/failed.txt" && ! grep -q "^== mame:" "${T}/merged/failed.txt"'
+# un artifact solo: download-artifact lo scompatta direttamente nella cartella
+M1="${T}/parts1"; rm -rf "${M1}"; mkdir -p "${M1}"
+printf 'core=fceumm so=fceumm commit=b file=fceumm_libretro-bbbbbbb.so.gz\ncore=mgba so=mgba commit=c file=mgba_libretro-ccccccc.so.gz\n' > "${M1}/built.txt"; : > "${M1}/failed.txt"
+printf 'y' | gzip -n > "${M1}/fceumm_libretro-bbbbbbb.so.gz"; printf 'z' | gzip -n > "${M1}/mgba_libretro-ccccccc.so.gz"
+bash "${REPO}/tools/ci-build.sh" merge-cores "${M1}" "${T}/merged1" "fceumm mgba" > /dev/null; rc=$?
+ok "merge-cores con un artifact solo (file direttamente nella cartella)" '[ "${rc}" = 0 ] && [ "$(grep -c "^core=" "${T}/merged1/built.txt")" = 2 ] && [ ! -s "${T}/merged1/failed.txt" ] && [ -f "${T}/merged1/mgba_libretro-ccccccc.so.gz" ]'
 
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

@@ -896,16 +896,20 @@ cmd_cores_matrix() {
 	printf '{"include":[%s]}\n' "${items}"
 }
 
-# Job cores, publish: i risultati dei job paralleli (download-artifact ne
-# mette uno per cartella sotto <parts>) in <d>: built.txt, failed.txt, i
-# .so.gz. Un core senza risultato (il job del suo gruppo si e' fermato prima:
-# tempo, disco, un errore della CI) va fra i falliti: resta al commit vecchio
-# e finisce nell'issue come gli altri.
+# Job cores, publish: i risultati dei job paralleli in <d>: built.txt,
+# failed.txt, i .so.gz. download-artifact con "pattern" mette ogni artifact
+# in una cartella col suo nome sotto <parts>, ma se ne trova uno solo lo
+# scompatta direttamente in <parts> (artifacts.length === 1, nel suo
+# sorgente): si leggono tutte e due. Con un gruppo solo la prima corsa vera
+# non aveva trovato niente, e i tre core erano finiti nell'issue come senza
+# risultato. Un core senza risultato (il job del suo gruppo si e' fermato
+# prima: tempo, disco, un errore della CI) va fra i falliti: resta al commit
+# vecchio e finisce nell'issue come gli altri.
 cmd_merge_cores() {
 	local parts="${1:?cartella dei risultati}" d="${2:?cartella di uscita}" cores="${3:-}" p c
 	rm -rf "${d}"; mkdir -p "${d}"
 	: > "${d}/built.txt"; : > "${d}/failed.txt"
-	for p in "${parts}"/*/; do
+	for p in "${parts}/" "${parts}"/*/; do
 		[ -d "${p}" ] || continue
 		if [ -f "${p}built.txt" ]; then cat "${p}built.txt" >> "${d}/built.txt"; fi
 		if [ -f "${p}failed.txt" ]; then cat "${p}failed.txt" >> "${d}/failed.txt"; fi

@@ -6252,3 +6252,12 @@ dell'immagine. Il dry run non ha pubblicato niente.
 Prove: test-ci-build 98 (+4: il core da un commit vecchio resta fuori, i
 falliti senza log vengono scritti), verify-claims 245 (+2), ci-check,
 dry-run. Poi di nuovo cores.yml in dry run.
+
+La prima corsa vera (run 37714966048, gli stessi tre core): compilati, ma
+la release "cores" non e' nata e si e' aperto un issue con tutti e tre "senza
+risultato". download-artifact con `pattern`, quando l'artifact trovato e' uno
+solo, lo scompatta direttamente nella cartella e non in una sottocartella col
+suo nome (`artifacts.length === 1` nel suo sorgente; il README lo dice solo
+per i download per nome), e `merge-cores` leggeva solo le sottocartelle.
+Ora legge anche la cartella stessa (prova in test-ci-build, 99). L'issue lo
+chiude la corsa successiva, quando non resta nessun fallito.
