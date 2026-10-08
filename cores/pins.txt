@@ -23,10 +23,10 @@ vice                 https://github.com/libretro/vice-libretro                e9
 dolphin              https://github.com/libretro/dolphin                      990bffac731a86ecb075d5d786d4b348310beea6 -
 ppsspp               https://github.com/hrydgard/ppsspp                       e49c0bd8836a8a8f678565357773386f1174d3f5 -
 fbneo                https://github.com/libretro/fbneo                        af33e4d8f11336d6902bff0874309066a405cadf -
-gambatte             https://github.com/libretro/gambatte-libretro            9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2 -
+gambatte             https://github.com/libretro/gambatte-libretro            d9d6cd06382d1ced30de34d56d3609452323dab1 -
 sameboy              https://github.com/LIJI32/SameBoy                        8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
 tgbdual              https://github.com/libretro/tgbdual-libretro             933707c0ba8f12360f6d79712f735a917713709a -
-fceumm               https://github.com/libretro/libretro-fceumm              5cd4a43e16a7f3cd35628d481c347a0a98cfdfa2 -
+fceumm               https://github.com/libretro/libretro-fceumm              7a542dab1e87679921962a9f056186eca425c0c2 -
 nestopia             https://github.com/libretro/nestopia                     473d3072be67fa2542ca833c274ef6682cf0f0bc -
 genesis_plus_gx      https://github.com/ekeeke/Genesis-Plus-GX                751d6ddc06469389ea8f65c42a01839141d69734 -
 picodrive            https://github.com/irixxxx/picodrive                     2779ac9bf182649d5b21465f86b190cf0a7b68bd -
@@ -34,7 +34,7 @@ gearsystem           https://github.com/drhelius/Gearsystem                   51
 snes9x2010           https://github.com/libretro/snes9x2010                   f9ae8fd28b13070a945a829ccf41cbf90a21d0f7 -
 snes9x               https://github.com/libretro/snes9x                       5a40cd5514e63e691e39141d64267798357a1424 -
 snes9x2005           https://github.com/libretro/snes9x2005                   74d871db9b4dba6dbe6c5ecebc88cbf255be5349 -
-mgba                 https://github.com/mgba-emu/mgba                         26b7884bc25a5933960f3cdcd98bac1ae14d42e2 -
+mgba                 https://github.com/mgba-emu/mgba                         3a5e34be33dc7f8f707e5bc9db69e8a430046f21 -
 gpsp                 https://github.com/libretro/gpsp                         6250979f01db3f9ee5ebca179316e1319f017b48 -
 beetle_pce_fast      https://github.com/libretro/beetle-pce-fast-libretro     52675734da114a19b3705f03906b1455f3d76644 -
 beetle_pce           https://github.com/libretro/beetle-pce-libretro          9a301c0773c53702a882bbaa42ee9cbc6d523787 -
