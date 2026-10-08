@@ -622,6 +622,7 @@ ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gamb
 ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
 ok "  ...e il perche' dal suo log (core_why): la patch gia' applicata, il comando" 'grep -q "^Reversed (or previously applied) patch detected" "${CW}/cores/failed.txt" && grep -qF "comando: cat \${i} | patch" "${CW}/cores/failed.txt"'
 ok "  ...un'annotazione per fallito, col perche'" 'grep -q "^::warning title=Core mgba::== mgba: mgba fallito (uscita 2)" "${T}/cores.out" && grep -q "^::warning title=Core gambatte::== gambatte: compilato da install_pkg/gambatte-9fe223d" "${T}/cores.out" && ! grep -q "title=Core fceumm::" "${T}/cores.out"'
+ok "  ...nella notice i riusciti col commit provato (core@sha)" 'grep -q "^::notice title=Core::riusciti: fceumm@1111111 ; falliti: " "${T}/cores.out"'
 
 echo "build-lakka-rf35h.sh --build-packages: il log del fallito e' solo suo"
 # scripts/clean e scripts/build finti: "lungo" compila con 600 righe che

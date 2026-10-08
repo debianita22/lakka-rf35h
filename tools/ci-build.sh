@@ -1087,9 +1087,11 @@ cmd_cores() {
 	done
 	echo; echo "riusciti:"; cut -d' ' -f1,2 "${out}/built.txt" | sed 's/^/  /' || true
 	echo "falliti:"; grep '^==' "${out}/failed.txt" | sed 's/^/  /' || true
-	summ "- core riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' ')"
+	# riusciti come <core>@<commit>: con dry_run (o su un altro ramo) il commit
+	# provato si legge dall'annotazione, senza scaricare built.txt
+	summ "- core riusciti: $(awk '{ printf "%s@%s ", substr($1, 6), substr($2, 8, 7) }' "${out}/built.txt")"
 	[ ! -s "${out}/failed.txt" ] || summ "- core falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
-	note notice "Core" "riusciti: $(cut -d' ' -f1 "${out}/built.txt" | sed 's/core=//' | tr '\n' ' '); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
+	note notice "Core" "riusciti: $(awk '{ printf "%s@%s ", substr($1, 6), substr($2, 8, 7) }' "${out}/built.txt"); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
 	# il perche' di ogni fallito in un'annotazione: si legge dall'API, il
 	# failed.txt solo scaricando l'artifact (la prima corsa completa ne aveva
 	# sedici, e da fuori se ne vedevano solo i nomi)
