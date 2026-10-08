@@ -14,14 +14,14 @@
 # Ogni release esce con i core a questi commit: niente aggiornamenti dei core
 # dalla console (8/10/2026), arrivano con l'aggiornamento di sistema.
 # Il punto di partenza (7/10/2026): i commit del Lakka pinnato (LAKKA_COMMIT).
-mame                 https://github.com/libretro/mame                         9069f39340f2d2b1795df8e71bb1d3d0fbc76598 -
+mame                 https://github.com/libretro/mame                         e858fcb097c59836f68a246648c4e0c070a8f083 -
 scummvm              https://github.com/libretro/scummvm                      fcbce3ae815269dacdc309092bc92ccc6d3e13bb -
 mame2015             https://github.com/libretro/mame2015-libretro            316cd06349f2b34b4719f04f7c0d07569a74c764 -
 mame2010             https://github.com/libretro/mame2010-libretro            dff8aadd1c3f38215af3955746d6e19abe0ddcea -
 same_cdi             https://github.com/libretro/same_cdi                     7ee1d8e9cb4307b7cd44ee1dd757e9b3f48f41d5 -
 vice                 https://github.com/libretro/vice-libretro                f63b56688f3133a2bb17499db9eebb7ab81df5f5 -
 dolphin              https://github.com/libretro/dolphin                      114977f115757b1d5506da93c825188233813ec1 -
-ppsspp               https://github.com/hrydgard/ppsspp                       13c1773bc24e97a2ca7bd4362b12b8859a6f71a3 -
+ppsspp               https://github.com/hrydgard/ppsspp                       d74f16ef51a9ae100dfffacb4126264f2d524bdd -
 fbneo                https://github.com/libretro/fbneo                        af33e4d8f11336d6902bff0874309066a405cadf -
 gambatte             https://github.com/libretro/gambatte-libretro            d9d6cd06382d1ced30de34d56d3609452323dab1 -
 sameboy              https://github.com/LIJI32/SameBoy                        8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
@@ -157,7 +157,7 @@ skyemu               https://github.com/skylersaleh/SkyEmu                    c3
 snes9x2002           https://github.com/libretro/snes9x2002                   6ffbf9ef4f0063e1f1b78a40d10c50fc52f2524c -
 snes9x2005_plus      https://github.com/libretro/snes9x2005                   a79dfe9047e7fec58808aefe48ad2bf499c7af11 -
 superbroswar         https://github.com/libretro/superbroswar-libretro        ae824f626ad80c8b7ee848698b3d1dcebe9a5ccb -
-swanstation          https://github.com/libretro/swanstation                  1db8c9b6866d9d22ee79447762e943a1635d2133 main
+swanstation          https://github.com/libretro/swanstation                  745de8288f8a33170be6f5f69257cf8b66b06f94 main
 tamalibretro         https://github.com/celerizer/tamalibretro                ea8dd612eaab375a04f976149dc693cb5d208b27 -
 theodore             https://github.com/Zlika/theodore                        4d469ce0f71ee046ceb78cdbf8e9f18364aaa918 -
 thepowdertoy         https://github.com/libretro/ThePowderToy                 cb3cd4c2e5beddb98b34e6b800fa24e8f96322d9 -
