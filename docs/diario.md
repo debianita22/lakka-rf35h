@@ -6261,3 +6261,12 @@ suo nome (`artifacts.length === 1` nel suo sorgente; il README lo dice solo
 per i download per nome), e `merge-cores` leggeva solo le sottocartelle.
 Ora legge anche la cartella stessa (prova in test-ci-build, 99). L'issue lo
 chiude la corsa successiva, quando non resta nessun fallito.
+
+La seconda corsa vera (run 37716143758): risultati riuniti, poi "Release
+cores" fallita. `gh api .../releases/tags/cores --jq .id 2>/dev/null || true`
+con la release che non c'e': il gh vero scrive il corpo JSON dell'errore su
+stdout anche con `--jq` (lo applica solo alle risposte buone), quindi `id`
+era `{"message":"Not Found",...}`, non vuoto; la release non si creava e
+l'upload falliva. Il gh finto delle prove non scriveva niente su stdout:
+ora fa come quello vero, e il codice guarda l'uscita (404: si crea; altro
+errore: si ferma) e vuole un id numerico.

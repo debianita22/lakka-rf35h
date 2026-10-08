@@ -1008,7 +1008,17 @@ cmd_publish_cores() {
 	local d="${1:?cartella con built.txt}" tag="cores" id assets name so keep k old="${RUNNER_TEMP:-/tmp}/index-old.txt"
 	: "${GITHUB_REPOSITORY:?}"
 	[ -s "${d}/built.txt" ] || die "manca ${d}/built.txt o e' vuoto"
-	id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id 2>/dev/null || true)"
+	# Con un errore gh api scrive il corpo JSON su stdout anche con --jq: un
+	# "|| true" qui lasciava in id '{"message":"Not Found",...}', la release
+	# non si creava e l'upload falliva (prima corsa vera, 8/10/2026). Conta
+	# l'uscita, e un errore che non e' un 404 ferma tutto.
+	if ! id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .id 2>&1)"; then
+		case "${id}" in
+			*"HTTP 404"*) id="" ;;
+			*) echo "${id}" >&2; die "la release ${tag} non si legge" ;;
+		esac
+	fi
+	case "${id}" in ''|[0-9]*) ;; *) die "id della release ${tag} non valido: ${id}" ;; esac
 	if [ -z "${id}" ]; then
 		echo "  release ${tag} assente: la creo"
 		gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" --prerelease \

@@ -311,7 +311,9 @@ case "$*" in
 	"api repos/"*"/releases/tags/cores "*)
 		if [ -n "${FAKE_CORES_ID:-}" ]; then echo "${FAKE_CORES_ID}"
 		elif grep -q "^gh release create cores " "${CALLS}"; then echo 78   # appena creata
-		else echo "gh: release not found (HTTP 404)" >&2; exit 1; fi ;;
+		# come il gh vero: con un errore il corpo JSON va comunque su stdout
+		# (anche con --jq), il messaggio su stderr, uscita 1
+		else echo '{"message":"Not Found","status":"404"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;
 	"release download cores "*) [ -n "${FAKE_CORES_INDEX:-}" ] || exit 1; a="$*"; o="${a##*--output }"; printf '%b\n' "${FAKE_CORES_INDEX}" > "${o}" ;;
 	"api --paginate repos/"*"/releases/"*"/assets?per_page=100 "*) [ -z "${FAKE_CORES_ASSETS:-}" ] || printf '%b\n' "${FAKE_CORES_ASSETS}" ;;
 	*) echo "gh finto: $*" >&2; exit 2 ;;
