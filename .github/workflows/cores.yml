@@ -126,7 +126,9 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 8
+      # i pesanti partono per primi e durano ore: con 8 posti i gruppi
+      # leggeri aspettavano dietro di loro
+      max-parallel: 16
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
     permissions:
       contents: read
@@ -212,7 +214,9 @@ jobs:
   pins:
     name: Pin dei core che compilano
     needs: [setup, build]
-    if: always() && needs.setup.result == 'success' && needs.setup.outputs.cores != '' && !inputs.dry_run
+    # !cancelled(), non always(): un run annullato non deve dare tutti i core
+    # per falliti (e aprire l'issue)
+    if: "!cancelled() && needs.setup.result == 'success' && needs.setup.outputs.cores != '' && !inputs.dry_run"
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
