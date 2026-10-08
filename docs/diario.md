@@ -6323,6 +6323,13 @@ Cosa cambia:
   (`RF35H_FROM_RUN` per dire quale run pubblicare con publish_from).
 - publish_from accetta un tag che c'e' gia', se e' sul commit della build.
 
-Per la v1.3.1: tag `v1.3.1` su b3c49f3 creato con git push da qui (la build
-che il push del tag fa partire, annullata subito), poi publish_from
-37698948705. Prove: test-ci-build 117.
+Prove: test-ci-build 117.
+
+Per la v1.3.1 serve quindi il tag `v1.3.1` su b3c49f3 creato da qualcuno con
+il permesso sui workflow. Da questa sessione no: il push del tag torna 403
+(la stessa politica che le vieta di creare release). Lo fa l'utente:
+`git push origin b3c49f323989c6d3d38343d7cc3538a8d2aa6f9f:refs/tags/v1.3.1`.
+Il push del tag fa partire da solo la build di release di b3c49f3, che con
+il tag gia' presente pubblica (il suo cmd_publish non deve creare niente);
+oppure quella build si ferma e publish_from 37698948705 pubblica in pochi
+minuti i file gia' fatti (14 giorni, fino al 22/10).
