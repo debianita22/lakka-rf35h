@@ -873,10 +873,24 @@ if [ -n "${BUILD_PACKAGES}" ]; then
 		[ -f "${WORKDIR}/packages/lakka/libretro_cores/${p}/package.mk" ] \
 			|| [ -n "$(find "${WORKDIR}/packages" "${WORKDIR}/projects/Rockchip" -path "*/${p}/package.mk" -print -quit 2>/dev/null)" ] \
 			|| { echo "${p} assente: nessun package.mk" >> "${REPORT}"; PK_FAILED="${PK_FAILED} ${p}"; continue; }
-		say "scripts/build ${p}"
+		# Prima, via ogni versione del pacchetto (scripts/clean: build,
+		# install_pkg, install_init, stamp). Sul sysroot di una release c'e'
+		# install_pkg/<pacchetto>-<commit vecchio>, e con AUTOREMOVE la sua
+		# cartella di build non c'e' piu': scripts/unpack non lo toglie da se',
+		# e dopo la build le versioni installate sarebbero due (il .so preso
+		# qui sotto: quello della cartella che viene dopo in ordine alfabetico,
+		# cioe' a caso il vecchio o il nuovo). E cosi' "rebuild" ricompila
+		# davvero, anche con lo stesso commit.
+		say "scripts/clean e scripts/build ${p}"
 		set +e
-		env "${BENV[@]}" ./scripts/build "${p}" 2>&1 | tee -a "${LOG}"
-		RC=${PIPESTATUS[0]}
+		env "${BENV[@]}" ./scripts/clean "${p}" >> "${LOG}" 2>&1
+		RC=$?
+		if [ "${RC}" -eq 0 ]; then
+			env "${BENV[@]}" ./scripts/build "${p}" 2>&1 | tee -a "${LOG}"
+			RC=${PIPESTATUS[0]}
+		else
+			echo "scripts/clean ${p}: uscita ${RC}" | tee -a "${LOG}"
+		fi
 		set -e
 		if [ "${RC}" -ne 0 ]; then
 			TLOG="$(sed -n 's|^ *\(/.*/\.threads/logs/[0-9]*\.log\) *$|\1|p' "${LOG}" | tail -1)"
@@ -888,11 +902,15 @@ if [ -n "${BUILD_PACKAGES}" ]; then
 			continue
 		fi
 		# i .so che il pacchetto ha installato (install_pkg/<pkg>-<versione>),
-		# col nome del pacchetto letto da .libreelec-package
-		n=0
+		# col nome del pacchetto letto da .libreelec-package. Dopo la pulizia
+		# la cartella deve essere una sola: due vorrebbero dire due versioni,
+		# e il .so non si saprebbe di quale. Il resoconto dice da quale
+		# cartella viene (ci-build.sh cores controlla che sia il commit pinnato).
+		n=0; dirs=""
 		for i in "${WORKDIR}"/build.*/install_pkg/*/; do
 			[ -f "${i}.libreelec-package" ] || continue
 			[ "$(sed -n 's/^INFO_PKG_NAME="\(.*\)"$/\1/p' "${i}.libreelec-package")" = "${p}" ] || continue
+			dirs="${dirs} $(basename "${i}")"
 			for so in "${i}usr/lib/libretro/"*_libretro.so; do
 				[ -f "${so}" ] || continue
 				mkdir -p "${WORKDIR}/target/cores/${p}"
@@ -900,11 +918,16 @@ if [ -n "${BUILD_PACKAGES}" ]; then
 				n=$((n + 1))
 			done
 		done
-		if [ "${n}" -eq 0 ]; then
+		dirs="${dirs# }"
+		if [ "$(echo "${dirs}" | wc -w)" -gt 1 ]; then
+			echo "${p} installato in piu' versioni (${dirs}): non si sa quale .so prendere" >> "${REPORT}"
+			rm -rf "${WORKDIR}/target/cores/${p}"
+			PK_FAILED="${PK_FAILED} ${p}"
+		elif [ "${n}" -eq 0 ]; then
 			echo "${p} compilato ma nessun *_libretro.so installato" >> "${REPORT}"
 			PK_FAILED="${PK_FAILED} ${p}"
 		else
-			echo "${p} ok: $(ls "${WORKDIR}/target/cores/${p}" | tr '\n' ' ')" >> "${REPORT}"
+			echo "${p} ok: $(ls "${WORKDIR}/target/cores/${p}" | tr '\n' ' ')(install_pkg/${dirs})" >> "${REPORT}"
 		fi
 	done
 	say "Resoconto"

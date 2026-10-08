@@ -6222,3 +6222,33 @@ fuori. Le console la vedono in System Update.
 Il ramo dei core su `main` (fast-forward su b3c49f3: rispetto all'893a42f
 provato cambiano solo i limiti di tempo della CI); la v1.3.1 in corso resta
 su b3c49f3 e non ha l'updater, che arriva con la release dopo.
+
+### cores.yml, la prima prova: un .so che poteva essere quello vecchio (8/10/2026)
+
+Prima corsa di cores.yml su `main` (run 37712551909, dry run, fceumm gambatte
+mgba): setup con la matrice (un gruppo), sysroot della #33 scaricato e
+scompattato, i tre core "riusciti" in due minuti. Troppo pochi, e
+rileggendo `--build-packages` il perche' c'e': il .so si prendeva da ogni
+`install_pkg/*/` del pacchetto, e sul sysroot di una release c'e' gia'
+`install_pkg/<core>-<commit vecchio>`. Con AUTOREMOVE la cartella di build di
+quella versione non c'e' piu', quindi scripts/unpack (che pulisce le versioni
+vecchie solo partendo da `build/<core>-*`) non la toglie; dopo la build le
+versioni installate sono due, stesso nome del .so, e vince la cartella che
+viene dopo in ordine alfabetico: a caso la vecchia o la nuova. L'indice
+avrebbe detto il commit nuovo per un core che poteva essere quello
+dell'immagine. Il dry run non ha pubblicato niente.
+
+- `--build-packages`: `scripts/clean <core>` prima di `scripts/build` (via
+  build, install_pkg, install_init e stamp di ogni versione), quindi anche
+  "rebuild" ricompila davvero; se dopo le cartelle installate del pacchetto
+  sono piu' di una, il core e' fallito; il resoconto dice da quale cartella
+  viene il .so.
+- `ci-build.sh cores`: un core entra nell'indice solo se la cartella e'
+  `<core>-<commit del pin>`, altrimenti va fra i falliti con il motivo.
+- E due `ls | head` sotto `pipefail` che, senza file, fermavano `cores` a
+  meta' (un core fallito senza log, o nessun resoconto) invece di scrivere
+  il fallito: `|| true`.
+
+Prove: test-ci-build 98 (+4: il core da un commit vecchio resta fuori, i
+falliti senza log vengono scritti), verify-claims 245 (+2), ci-check,
+dry-run. Poi di nuovo cores.yml in dry run.

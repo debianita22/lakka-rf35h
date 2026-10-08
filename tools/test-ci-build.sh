@@ -503,6 +503,38 @@ ok "  ...commit e push sul ramo, changed=true" 'called "commit -q -m cores: 1 co
 fake pins-merge "${CD}" "${T}/pins-new.txt"; rc=$?
 ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && ! called "commit" && [ "$(outv changed)" = false ]'
 
+echo "cores (job cores): il .so deve venire dal commit del pin"
+CW="${T}/cw"; rm -rf "${CW}"; mkdir -p "${CW}/lakka-rf35h" "${CW}/lakka-rf35h-build"
+git -C "${CW}/lakka-rf35h-build" init -q && git -C "${CW}/lakka-rf35h-build" -c user.name=t -c user.email=t@t commit -q --allow-empty -m lakka
+SF=1111111111111111111111111111111111111111; SG=2222222222222222222222222222222222222222; SM=3333333333333333333333333333333333333333
+cat > "${REPO}/cores/pins.txt" <<EOF
+fceumm    https://github.com/libretro/libretro-fceumm    ${SF} -
+gambatte  https://github.com/libretro/gambatte-libretro  ${SG} -
+mgba      https://github.com/mgba-emu/mgba               ${SM} -
+EOF
+# build-in-docker finto: il resoconto di --build-packages e i .so in target/cores.
+# gambatte "compilato" dalla cartella di un commit vecchio (il caso del sysroot)
+cat > "${CW}/lakka-rf35h/build-in-docker.sh" <<EOF
+#!/bin/bash
+t="${CW}/lakka-rf35h-build"
+mkdir -p "\${t}/target/cores/fceumm" "\${t}/target/cores/gambatte"
+cp "${T}/so.fceumm" "\${t}/target/cores/fceumm/fceumm_libretro.so"
+cp "${T}/so.gambatte" "\${t}/target/cores/gambatte/gambatte_libretro.so"
+{
+	echo "fceumm ok: fceumm_libretro.so (install_pkg/fceumm-${SF})"
+	echo "gambatte ok: gambatte_libretro.so (install_pkg/gambatte-9fe223d9c4b615c55840170c6e85e6e9fa4bd1d2)"
+	echo "mgba fallito (uscita 2)    log: x"
+} > "\${t}/build-rf35h-20261008-010000-pacchetti.txt"
+exit 1
+EOF
+chmod +x "${CW}/lakka-rf35h/build-in-docker.sh"
+mkelf "${T}/so.fceumm" 2000; mkelf "${T}/so.gambatte" 1500
+( export W="${CW}" RF35H_CONTAINER=x RF35H_SYSROOT_VERSION=ci-33-893a42f; bash "${CB}" cores "fceumm gambatte mgba" > "${T}/cores.out" 2>&1 ); rc=$?
+ok "cores: esce 0 con almeno un riuscito" '[ "${rc}" = 0 ]'
+ok "  ...fceumm nell'indice, al commit del pin, con il sysroot" '[ "$(grep -c "^core=" "${CW}/cores/built.txt")" = 1 ] && grep -q "^core=fceumm so=fceumm commit=${SF} " "${CW}/cores/built.txt" && grep -q " sysroot=ci-33-893a42f " "${CW}/cores/built.txt" && [ -f "${CW}/cores/fceumm_libretro-1111111.so.gz" ]'
+ok "  ...gambatte da un commit vecchio: fuori, fra i falliti" 'grep -q "^== gambatte: compilato da install_pkg/gambatte-9fe223d" "${CW}/cores/failed.txt" && ! grep -q "core=gambatte" "${CW}/cores/built.txt" && ! ls "${CW}/cores/"gambatte* >/dev/null 2>&1'
+ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba fallito" "${CW}/cores/failed.txt"'
+
 echo "cores-matrix e merge-cores (job cores in parallelo)"
 M="$(bash "${REPO}/tools/ci-build.sh" cores-matrix "fceumm mame a b c d e f g h i j k l flycast m")"
 ok "cores-matrix: i pesanti da soli e per primi, gli altri a gruppi di 12" '[ "${M}" = "{\"include\":[{\"g\":\"01\",\"cores\":\"mame\"},{\"g\":\"02\",\"cores\":\"flycast\"},{\"g\":\"03\",\"cores\":\"fceumm a b c d e f g h i j k\"},{\"g\":\"04\",\"cores\":\"l m\"}]}" ]'

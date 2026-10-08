@@ -929,7 +929,7 @@ pin_of() { awk -v c="$1" '$1 == c && $2 ~ /^https?:/ { print $2, $3 }' "${O}/cor
 # fallito (il job decide: pubblica i riusciti, apre un issue per gli altri),
 # diverso da 0 se nessuno e' riuscito.
 cmd_cores() {
-	local pkgs="${1:?core da compilare}" out="${W}/cores" rc=0 rep p so sha site size ck lakka c7 f
+	local pkgs="${1:?core da compilare}" out="${W}/cores" rc=0 rep p so sha site size ck lakka c7 f d
 	: "${W:?}" "${RF35H_CONTAINER:?}" "${RF35H_SYSROOT_VERSION:?}"
 	cd "${W}"
 	rm -rf "${out}"; mkdir -p "${out}"
@@ -941,12 +941,15 @@ cmd_cores() {
 	rc=${PIPESTATUS[0]}
 	set -e
 	docker rm -f "${RF35H_CONTAINER}" >/dev/null 2>&1 || true
-	rep="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-pacchetti.txt 2>/dev/null | head -1)"
+	# "|| true": con pipefail un ls senza file fermerebbe lo script qui, prima
+	# del messaggio
+	rep="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-pacchetti.txt 2>/dev/null | head -1 || true)"
 	[ -n "${rep}" ] || { note error "Core" "nessun resoconto: la build e' fallita prima dei pacchetti (uscita ${rc})"; die "nessun resoconto dei pacchetti"; }
 	lakka="$(git -C "${W}/${TREE_NAME}" rev-parse HEAD)"
 	for p in ${pkgs}; do
 		if ! grep -q "^${p} ok:" "${rep}"; then
-			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1)"
+			# un core senza log (assente, senza .so, in piu' versioni) non ne ha
+			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1 || true)"
 			{
 				echo "== ${p}: $(grep "^${p} " "${rep}" || echo 'non compilato')"
 				[ -n "${f}" ] && grep -aE 'error|Error|FAILED|fatal:|Cannot get|undefined reference' "${f}" | grep -av 'Werror\|error\.o\|_error\.' | tail -8 | cut -c1-180
@@ -956,6 +959,15 @@ cmd_cores() {
 		read -r site sha <<< "$(pin_of "${p}")"
 		[ -n "${sha}" ] || { echo "== ${p}: non in cores/pins.txt" >> "${out}/failed.txt"; continue; }
 		c7="${sha:0:7}"
+		# il .so deve venire dalla build del commit pinnato: install_pkg si
+		# chiama <pacchetto>-<PKG_VERSION>, e PKG_VERSION e' il commit del pin
+		# (apply.sh). Altrimenti l'indice direbbe un commit e il core sarebbe
+		# un altro.
+		d="$(sed -n "s/^${p} ok: .*(install_pkg\/\(.*\))\$/\1/p" "${rep}")"
+		if [ "${d}" != "${p}-${sha}" ]; then
+			echo "== ${p}: compilato da install_pkg/${d:-?}, non dal commit del pin ${c7}" >> "${out}/failed.txt"
+			continue
+		fi
 		for so in "${W}/${TREE_NAME}/target/cores/${p}/"*_libretro.so; do
 			[ -f "${so}" ] || continue
 			elf_ok "${so}" || { echo "== ${p}: $(basename "${so}") non e' un ELF aarch64 intero" >> "${out}/failed.txt"; continue 2; }

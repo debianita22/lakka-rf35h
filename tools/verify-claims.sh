@@ -387,6 +387,10 @@ chk "core: ogni core di CORES_DEFAULT ha un pin"  "( for c in \$(sed -n 's/^CORE
 chk "core: pin applicati nell'albero"            "( for c in \$(sed -n 's/^CORES_DEFAULT=\"\(.*\)\"$/\1/p' '$O/build-lakka-rf35h.sh'); do sha=\$(awk -v c=\"\${c}\" '\$1 == c { print \$3 }' '$O/cores/pins.txt'); grep -q \"^PKG_VERSION=\\\"\${sha}\\\"\" \"${W}/packages/lakka/libretro_cores/\${c}/package.mk\" || exit 1; done )"
 chk "core: elenco nell'immagine (cores.txt)"     "grep -q '^lakka=[0-9a-f]\{40\}$' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt' && [ \$(grep -c ' https' '${RKP%/patches/linux}/packages/rf35h-utils/cores.txt') -ge 34 ] && grep -q 'cores.txt' '$P/package.mk'"
 chk "core: sysroot salvato a fine build"         "grep -q 'pack-sysroot' '$O/.github/workflows/build-stage.yml' && grep -q 'sysroot-' '$O/.github/workflows/cores.yml'"
+# --build-packages su un sysroot: le versioni vecchie via prima della build, e
+# un .so pubblicato solo se viene dal commit del pin (8/10/2026)
+chk "core: scripts/clean prima della build, una versione installata" "grep -q './scripts/clean \"\${p}\"' '$O/build-lakka-rf35h.sh' && grep -q \"installato in piu' versioni\" '$O/build-lakka-rf35h.sh'"
+chk "core: il .so pubblicato viene dal commit del pin" "grep -qF 'non dal commit del pin' '$O/tools/ci-build.sh'"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
