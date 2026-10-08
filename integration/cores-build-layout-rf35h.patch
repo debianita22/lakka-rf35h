@@ -65,19 +65,21 @@ diff -ruN a/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk b/packag
  }
 diff -ruN a/packages/lakka/libretro_cores/mgba_fork/package.mk b/packages/lakka/libretro_cores/mgba_fork/package.mk
 --- a/packages/lakka/libretro_cores/mgba_fork/package.mk	2026-10-08 21:47:37.486591052 +0200
-+++ b/packages/lakka/libretro_cores/mgba_fork/package.mk	2026-10-08 21:47:52.323881499 +0200
-@@ -3,21 +3,42 @@
++++ b/packages/lakka/libretro_cores/mgba_fork/package.mk	2026-10-08 23:22:17.883047381 +0200
+@@ -3,21 +3,46 @@
  PKG_LICENSE="MPLv2.0"
  PKG_SITE="https://github.com/libretro/mgba"
  PKG_URL="${PKG_SITE}.git"
 -PKG_DEPENDS_TARGET="toolchain"
-+PKG_DEPENDS_TARGET="toolchain libzip libpng zlib"
++PKG_DEPENDS_TARGET="toolchain libpng zlib"
  PKG_LONGDESC="mGBA Game Boy Advance Emulator"
 -PKG_TOOLCHAIN="make"
 +# rf35h: da settembre 2026 libretro/mgba non ha piu' Makefile.libretro: si
 +# costruisce con il CMake di mGBA (BUILD_LIBRETRO), come il core mgba di
 +# Lakka, che c'era anche nei commit di prima; il .so si installa col nome
-+# di sempre, mgba_fork_libretro.so
++# di sempre, mgba_fork_libretro.so. Lo zip col minizip che mGBA porta con
++# se' (dentro zlib), senza cercare libzip o minizip nel sistema: la prima
++# prova (run 37839564864) si e' fermata su "minizip/zip.h: No such file"
 +PKG_TOOLCHAIN="cmake"
  
 -PKG_MAKE_OPTS_TARGET="-C ../ -f Makefile.libretro"
@@ -89,6 +91,8 @@ diff -ruN a/packages/lakka/libretro_cores/mgba_fork/package.mk b/packages/lakka/
 +                       -DUSE_DISCORD_RPC=OFF \
 +                       -DUSE_EDITLINE=OFF \
 +                       -DUSE_EPOXY=OFF \
++                       -DUSE_LIBZIP=OFF \
++                       -DUSE_MINIZIP=OFF \
 +                       -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
  
  if [ "${OPENGL_SUPPORT}" = "yes" ]; then
