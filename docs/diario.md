@@ -6563,3 +6563,11 @@ solo easyrpg). Ora `ci-build.sh issue-merge`: l'elenco dell'issue aperta,
 meno i core provati in questa corsa, piu' i falliti di questa corsa; un core
 non provato resta com'era, e ogni riga dice il run in cui e' fallito
 ([run N]). Prove: test-ci-build 138 (4 nuove).
+
+mgba_fork: col CMake di mGBA la prima prova (run 37839564864) si e' fermata
+su "minizip/zip.h: No such file"; con USE_LIBZIP e USE_MINIZIP spenti mGBA
+usa il minizip che porta dentro la sua zlib, e compila (run 37846544248, pin
+7a12d6d in 65dab28). La stessa corsa ha aggiornato l'issue #5 invece di
+riscriverla: mgba_fork tolto, gli altri cinque lasciati coi motivi del run
+prima. Dei 22: 17 all'upstream; restano easyrpg (liblcf), hatari e vbam
+(CMake), dosbox (dosbox-core), same_cdi (senza GENie).
