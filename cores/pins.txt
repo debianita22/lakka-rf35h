@@ -7,10 +7,12 @@
 # package di Lakka resta, con flag e patch). Li aggiorna cores.yml, ogni
 # settimana, alla punta del ramo ("-": quello di default del repository), uno
 # per uno: solo se il core compila. I 37 core con patch Lakka restano
-# sull'upstream con quelle patch: se al commit nuovo non si applicano piu', il
-# core non compila (scripts/unpack si ferma) e resta al commit vecchio, con
-# l'issue. Con un fork https://github.com/debianita22/<core>, ramo rf35h
-# (l'upstream piu' le patch), apply.sh toglie le patch del package.
+# sull'upstream con quelle patch, applicate da cores/pre-patch.sh: una gia'
+# entrata upstream si salta, una che non si applica piu' prende la versione di
+# cores/patches/<core>/ (stesso nome; solo testo = superata). Altrimenti il
+# core non compila e resta al commit vecchio, con l'issue. Con un fork
+# https://github.com/debianita22/<core>, ramo rf35h (l'upstream piu' le
+# patch), apply.sh toglie le patch del package.
 # Ogni release esce con i core a questi commit: niente aggiornamenti dei core
 # dalla console (8/10/2026), arrivano con l'aggiornamento di sistema.
 # Il punto di partenza (7/10/2026): i commit del Lakka pinnato (LAKKA_COMMIT).

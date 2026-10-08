@@ -6460,3 +6460,52 @@ make senza la cartella, errore di gcc marcato, nessun errore riconoscibile,
 righe lunghe) e dentro `cores`; pins-merge con git vero (un origin nudo, un
 commit arrivato intanto, un push rifiutato una volta, sempre rifiutato) al
 posto delle prove col git finto. Con il codice di prima le nuove falliscono.
+
+## Le patch di Lakka dei core: le applica pre_patch (8/10/2026)
+
+I 22 core rimasti indietro, coi motivi veri (run 37823990221, core_why):
+
+- patch di Lakka gia' entrate upstream, tutte o in parte: same_cdi,
+  emux_sms, daphne, parallel_n64, mupen64plus_next;
+- patch di Lakka che non si applicano piu': mame2015, easyrpg, desmume,
+  flycast, puae, superbroswar, thepowdertoy, tyrquake;
+- l'upstream ha cambiato il modo di compilare: fbneo (un meson.build nella
+  radice, e LibreELEC compila in .aarch64-libreelec-linux-gnu: il
+  `make -C src/burner/libretro` non trova la cartella), hatari (Makefile.libretro
+  sparito, ora CMake con ENABLE_LIBRETRO), dosbox (rifatto su dosbox-core:
+  libretro/Makefile.libretro, con CMake e Ninja dentro), mgba_fork e vbam
+  (Makefile spostato), higan_sfc_balanced (il .so ora si chiama
+  nside_sfc_balanced_libretro.so) e tic80 (il .so non e' piu' in lib/);
+- altro: citra (glslang, CMake), beetle_psx (un sottomodulo senza URL in
+  .gitmodules upstream).
+
+Lakka devel e' fermo al 9 maggio, al nostro stesso commit (e2cf2e5): niente
+package.mk aggiornati da prendere li'.
+
+Al posto dei fork del task #52 (l'utente avrebbe dovuto crearli, e la CI
+avrebbe avuto bisogno di un token per il rebase): le patch di Lakka dei 37
+core pinnati che ne hanno le applica pre_patch (`cores/pre-patch.sh`, che
+apply.sh aggiunge al package.mk dopo averle spostate in patches-lakka/). Per
+ognuna: si applica, come prima; e' gia' tutta nel sorgente (si applica al
+contrario), si salta; c'e' la versione aggiornata in `cores/patches/<core>/`
+(stesso nome; solo testo = superata, col perche'), quella; file per file,
+ognuno si applica o e' gia' nel sorgente; altrimenti errore, con gli hunk
+falliti nel log. Al commit pinnato, dove si applicano tutte, il risultato e'
+lo stesso di scripts/unpack.
+
+Provato con gli script veri di LibreELEC (scripts/unpack da utente normale,
+sorgenti scaricati da GitHub) alla punta upstream: emux_sms (la 02 gia'
+upstream, saltata), mupen64plus_next (sei applicate, una gia' upstream),
+daphne (file per file: SDL_audiocvt.c gia' corretto, gli altri due
+applicati); al commit pinnato emux_sms come prima. Restano da aggiornare a
+mano, in cores/patches: easyrpg, desmume (la 002), puae, superbroswar,
+thepowdertoy, tyrquake, flycast, same_cdi (dalla seconda), mame2015,
+parallel_n64 (fix_nullf_signature: i file che tocca non ci sono piu').
+Flycast e citra qui non si scaricano interi: hanno sottomoduli su
+gitlab.freedesktop.org e codeberg.org, fuori dalla rete di questa sessione.
+
+Prove: test-core-patches 18 (le cinque regole, l'ordine, il rename con git
+apply, la patch di git format-patch con il suo "---", una riga tolta che
+comincia con "-- " dentro un hunk, i due modi di fallire, core_why sul
+risultato); verify-claims 245 (nessuna patch dei core pinnati resta a
+scripts/unpack).

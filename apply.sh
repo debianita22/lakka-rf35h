@@ -181,7 +181,7 @@ cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 # Lakka, ramo rf35h) le patch del package si tolgono: sono gia' nel sorgente,
 # e scripts/unpack le applicherebbe di nuovo senza fermarsi.
 echo "  core pinnati (cores/pins.txt)"
-npin=0
+npin=0; ncp=0
 while read -r c site sha _; do
 	case "$sha" in *[!0-9a-f]*|'') echo "apply: pins.txt: $c: commit '$sha' non e' uno sha" >&2; exit 1 ;; esac
 	[ "${#sha}" -eq 40 ] || { echo "apply: pins.txt: $c: commit $sha non e' di 40 caratteri (get_git vuole lo sha intero)" >&2; exit 1; }
@@ -196,17 +196,49 @@ while read -r c site sha _; do
 	fi
 	sed -i -e "s|^PKG_SITE=\".*\"|PKG_SITE=\"$site\"|" -e "s|^PKG_VERSION=\".*\"|PKG_VERSION=\"$sha\"|" "$pm"
 	grep -q "^PKG_VERSION=\"$sha\"" "$pm" && grep -q "^PKG_SITE=\"$site\"" "$pm" || { echo "apply: $c: pin non scritto" >&2; exit 1; }
+	pd="$L/packages/lakka/libretro_cores/$c"
 	case "$site" in
 		https://github.com/debianita22/*)
-			if [ -d "$L/packages/lakka/libretro_cores/$c/patches" ]; then
-				rm -rf "$L/packages/lakka/libretro_cores/$c/patches"
+			if [ -d "$pd/patches" ]; then
+				rm -rf "$pd/patches"
 				echo "    $c: fork ${site##*/}, patch di Lakka tolte (sono nel fork)"
+			fi ;;
+		*)
+			# Le patch di Lakka del core le applica pre_patch
+			# (cores/pre-patch.sh), non scripts/unpack: quando
+			# cores.yml porta il core a un commit nuovo, una patch gia'
+			# entrata upstream si salta, e una che non si applica piu' prende
+			# la versione aggiornata di cores/patches/<core>/ (stesso nome).
+			# Al commit dove si applicano tutte, il risultato e' lo stesso.
+			if compgen -G "$pd/patches/*.patch" > /dev/null; then
+				mkdir -p "$pd/patches-lakka"
+				mv "$pd"/patches/*.patch "$pd/patches-lakka/"
+				rmdir "$pd/patches" 2> /dev/null || { echo "apply: $c: patches/ di Lakka ha delle sottocartelle, che pre_patch non applicherebbe" >&2; exit 1; }
+				if [ -d "$O/cores/patches/$c" ]; then
+					for f in "$O/cores/patches/$c"/*.patch; do
+						[ -f "$pd/patches-lakka/${f##*/}" ] || { echo "apply: cores/patches/$c/${f##*/}: Lakka non ha una patch con questo nome" >&2; exit 1; }
+					done
+					mkdir -p "$pd/patches-rf35h"
+					cp "$O/cores/patches/$c"/*.patch "$pd/patches-rf35h/"
+				fi
+				if grep -qE '^ *pre_patch *\(\)' "$pd/package.mk"; then
+					echo "apply: $c: il package.mk di Lakka ha gia' un pre_patch" >&2; exit 1
+				fi
+				cat "$O/cores/pre-patch.sh" >> "$pd/package.mk"
+				ncp=$((ncp + 1))
 			fi ;;
 	esac
 	npin=$((npin + 1))
 done < <(grep -E '^[a-z0-9_]+ +https?://' "$O/cores/pins.txt")
 [ "$npin" -ge 1 ] || { echo "apply: cores/pins.txt senza core" >&2; exit 1; }
-echo "    $npin core pinnati"
+# una cartella di cores/patches per un core senza patch di Lakka (o non
+# pinnato) non verrebbe mai usata: meglio dirlo subito
+for d in "$O"/cores/patches/*/; do
+	[ -d "$d" ] || continue
+	c="$(basename "$d")"
+	[ -d "$L/packages/lakka/libretro_cores/$c/patches-rf35h" ] || { echo "apply: cores/patches/$c: il core non e' pinnato o non ha patch di Lakka" >&2; exit 1; }
+done
+echo "    $npin core pinnati, $ncp con le patch di Lakka applicate da pre_patch"
 cp -r "$O"/packages/wpa_supplicant "$RK/packages/"
 patch -p1 --fuzz=0 --no-backup-if-mismatch -d "$L" < "$O/integration/odroidgo2-utils-rf35h.patch"
 # lakka-update (da ssh) installerebbe l'immagine di Lakka per un RK3326

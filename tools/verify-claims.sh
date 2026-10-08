@@ -393,6 +393,22 @@ chk "core: sysroot salvato a fine build"         "grep -q 'pack-sysroot' '$O/.gi
 # un .so pubblicato solo se viene dal commit del pin (8/10/2026)
 chk "core: scripts/clean prima della build, una versione installata" "grep -q './scripts/clean \"\${p}\"' '$O/build-lakka-rf35h.sh' && grep -q \"installato in piu' versioni\" '$O/build-lakka-rf35h.sh'"
 chk "core: il pin cambia solo se il core compila a quel commit" "grep -qF 'non dal commit del pin' '$O/tools/ci-build.sh'"
+# Le patch di Lakka dei core pinnati (non fork) le applica pre_patch
+# (cores/pre-patch.sh): una gia' entrata upstream si salta, una che non si
+# applica piu' prende la versione di cores/patches/<core>/ (8/10/2026).
+# Nessuna resta a scripts/unpack, che le applicherebbe senza quelle regole.
+pp_ok() {
+	local c pd n=0
+	for c in $(awk '$2 ~ /^https?:/ && $2 !~ /\/debianita22\// { print $1 }' "$O/cores/pins.txt"); do
+		pd="$W/packages/lakka/libretro_cores/$c"
+		if compgen -G "$pd/patches/*.patch" > /dev/null; then return 1; fi
+		[ -d "$pd/patches-lakka" ] || continue
+		grep -q '^# --- rf35h: cores/pre-patch.sh' "$pd/package.mk" || return 1
+		n=$((n + 1))
+	done
+	[ "$n" -ge 1 ]
+}
+chk "core: le patch di Lakka dei core pinnati le applica pre_patch" "pp_ok"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir

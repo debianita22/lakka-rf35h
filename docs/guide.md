@@ -818,11 +818,20 @@ prints which cores have moved upstream; `cores.yml` (every Monday, or by hand
 before a release) test-builds them in parallel jobs (the heavy ones, like
 MAME, alone; the others in groups of 12) and moves the pin of each core that
 builds, so a core that stops building upstream stays at its last good commit
-while the others move on, and the next release ships the new ones. The 37 cores with Lakka patches keep them: when a patch no
-longer applies to a newer upstream commit, that core fails and stays where it
-was, listed in an issue with the error lines of its own build log, the build step
-that stopped and the command that failed. A `debianita22/<core>` fork (branch `rf35h`: upstream
-plus the patches), if a pin points to one, is built without Lakka's patches.
+while the others move on, and the next release ships the new ones.
+
+The 37 pinned cores with Lakka patches keep them, but `scripts/unpack` no
+longer applies them: `apply.sh` moves them to `patches-lakka/` and adds a
+`pre_patch` (`cores/pre-patch.sh`) that applies them one by one, in the same
+order. A patch that applies goes in as before. A patch already present in the
+source (merged upstream: it applies in reverse) is skipped. A patch that no
+longer applies takes the updated version with the same name from
+`cores/patches/<core>/`; a file there with text only and no hunk says the
+patch is obsolete at newer commits, and why. Anything else fails, and the core
+stays where it was, listed in an issue with the error lines of its own build
+log, the build step that stopped and the command that failed. A
+`debianita22/<core>` fork (branch `rf35h`: upstream plus the patches), if a
+pin points to one, is built without Lakka's patches.
 
 A release contains the `.img.gz`, the `.tar`, `update.txt` (version, file
 name, URL, SHA-256 and size of the `.tar`) and `SHA256SUMS`. Before
