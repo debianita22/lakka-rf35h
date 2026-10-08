@@ -830,6 +830,12 @@ Workflows in [`.github/workflows`](../.github/workflows):
   build restarts from its saved state (kept 3 days) and rebuilds only the
   changed packages. Test builds only: the image mixes packages from two
   commits.
+- **Publish without rebuilding**: if a release build finished but its
+  *Release* job keeps failing even when re-run (a re-run repeats the same
+  code), *Run workflow* with the same *version* and `publish_from` set to
+  that run's ID builds nothing: the *Release* job publishes that run's files
+  (kept 14 days) with the current scripts, and the release still points at
+  the commit that was built.
 
 All 162 cores of the default set are pinned in `cores/pins.txt` (package,
 repository, commit, branch): `apply.sh` writes them into the Lakka packages,

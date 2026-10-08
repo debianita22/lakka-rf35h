@@ -12,7 +12,8 @@ tarf="$(val tar)"
 img="$(cd "${D}" && ls -- *.img.gz | head -1)"
 lakka="$(sed -n 's/^LAKKA_COMMIT="\([0-9a-f]*\)".*/\1/p' "${O}/build-lakka-rf35h.sh")"
 repo="${GITHUB_REPOSITORY:-debianita22/lakka-rf35h}"
-sha="${GITHUB_SHA:-$(git -C "${O}" rev-parse HEAD 2>/dev/null || echo unknown)}"
+# il commit della build (con publish_from non e' quello di questo run)
+sha="${RF35H_BUILD_SHA:-${GITHUB_SHA:-$(git -C "${O}" rev-parse HEAD 2>/dev/null || echo unknown)}}"
 
 echo "Lakka for the XiFan RF35H, ${v}."
 # Le novita' di questa versione, scritte a mano (docs/release-notes/<versione>.md),

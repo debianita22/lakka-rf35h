@@ -6270,3 +6270,34 @@ era `{"message":"Not Found",...}`, non vuoto; la release non si creava e
 l'upload falliva. Il gh finto delle prove non scriveva niente su stdout:
 ora fa come quello vero, e il codice guarda l'uscita (404: si crea; altro
 errore: si ferma) e vuole un id numerico.
+
+### v1.3.1: build in una parte, poi "Pubblica" fallita due volte (8/10/2026)
+
+La v1.3.1 rilanciata (run 37698948705, b3c49f3) ha fatto tutto in una parte:
+190 minuti, ccache al 52% (la v1.3.0 aveva appena compilato quasi tutto),
+498 passi, 174 core, niente fuori. check-dist e le note passano; "Pubblica"
+fallisce in due secondi, e di nuovo rilanciando il job alle 02:31. Nessuna
+annotazione di errore (quindi non e' una delle `fail` di cmd_publish) e
+nessuna bozza creata: si ferma su `gh release create`, con `set -e`, e il
+messaggio di gh e' solo nel log, che dall'API non si legge (redirect su
+blob.core.windows.net, che il gh di questa sessione non segue; creare una
+release di prova a mano da qui non e' permesso). La v1.3.0, un'ora prima,
+con lo stesso codice, era passata.
+
+Due cose, perche' non si ripeta al buio e senza ricostruire:
+- `gh_step` in cmd_publish: create, upload, edit e la cancellazione delle
+  bozze, se falliscono, finiscono in un'annotazione con le ultime righe di
+  gh.
+- `publish_from` in build.yml: con una version, nessuna build; il job
+  Release scarica l'artifact `lakka-rf35h-<version>` di quel run (14 giorni)
+  e lo pubblica con gli script di adesso. Il commit della release (target
+  del tag e note) resta quello della build: `RF35H_BUILD_SHA`, dal setup. Il
+  setup controlla che il run sia una build di build.yml finita, con
+  l'artifact di quella versione (solo una build di release lo carica: le
+  prove si chiamano lakka-rf35h-ci-<n>-<commit>) e un commit sul ramo
+  principale. Un rilancio del job, invece, rifa' lo stesso codice di allora.
+
+Prove in test-ci-build (111): publish_from buono, non numerico, senza
+version, con resume_run, run non finito, non una build, senza artifact,
+inesistente, fuori da main; target sul commit della build; create fallito
+con il messaggio di gh.

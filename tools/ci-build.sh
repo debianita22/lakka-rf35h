@@ -723,13 +723,41 @@ newer() {
 # (GITHUB_OUTPUT: version, publish, prerelease, resume).
 cmd_version() {
 	: "${GITHUB_EVENT_NAME:?}" "${GITHUB_REF_NAME:?}" "${GITHUB_RUN_NUMBER:?}" "${GITHUB_REPOSITORY:?}" "${DEFAULT_BRANCH:?}"
-	local version publish=false prerelease=false tag rels
+	local version publish=false prerelease=false tag rels from="${IN_PUBLISH_FROM:-}" bsha info rpath rstatus art
+	bsha="${GITHUB_SHA:-$(git -C "${O}" rev-parse HEAD)}"
 	# una release si costruisce sempre da zero: la ripresa riusa pacchetti
 	# fatti da un altro commit
 	case "${IN_RESUME:-}" in
 		'') ;;
 		*[!0-9]*) fail "resume_run" "resume_run: un ID di run (numero)" ;;
 		*) [ -z "${IN_VERSION:-}" ] || fail "resume_run" "resume_run solo per le build di prova, senza version" ;;
+	esac
+	# publish_from: i file di una build di release gia' fatta (run <from>),
+	# pubblicati dal job Release di questo run, con gli script di questo
+	# commit. Per quando il job Release di quel run non puo' riuscire neanche
+	# rilanciato (un rilancio rifa' lo stesso codice). Il commit della release
+	# resta quello della build.
+	case "${from}" in
+		'') ;;
+		*[!0-9]*) fail "publish_from" "publish_from: un ID di run (numero)" ;;
+		*)
+			[ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ -n "${IN_VERSION:-}" ] \
+				|| fail "publish_from" "publish_from solo da Run workflow, con la version della build"
+			[ -z "${IN_RESUME:-}" ] || fail "publish_from" "publish_from e resume_run insieme no"
+			info="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${from}" --jq '[.path, .status, .head_sha] | @tsv' 2>&1)" \
+				|| fail "publish_from" "il run ${from} non si legge: ${info}"
+			IFS=$'\t' read -r rpath rstatus bsha <<< "${info}"
+			[ "${rpath}" = ".github/workflows/build.yml" ] || fail "publish_from" "il run ${from} non e' una build (${rpath})"
+			[ "${rstatus}" = completed ] || fail "publish_from" "il run ${from} non e' finito (${rstatus})"
+			case "${bsha}" in *[!0-9a-f]*|'') fail "publish_from" "commit del run ${from} illeggibile: ${bsha}" ;; esac
+			# l'artifact di una release di questa versione: lo carica solo una
+			# build con version (una prova si chiama lakka-rf35h-ci-<n>-<commit>,
+			# e la ripresa con resume_run e' solo per le prove)
+			art="$(RF35H_ART="lakka-rf35h-${IN_VERSION}" gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${from}/artifacts?per_page=100" \
+				--jq '.artifacts[] | select(.name == env.RF35H_ART and (.expired | not)) | .id' 2>&1)" \
+				|| fail "publish_from" "gli artifact del run ${from} non si leggono: ${art}"
+			[ -n "${art}" ] || fail "publish_from" "il run ${from} non ha i file della ${IN_VERSION} (artifact lakka-rf35h-${IN_VERSION}, 14 giorni): non era una release di questa versione, o non e' arrivato in fondo"
+			;;
 	esac
 	if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_TYPE:-}" = tag ]; then
 		version="${GITHUB_REF_NAME}"; publish=true
@@ -751,7 +779,7 @@ cmd_version() {
 			if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] && [ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]; then
 				fail "Versione" "da ${GITHUB_REF_NAME} solo pre-release: le console aggiornano all'ultima release"
 			fi
-			on_default_branch "${GITHUB_SHA:-HEAD}" \
+			on_default_branch "${bsha}" \
 				|| fail "Versione" "${version}: il commit non e' su ${DEFAULT_BRANCH}; da altri rami solo pre-release (v1.1.0-rc1, o la casella prerelease)"
 		fi
 		if [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ]; then
@@ -768,28 +796,48 @@ cmd_version() {
 		echo "publish=${publish}"
 		echo "prerelease=${prerelease}"
 		echo "resume=${IN_RESUME:-}"
+		echo "from=${from}"
+		echo "build_sha=${bsha}"
 	} >> "${GITHUB_OUTPUT:-/dev/null}"
 	{
 		echo "### ${version}"
 		if [ "${publish}" != true ]; then
 			echo "Build di prova: nessuna release, l'immagine negli artifact."
+		elif [ -n "${from}" ]; then
+			echo "Nessuna build: si pubblicano i file del run ${from} (commit ${bsha:0:12})."
 		elif [ "${prerelease}" = true ]; then
 			echo "Pre-release a fine build: le console non la vedono."
 		else
 			echo "Release a fine build: \"latest\" (la scaricano le console) se e' la versione piu' alta."
 		fi
 	} >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-	echo "versione ${version}, release ${publish}, pre-release ${prerelease}"
+	echo "versione ${version}, release ${publish}, pre-release ${prerelease}${from:+, file del run ${from} (${bsha:0:12})}"
 }
 
 # Job release: pubblica i file di <d> (dopo check-dist e le note). Bozza, file,
 # poi pubblicata: una console che guarda proprio in quel momento non trova mai
 # una release senza update.txt.
+# Un comando gh del job release: se fallisce, il suo messaggio in
+# un'annotazione (il log del job non si legge dall'API). Il 8/10/2026 la
+# v1.3.1 si e' fermata due volte su "gh release create" senza un perche'
+# leggibile.
+gh_step() {
+	local what="$1" out
+	shift
+	if ! out="$("$@" 2>&1)"; then
+		printf '%s\n' "${out}" >&2
+		fail "Pubblica" "${what}: $(printf '%s\n' "${out}" | grep -v '^[[:space:]]*$' | tail -n 5)"
+	fi
+	[ -z "${out}" ] || printf '%s\n' "${out}"
+}
+
 cmd_publish() {
 	local d="${1:?cartella con i file della release}" pre="${PRERELEASE:-false}" latest=false sha tag rels id draft cur
 	: "${VERSION:?}" "${GITHUB_REPOSITORY:?}" "${GITHUB_SHA:?}" "${DEFAULT_BRANCH:?}"
+	# il commit della build: questo run, o quello di publish_from
+	local bsha="${RF35H_BUILD_SHA:-${GITHUB_SHA}}"
 	case "${VERSION}" in *-*) pre=true ;; esac
-	sha="$(git -C "${O}" rev-parse --verify -q "${GITHUB_SHA}^{commit}")" || fail "Pubblica" "commit ${GITHUB_SHA} non trovato"
+	sha="$(git -C "${O}" rev-parse --verify -q "${bsha}^{commit}")" || fail "Pubblica" "commit ${bsha} non trovato"
 	# di nuovo, adesso: una release che non e' pre-release solo dal ramo principale
 	if [ "${pre}" != true ] && ! on_default_branch "${sha}"; then
 		fail "Pubblica" "${sha:0:12} non e' su ${DEFAULT_BRANCH}: da qui solo pre-release"
@@ -808,7 +856,8 @@ cmd_publish() {
 		[ -n "${id}" ] || continue
 		[ "${draft}" = true ] || fail "Pubblica" "la release ${VERSION} e' gia' pubblicata"
 		echo "  bozza ${id} di un tentativo precedente: la cancello"
-		gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}" > /dev/null
+		# senza ridirigere: l'annotazione di un errore va su stdout
+		gh_step "bozza ${id} non cancellata" gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/${id}"
 	done <<< "${rels}"
 	# "latest" solo alla versione piu' alta: GitHub fa "latest" ogni release
 	# appena pubblicata, e una versione piu' bassa (una v1.0.1 dopo la v1.1.0,
@@ -821,12 +870,12 @@ cmd_publish() {
 	local flags=()
 	if [ "${pre}" = true ]; then flags+=(--prerelease); fi
 	cd "${d}"
-	gh release create "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft \
+	gh_step "gh release create" gh release create "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft \
 		--target "${sha}" --title "Lakka RF35H ${VERSION}" \
 		--notes-file RELEASE-NOTES.md "${flags[@]}"
-	gh release upload "${VERSION}" --repo "${GITHUB_REPOSITORY}" --clobber \
+	gh_step "gh release upload" gh release upload "${VERSION}" --repo "${GITHUB_REPOSITORY}" --clobber \
 		./*.img.gz ./*.tar update.txt SHA256SUMS
-	gh release edit "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest="${latest}"
+	gh_step "gh release edit" gh release edit "${VERSION}" --repo "${GITHUB_REPOSITORY}" --draft=false --latest="${latest}"
 	if [ "${pre}" = true ]; then
 		cur="pre-release: le console non la vedono"
 	elif [ "${latest}" = true ]; then

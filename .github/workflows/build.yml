@@ -10,6 +10,12 @@
 #                            riparte dal suo stato (salvato per 3 giorni) e
 #                            rifa' solo i pacchetti cambiati. Pacchetti di
 #                            due commit insieme: mai per una release.
+#   Run workflow, version e  nessuna build: il job Release pubblica i file
+#   publish_from             (artifact lakka-rf35h-<version>, 14 giorni) di
+#                            quel run di release, con gli script di adesso e
+#                            il commit di quella build. Per quando il suo job
+#                            Release non riesce neanche rilanciato (un rilancio
+#                            rifa' lo stesso codice).
 #
 # La build sta in fino a otto parti di 6 ore (build-stage.yml): con tutti i
 # 162 core da zero ne servono piu' di quattro. La release
@@ -45,6 +51,7 @@ name: Build
 # vedono dall'API ne' dall'elenco dei run, e la versione e' quello che conta.
 run-name: >-
   ${{ github.ref_type == 'tag' && format('Release {0}{1}', github.ref_name, contains(github.ref_name, '-') && ' (pre-release)' || '')
+  || inputs.version != '' && inputs.publish_from != '' && format('Release {0}, file del run {1}', inputs.version, inputs.publish_from)
   || inputs.version != '' && format('Release {0}{1}', inputs.version, (inputs.prerelease || contains(inputs.version, '-')) && ' (pre-release)' || '')
   || inputs.resume_run != '' && format('Build di prova, ripresa da {0}', inputs.resume_run)
   || format('Build di prova ({0})', github.ref_name) }}
@@ -71,6 +78,10 @@ on:
         description: "Pubblica anche se mancano core o giochi (non compilati): le console che aggiornano li perdono"
         type: boolean
         default: false
+      publish_from:
+        description: "Con version: nessuna build, pubblica i file della build di release di quel run (ID), se il suo job Release non riesce"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -93,6 +104,8 @@ jobs:
       publish: ${{ steps.v.outputs.publish }}
       prerelease: ${{ steps.v.outputs.prerelease }}
       resume: ${{ steps.v.outputs.resume }}
+      from: ${{ steps.v.outputs.from }}
+      build_sha: ${{ steps.v.outputs.build_sha }}
     steps:
       # la storia intera: un tag di una release non pre-release deve stare
       # sul ramo principale (git merge-base --is-ancestor)
@@ -109,6 +122,7 @@ jobs:
           IN_VERSION: ${{ inputs.version }}
           IN_PRERELEASE: ${{ inputs.prerelease }}
           IN_RESUME: ${{ inputs.resume_run }}
+          IN_PUBLISH_FROM: ${{ inputs.publish_from }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: ./tools/ci-build.sh version
 
@@ -122,8 +136,10 @@ jobs:
       - name: tools/ci-check.sh
         run: ./tools/ci-check.sh
 
+  # con publish_from niente build: saltata la parte 1, saltano anche le altre
   stage1:
     needs: setup
+    if: needs.setup.outputs.from == ''
     uses: ./.github/workflows/build-stage.yml
     with:
       stage: 1
@@ -191,8 +207,9 @@ jobs:
     name: Release
     needs: [setup, stage1, stage2, stage3, stage4, stage5, stage6, stage7, stage8]
     if: >-
-      !cancelled() && needs.setup.outputs.publish == 'true' &&
-      (needs.stage1.outputs.result == 'done' || needs.stage2.outputs.result == 'done' ||
+      !cancelled() && needs.setup.result == 'success' && needs.setup.outputs.publish == 'true' &&
+      (needs.setup.outputs.from != '' ||
+       needs.stage1.outputs.result == 'done' || needs.stage2.outputs.result == 'done' ||
        needs.stage3.outputs.result == 'done' || needs.stage4.outputs.result == 'done' ||
        needs.stage5.outputs.result == 'done' || needs.stage6.outputs.result == 'done' ||
        needs.stage7.outputs.result == 'done' || needs.stage8.outputs.result == 'done')
@@ -200,12 +217,16 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+      actions: read     # publish_from: l'artifact di un altro run
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.setup.outputs.version }}
       PRERELEASE: ${{ needs.setup.outputs.prerelease }}
       RF35H_ALLOW_INCOMPLETE: ${{ inputs.allow_incomplete }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # il commit della build: questo run, o quello di publish_from (target
+      # del tag e note della release)
+      RF35H_BUILD_SHA: ${{ needs.setup.outputs.build_sha }}
     steps:
       # la storia intera e i tag: le note elencano i commit dall'ultima
       # release, e publish riguarda che il commit sia sul ramo principale
@@ -214,9 +235,18 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/download-artifact@v8
+        if: needs.setup.outputs.from == ''
         with:
           name: lakka-rf35h-${{ needs.setup.outputs.version }}
           path: dist
+
+      - uses: actions/download-artifact@v8
+        if: needs.setup.outputs.from != ''
+        with:
+          name: lakka-rf35h-${{ needs.setup.outputs.version }}
+          path: dist
+          run-id: ${{ needs.setup.outputs.from }}
+          github-token: ${{ github.token }}
 
       - name: Controlli
         run: |

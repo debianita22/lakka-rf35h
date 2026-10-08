@@ -306,7 +306,14 @@ case "$*" in
 			ERRORE) echo "gh: Server Error (HTTP 500)" >&2; exit 1 ;;
 			*) echo "${FAKE_LATEST}" ;;
 		esac ;;
-	"api -X DELETE "*|"release create "*|"release upload "*|"release edit "*) ;;
+	# publish_from: il run (path, stato, commit) e i suoi artifact
+	"api repos/"*"/actions/runs/"[0-9]*" --jq "*)
+		[ -n "${FAKE_RUN:-}" ] || { echo '{"message":"Not Found"}'; echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+		printf '%b\n' "${FAKE_RUN}" ;;
+	"api --paginate repos/"*"/actions/runs/"*"/artifacts?per_page=100 "*) [ -z "${FAKE_RUN_ART:-}" ] || echo "${FAKE_RUN_ART}" ;;
+	"release create "*)
+		[ -z "${FAKE_CREATE_FAIL:-}" ] || { echo "HTTP 422: ${FAKE_CREATE_FAIL} (https://api.github.com/repos/o/r/releases)" >&2; exit 1; } ;;
+	"api -X DELETE "*|"release upload "*|"release edit "*) ;;
 	# la release "cores" (publish-cores): id, l'indice che c'e', gli asset
 	"api repos/"*"/releases/tags/cores "*)
 		if [ -n "${FAKE_CORES_ID:-}" ]; then echo "${FAKE_CORES_ID}"
@@ -329,7 +336,7 @@ export CALLS="${T}/calls.log"
 # ci-build.sh <comando> con gh e git finti; uscita in run.out, output in out.txt
 fake() {
 	: > "${CALLS}"; : > "${T}/out.txt"
-	( export PATH="${FB}:${PATH}" GITHUB_REPOSITORY=o/r DEFAULT_BRANCH=main GITHUB_SHA="${SHA}" \
+	( export PATH="${FB}:${PATH}" GITHUB_REPOSITORY=o/r DEFAULT_BRANCH=main GITHUB_SHA="${FAKE_GITHUB_SHA:-${SHA}}" \
 		GITHUB_RUN_NUMBER=7 GITHUB_OUTPUT="${T}/out.txt" FAKE_SHA="${SHA}"
 	  bash "${CB}" "$@" > "${T}/run.out" 2>&1 )
 }
@@ -362,6 +369,28 @@ vers workflow_dispatch branch main ""; rc=$?
 ok "Run workflow senza version: build di prova" '[ "${rc}" = 0 ] && [ "$(outv publish)" = false ] && [ "$(outv version)" = ci-7-0123456 ]'
 IN_RESUME=123 vers workflow_dispatch branch main v1.1.0; rc=$?
 ok "resume_run con una version: si ferma" '[ "${rc}" != 0 ] && grep -q "resume_run solo per le build di prova" "${T}/run.out"'
+# publish_from: i file di un altro run, il suo commit
+RUNOK=".github/workflows/build.yml\tcompleted\t${SHA}"
+FAKE_GITHUB_SHA=ffffffffffffffffffffffffffffffffffffffff FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from: release con i file e il commit di quel run" '[ "${rc}" = 0 ] && [ "$(outv from)" = 555 ] && [ "$(outv build_sha)" = "${SHA}" ] && [ "$(outv publish)" = true ] && called "merge-base --is-ancestor ${SHA} refs/remotes/origin/main"'
+vers workflow_dispatch branch main v1.1.0 false; rc=$?
+ok "  ...senza: from vuoto, build_sha il commit del run" '[ "${rc}" = 0 ] && [ -z "$(outv from)" ] && [ "$(outv build_sha)" = "${SHA}" ]'
+FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=55x vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from non numerico: si ferma" '[ "${rc}" != 0 ] && grep -q "publish_from: un ID di run" "${T}/run.out"'
+FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main ""; rc=$?
+ok "publish_from senza version: si ferma" '[ "${rc}" != 0 ] && grep -q "con la version della build" "${T}/run.out"'
+FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 IN_RESUME=12 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from con resume_run: si ferma" '[ "${rc}" != 0 ] && grep -q "resume_run" "${T}/run.out"'
+FAKE_RUN=".github/workflows/build.yml\tin_progress\t${SHA}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from di un run non finito: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. finito" "${T}/run.out"'
+FAKE_RUN=".github/workflows/cores.yml\tcompleted\t${SHA}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from di un run che non e' una build: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. una build" "${T}/run.out"'
+FAKE_RUN="${RUNOK}" FAKE_RUN_ART="" IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from senza l'artifact della versione: si ferma" '[ "${rc}" != 0 ] && grep -q "non ha i file della v1.3.1" "${T}/run.out" && called "artifacts?per_page=100"'
+FAKE_RUN="" IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from di un run che non c'e': si ferma" '[ "${rc}" != 0 ] && grep -q "il run 555 non si legge" "${T}/run.out"'
+FAKE_ON_MAIN=no FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+ok "publish_from di una build fuori da main: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. su main" "${T}/run.out"'
 
 echo "publish (job release)"
 PD="${T}/pubdist"; mkdir -p "${PD}"
@@ -396,6 +425,10 @@ FAKE_RELEASES="555 true" pub v1.2.0; rc=$?
 ok "bozza di un tentativo fallito: cancellata, poi da capo" '[ "${rc}" = 0 ] && called "api -X DELETE repos/o/r/releases/555" && [ "$(grep -n "DELETE" "${CALLS}" | cut -d: -f1)" -lt "$(grep -n "release create" "${CALLS}" | cut -d: -f1)" ]'
 FAKE_RELEASES="556 false" pub v1.2.0; rc=$?
 ok "release gia' pubblicata: si ferma, niente cancellato" '[ "${rc}" != 0 ] && ! called DELETE && ! called "release create"'
+FAKE_GITHUB_SHA=ffffffffffffffffffffffffffffffffffffffff RF35H_BUILD_SHA="${SHA}" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
+ok "publish_from: tag sul commit della build, non su quello del run" '[ "${rc}" = 0 ] && seq_ok true && called "release create v1.3.1 --repo o/r --draft --target ${SHA}"'
+FAKE_CREATE_FAIL="Validation Failed" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
+ok "gh release create fallito: si ferma con il messaggio di gh" '[ "${rc}" != 0 ] && grep -q "gh release create: HTTP 422: Validation Failed" "${T}/run.out" && ! called "release upload"'
 
 echo "note della release: da quale release"
 # un repository vero (merge-base, describe, log) con v1.0.0, v1.1.0-rc1 e
