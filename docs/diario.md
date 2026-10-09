@@ -6665,3 +6665,46 @@ pinnati, con le dipendenze liblcf (easyrpg)"; verify-claims 246 (in piu':
 la dipendenza nell'albero); sei errori di formato di pins.txt, ognuno col
 suo messaggio. In pins-merge il mktemp lasciava una cartella vuota per
 corsa: tolta.
+
+La prova (run 37892605474, `cores=easyrpg`): nel riassunto easyrpg con
+`+liblcf 92c4450 -> 6854310`; nel job `--build-packages "liblcf easyrpg"`,
+liblcf "ok: dipendenza", poi il Player contro di lei; notice
+`easyrpg@0de2a9a+liblcf@6854310`, 11 minuti. Il commit dei pin (ed103ae,
+github-actions) sposta le due righe insieme, liblcf ancora sotto easyrpg;
+l'issue #5 scende a 2.
+
+## dosbox e same_cdi all'upstream: tutti i 22 (9/10/2026)
+
+**dosbox** (libretro/dosbox-libretro): dal 27/9/2026 (a563bb5) l'upstream e'
+dosbox-core (realnc, d38fcb50) con le aggiunte di DOSBox Pure: ZIP come
+contenuto senza estrarli (salvataggi in `<nome>.save.zip`), immagini CD e
+floppy dentro lo ZIP, menu di avvio, mappatura automatica dei tasti dal
+database Keyb2Joypad, velocita' della CPU dall'anno del gioco, MIDI SC-55
+(Nuked-SC55), VFS del frontend. Si chiama ancora dosbox (dosbox_libretro.so,
+"DOSBox") e sta accanto a dosbox_core senza dividerne opzioni, salvataggi e
+configurazione; le chiavi delle opzioni restano `dosbox_core_*`. Il
+Makefile e' in `libretro/` e, a parte il nome e il permesso di spegnere la
+MIDI ALSA, e' quello del dosbox-core 7bcf083 che Lakka gia' costruisce come
+dosbox_core: stessa ricetta (SDL_net e i codec di sistema, dynarec arm64),
+con `CMAKE_POLICY_VERSION_MINIMUM` gia' nel Makefile (la patch di Lakka a
+dosbox_core qui non serve). In integration/cores-build-layout-rf35h.patch:
+le dipendenze di dosbox_core, e make_target che finche' c'e' il
+Makefile.libretro di prima fa come prima.
+
+**same_cdi**: il 3/8/2026 (68a9991) l'upstream ha tolto GENie per un Makefile
+fisso (Makefile.libretro e Makefile.common) che prende CC, CXX e AR
+dall'ambiente; poi via Lua, sqlite, expat, zlib, flac (al loro posto
+libretro-common), e dal 25/9 il controllo dei dischi, le playlist M3U, la
+Digital Video Cartridge e l'opzione PAL/NTSC. La ricetta: senza
+`scripts/genie.lua`, `make -f Makefile.libretro platform=unix`; con, quella
+di Lakka. Delle cinque patch di Lakka una e' gia' upstream (pre_patch la
+salta), quattro sono superate: marcatori in cores/patches/same_cdi/ (GENie,
+sol2 e il Makefile vecchio non ci sono piu', corestr.cpp include <cstdint>
+da se'). Provato pre_patch sul sorgente della punta prima della CI.
+
+La prova (run 37893338725, `cores=dosbox same_cdi`): dosbox@a563bb5 in 8
+minuti, same_cdi@ff9bb99 in 12 (col GENie era un MAME intero); pin in
+c827998; l'issue #5 si chiude da sola ("Tutti i core compilano"). Dei 22
+rimasti indietro con la v1.4.0, tutti all'upstream: la prossima release li
+ha. Di dosbox cambia il comportamento, non solo la versione: opzioni,
+ZIP e menu sono quelli di dosbox-core e DOSBox Pure.
