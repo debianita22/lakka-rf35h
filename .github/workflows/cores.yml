@@ -9,6 +9,9 @@
 #                     cores/pins.txt (commit sul ramo principale: la prossima
 #                     release li ha), i falliti restano al commit vecchio e
 #                     finiscono in un issue.
+#                     Un core con dipendenze pinnate ("+liblcf" sotto easyrpg
+#                     in pins.txt) le porta con se': aggiornate, compilate
+#                     prima di lui e spostate solo insieme a lui.
 #   Run workflow      "cores": solo questi (vuoto: tutti quelli cambiati);
 #                     "rebuild": anche se il pin non e' cambiato (per vedere
 #                     se compilano ancora dopo una correzione dell'overlay);
@@ -86,9 +89,11 @@ jobs:
           echo "matrix=$(./tools/ci-build.sh cores-matrix "${cores}")" >> "${GITHUB_OUTPUT}"
           {
             echo "### Core da compilare: ${cores:-nessuno}"
+            # una riga per core, e una per ogni sua dipendenza cambiata
+            # ("+liblcf", in coda alla riga del core in changed.txt)
             if [ -s changed.txt ]; then
               echo; echo "| core | da | a |"; echo "|---|---|---|"
-              awk '{ printf "| %s | %s | %s |\n", $1, substr($2, 1, 7), substr($3, 1, 7) }' changed.txt
+              awk '{ for (i = 1; i + 2 <= NF; i += 3) printf "| %s | %s | %s |\n", $i, substr($(i + 1), 1, 7), substr($(i + 2), 1, 7) }' changed.txt
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
           if [ -z "${cores}" ]; then echo "::notice title=Core::nessun core con un upstream nuovo"; fi

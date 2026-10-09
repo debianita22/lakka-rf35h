@@ -16,6 +16,15 @@
 # Ogni release esce con i core a questi commit: niente aggiornamenti dei core
 # dalla console (8/10/2026), arrivano con l'aggiornamento di sistema.
 # Il punto di partenza (7/10/2026): i commit del Lakka pinnato (LAKKA_COMMIT).
+#
+#   +<pacchetto Lakka>  <repository>  <commit>  <ramo>
+#
+# Subito sotto un core, senza righe in mezzo: una sua dipendenza, un pacchetto
+# di Lakka che non e' un core e che deve andare d'accordo col commit del core
+# (liblcf: il Player di easyrpg usa i campi nuovi della libreria appena
+# entrano). apply.sh la scrive nel suo package.mk come per i core; cores.yml
+# la porta all'upstream insieme al core, la compila prima di lui, e sposta i
+# pin del gruppo solo se il core compila con lei. Si prova col nome del core.
 mame                 https://github.com/libretro/mame                         e858fcb097c59836f68a246648c4e0c070a8f083 -
 scummvm              https://github.com/libretro/scummvm                      fcbce3ae815269dacdc309092bc92ccc6d3e13bb -
 mame2015             https://github.com/libretro/mame2015-libretro            7adbf440d5f554097f58f8c6ebb673adc4320a31 -
@@ -97,6 +106,7 @@ dosbox_svn           https://github.com/libretro/dosbox-svn                   46
 doublecherrygb       https://github.com/TimOelrichs/doublecherryGB-libretro   03f58ca3dfb4b716f7e66a0e0467f9e85ef82abb -
 doukutsu_rs          https://github.com/DrGlaucous/doukutsu-rs-libretro       2e6504e46179561869e976a22f73d8ebb65a7d5c -
 easyrpg              https://github.com/EasyRPG/Player                        78328fa29f465315291e161130e6682f69410370 -
++liblcf              https://github.com/EasyRPG/liblcf                        92c4450a1bc1acb58bd02bbb99b57e5036919cdf -
 emux_sms             https://github.com/libretro/emux                         3e558cb15157fcb1944846a845547d369605c963 -
 ep128emu             https://github.com/libretro/ep128emu-core                6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e core
 fake_08              https://github.com/jtothebell/fake-08                    814991a2571ad3970e386cef48f3b148aa1c27b9 -

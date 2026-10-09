@@ -112,10 +112,19 @@ fi
 # cores/pins.txt (cores.yml li sposta quando il core compila) rispetto alla
 # release precedente. Se allora pins.txt non c'era (fino alla v1.3.1), per
 # ogni core la prima versione in cui compare nel file, cioe' il commit del
-# Lakka pinnato, che e' quello che quella release aveva.
+# Lakka pinnato, che e' quello che quella release aveva. Le dipendenze di un
+# core (le righe "+<pacchetto>" sotto di lui) contano per lui: liblcf piu'
+# nuova e' easyrpg aggiornato, anche con lo stesso commit del Player; una
+# dipendenza che la release precedente non aveva fra i pin no.
 if [ -n "${prev}" ] && git -C "${O}" cat-file -e "${sha}:cores/pins.txt" 2>/dev/null; then
 	pins_tmp="$(mktemp -d)"
-	pins_of() { git -C "${O}" show "$1:cores/pins.txt" | awk '$2 ~ /^https?:/ { print $1, $3 }'; }
+	# "<core> <commit>", e "<core>+<dipendenza> <commit>" per le dipendenze
+	pins_of() {
+		git -C "${O}" show "$1:cores/pins.txt" | awk '
+			$2 !~ /^https?:/ { next }
+			/^\+/ { if (c != "") print c $1, $3; next }
+			{ c = $1; print c, $3 }'
+	}
 	if git -C "${O}" cat-file -e "${prev}:cores/pins.txt" 2>/dev/null; then
 		pins_of "${prev}" > "${pins_tmp}/base"
 	else
@@ -124,7 +133,8 @@ if [ -n "${prev}" ] && git -C "${O}" cat-file -e "${sha}:cores/pins.txt" 2>/dev/
 		done | awk '!($1 in seen) { seen[$1] = 1; print }' > "${pins_tmp}/base"
 	fi
 	pins_of "${sha}" > "${pins_tmp}/now"
-	upd="$(awk 'FILENAME == ARGV[1] { b[$1] = $2; next } ($1 in b) && b[$1] != $2 { print $1 }' "${pins_tmp}/base" "${pins_tmp}/now")"
+	upd="$(awk 'FILENAME == ARGV[1] { b[$1] = $2; next }
+		($1 in b) && b[$1] != $2 { k = $1; sub(/\+.*/, "", k); if (!(k in u)) { u[k] = 1; print k } }' "${pins_tmp}/base" "${pins_tmp}/now")"
 	rm -rf "${pins_tmp}"
 	if [ -n "${upd}" ]; then
 		echo

@@ -1015,6 +1015,38 @@ cmd_merge_cores() {
 # Il repository e il commit di un core in cores/pins.txt
 pin_of() { awk -v c="$1" '$1 == c && $2 ~ /^https?:/ { print $2, $3 }' "${O}/cores/pins.txt"; }
 
+# Le dipendenze pinnate di un core, le righe "+<pacchetto>" subito sotto la sua
+# in cores/pins.txt (o nel file $2): "<pacchetto> <repository> <commit>"
+deps_of() {
+	awk -v c="$1" '
+		/^\+/ { if (on && $2 ~ /^https?:/) print substr($1, 2), $2, $3; next }
+		{ on = ($1 == c && $2 ~ /^https?:/) }
+	' "${2:-${O}/cores/pins.txt}"
+}
+
+# Il pin di un core in un file di pin, cosi' com'e': la sua riga e quelle
+# delle sue dipendenze
+pin_block() {
+	awk -v c="$1" '
+		/^\+/ { if (on) print; next }
+		{ on = ($1 == c && $2 ~ /^https?:/) }
+		on
+	' "$2"
+}
+
+# I riusciti di built.txt come <core>@<commit>, con le dipendenze provate
+# insieme: "easyrpg@0de2a9a+liblcf@6854310 fceumm@1111111 "
+built_list() {
+	awk '{
+		s = substr($1, 6) "@" substr($2, 8, 7)
+		for (i = 3; i <= NF; i++) if ($i ~ /^deps=/) {
+			n = split(substr($i, 6), a, ",")
+			for (j = 1; j <= n; j++) { split(a[j], b, "@"); s = s "+" b[1] "@" substr(b[2], 1, 7) }
+		}
+		printf "%s ", s
+	}' "$1"
+}
+
 # Perche' un core non compila, dal suo *-fallito.log: le righe d'errore
 # (compilatore, make, patch, cmake, git), il passo di LibreELEC che si e'
 # fermato ("FAILURE: ... during make_target") e il comando sotto il primo
@@ -1056,15 +1088,28 @@ core_why() {
 # W/cores una riga per riuscito in built.txt, i falliti in failed.txt con la
 # coda del loro log. Esce 0 anche con qualche fallito (restano al commit
 # vecchio, nell'issue), diverso da 0 se nessuno e' riuscito.
+# Le dipendenze pinnate di un core (cores/pins.txt, "+<pacchetto>": liblcf di
+# easyrpg) si puliscono e si compilano prima di lui, al loro commit nuovo: il
+# core riesce solo se riescono anche loro, a quel commit, e built.txt le
+# nomina (deps=). Il pin del gruppo si sposta tutto insieme (pins-merge).
 cmd_cores() {
 	local pkgs="${1:?core da compilare}" out="${W}/cores" rc=0 rep p so sha site lakka c7 f d n
+	local list="" dl dd dsite dsha dwhy dlog dpins
 	: "${W:?}" "${RF35H_CONTAINER:?}" "${RF35H_SYSROOT_VERSION:?}"
 	cd "${W}"
 	rm -rf "${out}"; mkdir -p "${out}"
 	: > "${out}/built.txt"; : > "${out}/failed.txt"
+	for p in ${pkgs}; do
+		for d in $(deps_of "${p}" | cut -d' ' -f1); do
+			case " ${list} " in *" ${d} "*) ;; *) list="${list} ${d}" ;; esac
+		done
+		list="${list} ${p}"
+	done
+	list="${list# }"
 	say "Core: ${pkgs}"
+	[ "${list}" = "$(tr -s ' ' <<< "${pkgs}" | sed 's/^ //; s/ $//')" ] || echo "  con le dipendenze, in quest'ordine: ${list}"
 	set +e
-	./lakka-rf35h/build-in-docker.sh --build-packages "${pkgs}" --jobs 4 2>&1 \
+	./lakka-rf35h/build-in-docker.sh --build-packages "${list}" --jobs 4 2>&1 \
 		| grep --line-buffered -aE '^\[[0-9]+/[0-9]+\] \[(INIT|DONE|FAIL|ACTV|IDLE)|==>|\[!\]|\[x\]|FAILURE|ERROR|^  [a-z0-9_]+ (ok|fallito|assente|compilato)'
 	rc=${PIPESTATUS[0]}
 	set -e
@@ -1075,6 +1120,32 @@ cmd_cores() {
 	[ -n "${rep}" ] || { note error "Core" "nessun resoconto: la build e' fallita prima dei pacchetti (uscita ${rc})"; die "nessun resoconto dei pacchetti"; }
 	lakka="$(git -C "${W}/${TREE_NAME}" rev-parse HEAD)"
 	for p in ${pkgs}; do
+		# prima le dipendenze: se una non compila (al commit del suo pin) non
+		# vale nemmeno il core, e il perche' e' il suo
+		dwhy=""; dlog=""; dpins=""
+		while read -r d dsite dsha; do
+			[ -n "${d}" ] || continue
+			dl="$(grep "^${d} " "${rep}" || true)"
+			case "${dl}" in
+				"${d} ok:"*)
+					dd="$(sed -n "s/^${d} ok: .*(install_pkg\/\(.*\))\$/\1/p" <<< "${dl}")"
+					case "${dd}" in
+						"${d}-${dsha}"|nessuna) dpins="${dpins:+${dpins},}${d}@${dsha}" ;;
+						*) dwhy="la dipendenza ${d} e' compilata da install_pkg/${dd:-?}, non dal commit del pin ${dsha:0:7}"; break ;;
+					esac ;;
+				*)
+					dwhy="la dipendenza ${d} (${dsite##*/} ${dsha:0:7}) non compila: ${dl:-non compilata}"
+					dlog="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${d}"-fallito.log 2>/dev/null | head -1 || true)"
+					break ;;
+			esac
+		done < <(deps_of "${p}")
+		if [ -n "${dwhy}" ]; then
+			{
+				echo "== ${p}: ${dwhy} [run ${GITHUB_RUN_ID:-?}]"
+				[ -n "${dlog}" ] && core_why "${dlog}"
+			} >> "${out}/failed.txt"
+			continue
+		fi
 		if ! grep -q "^${p} ok:" "${rep}"; then
 			# un core senza log (assente, senza .so, in piu' versioni) non ne ha
 			f="$(ls -t "${W}/${TREE_NAME}"/build-rf35h-*-"${p}"-fallito.log 2>/dev/null | head -1 || true)"
@@ -1103,15 +1174,15 @@ cmd_cores() {
 			n=$((n + 1))
 		done
 		[ "${n}" -gt 0 ] || { echo "== ${p}: nessun _libretro.so" >> "${out}/failed.txt"; continue; }
-		echo "core=${p} commit=${sha} site=${site} lakka=${lakka} sysroot=${RF35H_SYSROOT_VERSION} date=$(date -u +%Y%m%d)" >> "${out}/built.txt"
+		echo "core=${p} commit=${sha} site=${site} lakka=${lakka} sysroot=${RF35H_SYSROOT_VERSION} date=$(date -u +%Y%m%d)${dpins:+ deps=${dpins}}" >> "${out}/built.txt"
 	done
 	echo; echo "riusciti:"; cut -d' ' -f1,2 "${out}/built.txt" | sed 's/^/  /' || true
 	echo "falliti:"; grep '^==' "${out}/failed.txt" | sed 's/^/  /' || true
 	# riusciti come <core>@<commit>: con dry_run (o su un altro ramo) il commit
 	# provato si legge dall'annotazione, senza scaricare built.txt
-	summ "- core riusciti: $(awk '{ printf "%s@%s ", substr($1, 6), substr($2, 8, 7) }' "${out}/built.txt")"
+	summ "- core riusciti: $(built_list "${out}/built.txt")"
 	[ ! -s "${out}/failed.txt" ] || summ "- core falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
-	note notice "Core" "riusciti: $(awk '{ printf "%s@%s ", substr($1, 6), substr($2, 8, 7) }' "${out}/built.txt"); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
+	note notice "Core" "riusciti: $(built_list "${out}/built.txt"); falliti: $(grep '^==' "${out}/failed.txt" | sed 's/^== //; s/:.*//' | tr '\n' ' ')"
 	# il perche' di ogni fallito in un'annotazione: si legge dall'API, il
 	# failed.txt solo scaricando l'artifact (la prima corsa completa ne aveva
 	# sedici, e da fuori se ne vedevano solo i nomi)
@@ -1148,29 +1219,43 @@ cmd_issue_merge() {
 # veniva rifiutato (non fast-forward), il job falliva e i pin compilati
 # andavano persi, issue compresa. Se il ramo si muove fra fetch e push, si
 # riprova (3 volte). Un push del GITHUB_TOKEN non avvia altri workflow.
+# Un core con dipendenze pinnate ("+<pacchetto>" sotto di lui) si sposta con
+# loro, righe del gruppo tutte insieme: il core riuscito le ha compilate a quei
+# commit (cmd_cores). Se sul ramo il gruppo ha intanto altre dipendenze, resta.
 cmd_pins_merge() {
-	local d="${1:?cartella con built.txt}" np="${2:?pins nuovi}" c line n try wt cores
+	local d="${1:?cartella con built.txt}" np="${2:?pins nuovi}" c line cur n try wt wtp cores
 	[ -f "${np}" ] || die "manca ${np}"
 	: "${DEFAULT_BRANCH:?}"
 	cores="$(awk '{ print substr($1, 6) }' "${d}/built.txt" | sort -u)"
-	wt="$(mktemp -d)/pins"
+	wtp="$(mktemp -d)"; wt="${wtp}/pins"
 	for try in 1 2 3; do
 		git -C "${O}" fetch -q --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
 		git -C "${O}" worktree remove --force "${wt}" 2>/dev/null || rm -rf "${wt}"
 		git -C "${O}" worktree add -q --detach "${wt}" "refs/remotes/origin/${DEFAULT_BRANCH}"
 		n=0
 		for c in ${cores}; do
-			line="$(awk -v c="${c}" '$1 == c && $2 ~ /^https?:/' "${np}")"
+			line="$(pin_block "${c}" "${np}")"
 			[ -n "${line}" ] || { echo "  ${c}: non nei pin nuovi, resta"; continue; }
-			if grep -qxF "${line}" "${wt}/cores/pins.txt"; then continue; fi
-			awk -v c="${c}" -v l="${line}" '$1 == c && $2 ~ /^https?:/ { print l; next } { print }' "${wt}/cores/pins.txt" > "${wt}/cores/pins.txt.new"
+			cur="$(pin_block "${c}" "${wt}/cores/pins.txt")"
+			[ -n "${cur}" ] || { echo "  ${c}: non e' piu' fra i pin del ramo, resta fuori"; continue; }
+			[ "${line}" != "${cur}" ] || continue
+			if [ "$(awk '{ print $1 }' <<< "${line}")" != "$(awk '{ print $1 }' <<< "${cur}")" ]; then
+				echo "  ${c}: sul ramo il gruppo e' cambiato ($(awk '{ print $1 }' <<< "${cur}" | tr '\n' ' ')invece di $(awk '{ print $1 }' <<< "${line}" | tr '\n' ' ' | sed 's/ $//')): resta"
+				continue
+			fi
+			PIN_BLOCK="${line}" awk -v c="${c}" '
+				skip && /^\+/ { next }
+				{ skip = 0 }
+				$1 == c && $2 ~ /^https?:/ { print ENVIRON["PIN_BLOCK"]; skip = 1; next }
+				{ print }
+			' "${wt}/cores/pins.txt" > "${wt}/cores/pins.txt.new"
 			mv "${wt}/cores/pins.txt.new" "${wt}/cores/pins.txt"
 			n=$((n + 1))
-			echo "  ${c}: $(awk '{ print substr($3, 1, 7) }' <<< "${line}")"
+			echo "  ${c}: $(awk '{ printf "%s%s", (NR > 1 ? " " $1 " " : ""), substr($3, 1, 7) }' <<< "${line}")"
 		done
 		if [ "${n}" -eq 0 ]; then
 			echo "  nessun pin da cambiare"
-			git -C "${O}" worktree remove --force "${wt}"
+			git -C "${O}" worktree remove --force "${wt}"; rm -rf "${wtp}"
 			out "changed=false"
 			return 0
 		fi
@@ -1179,7 +1264,7 @@ cmd_pins_merge() {
 			-m "$(tr '\n' ' ' <<< "${cores}")" \
 			-m "Compilati da cores.yml (run ${GITHUB_RUN_ID:-?}) al commit nuovo: la prossima release li ha." -- cores/pins.txt
 		if git -C "${wt}" push -q origin "HEAD:${DEFAULT_BRANCH}"; then
-			git -C "${O}" worktree remove --force "${wt}"
+			git -C "${O}" worktree remove --force "${wt}"; rm -rf "${wtp}"
 			out "changed=true"
 			echo "  ${n} pin aggiornati e pushati su ${DEFAULT_BRANCH}"
 			note notice "Pin" "${n} core aggiornati in cores/pins.txt: la prossima immagine li avra'"
@@ -1189,6 +1274,7 @@ cmd_pins_merge() {
 		[ "${try}" -lt 3 ] && sleep "${PINS_RETRY_SLEEP:-10}"
 	done
 	git -C "${O}" worktree remove --force "${wt}" 2>/dev/null || true
+	rm -rf "${wtp}"
 	fail "Pin" "push dei pin su ${DEFAULT_BRANCH} non riuscito dopo 3 tentativi"
 }
 

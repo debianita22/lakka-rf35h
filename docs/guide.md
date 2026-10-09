@@ -827,6 +827,14 @@ MAME, alone; the others in groups of 12) and moves the pin of each core that
 builds, so a core that stops building upstream stays at its last good commit
 while the others move on, and the next release ships the new ones.
 
+A line starting with `+` right below a core pins one of its dependencies: a
+Lakka package that is not a core but has to match the core's commit. The
+first is `+liblcf` under `easyrpg`: the EasyRPG Player uses new liblcf fields
+as soon as they land. `apply.sh` writes it into its package like a core.
+`cores.yml` moves it to its upstream tip together with the core, builds it
+first, and moves the pins of the group only when the core builds against it.
+In a test run, give the core's name.
+
 The 37 pinned cores with Lakka patches keep them, but `scripts/unpack` no
 longer applies them: `apply.sh` moves them to `patches-lakka/` and adds a
 `pre_patch` (`cores/pre-patch.sh`) that applies them one by one, in the same
@@ -954,7 +962,7 @@ port it to 7.2 and add it to the keep list in `apply.sh`.
 | `board/loader/` | boot loader and its checksum |
 | `patches/linux/`, `patches/linux-default/` | kernel patches: device tree, panel, Wi-Fi, suspend |
 | `patches/retroarch/` | RetroArch patches: Device Settings menu and fixes |
-| `cores/pins.txt` | every image core with its repository and commit; updated by `cores.yml` |
+| `cores/pins.txt` | every image core with its repository and commit, and the dependencies pinned with a core (`+liblcf`); updated by `cores.yml` |
 | `integration/` | patches to the Lakka tree: options, kernel configuration, boot, packages |
 | `packages/` | device packages: drivers, `rf35h-utils`, `wpa_supplicant`, IKEMEN GO and the bundled games |
 | `autoconfig/` | RetroArch autoconfig for the built-in controls |

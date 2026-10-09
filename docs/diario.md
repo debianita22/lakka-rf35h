@@ -6617,3 +6617,51 @@ ninja; makeinstall prende il .so dove c'e'. Compilano al primo giro (run
 37865500377, pin a82e014 e 33b3bda in 30725ec). Dei 22: 19 all'upstream.
 Restano (issue #5): easyrpg (liblcf va portato avanti con lui: serve un pin
 di gruppo, da proporre), dosbox e same_cdi (da decidere con l'utente).
+
+## easyrpg e liblcf: le dipendenze pinnate col core (9/10/2026)
+
+easyrpg all'upstream (Player 0de2a9a) non compila con la liblcf di Lakka
+(92c4450, la 0.8.1 di aprile 2025): `lcf::rpg::SaveSystem` non ha
+`maniac_battle_origin` e `maniac_message_face_width/height`, campi entrati in
+liblcf dopo (sono nella punta, 6854310, 15 commit piu' avanti). liblcf e' un
+pacchetto di Lakka (`lakka_depends/liblcf`, archivio del commit da GitHub,
+senza sha256), libreria condivisa (liblcf.so.0 nell'immagine) usata solo da
+easyrpg. Il Player va portato avanti insieme alla sua liblcf, e i due pin si
+devono spostare insieme: un Player nuovo con la liblcf vecchia non compila, e
+una liblcf nuova con un Player vecchio non e' provata.
+
+In `cores/pins.txt` una riga che comincia con `+`, subito sotto il core, e'
+una sua dipendenza: `+liblcf` sotto `easyrpg`, per ora al commit di Lakka
+(l'immagine non cambia). Il core resta l'unita' di tutto (matrice dei job,
+issue, notice); la dipendenza va con lui:
+
+- `apply.sh` legge tutto il file: una riga `+` deve seguire il core (o
+  un'altra `+`), il package.mk si cerca come LibreELEC (prima progetto e
+  device, poi packages/), uno solo e non quello di un core; stessi controlli
+  di PKG_URL e stesse patch (pre_patch) dei core;
+- `cores-bump.sh`: il gruppo si aggiorna con il core; se cambia solo la
+  dipendenza il core e' fra i cambiati, con la dipendenza in coda alla sua
+  riga (`easyrpg <vecchio> <nuovo> +liblcf <vecchio> <nuovo>`, una riga in
+  piu' nella tabella del riassunto); se un repository del gruppo non
+  risponde, il gruppo resta tutto com'era;
+- `ci-build.sh cores`: le dipendenze dei core del job si puliscono e si
+  compilano prima di loro (`--build-packages "liblcf easyrpg"`, una volta
+  sola), il core vale solo se la dipendenza e' "ok" e da install_pkg del
+  commit del pin, e built.txt la nomina (`deps=liblcf@<commit>`, nella
+  notice `easyrpg@0de2a9a+liblcf@6854310`). Se la dipendenza non compila, il
+  core e' fallito col perche' di lei;
+- `build-lakka-rf35h.sh --build-packages`: un pacchetto che non e' un core e
+  non installa un .so di libretro va bene se compila ("ok: dipendenza");
+- `pins-merge`: il blocco del core (la sua riga e le `+` sotto) si sostituisce
+  tutto; se sul ramo il gruppo ha intanto altre dipendenze, resta;
+- note della release: una dipendenza cambiata e' il suo core aggiornato; una
+  appena messa fra i pin no.
+
+Prove: test-ci-build 158 (cores-bump con un git finto, cores con la
+dipendenza riuscita, fallita, da un'altra versione, e il core fallito da
+solo; pins-merge del gruppo; note); cinque mutazioni della logica nuova,
+ognuna presa da una prova. apply.sh da zero sul Lakka pinnato: "162 core
+pinnati, con le dipendenze liblcf (easyrpg)"; verify-claims 246 (in piu':
+la dipendenza nell'albero); sei errori di formato di pins.txt, ognuno col
+suo messaggio. In pins-merge il mktemp lasciava una cartella vuota per
+corsa: tolta.

@@ -18,6 +18,9 @@
 set -u
 O="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "${T}"' EXIT
+# i temporanei di ci-build.sh (check-dist che si ferma, pins-merge) qui dentro,
+# non in /tmp
+mkdir -p "${T}/tmp"; export TMPDIR="${T}/tmp"
 V100_DEFAULT="gambatte sameboy tgbdual fceumm nestopia genesis_plus_gx picodrive gearsystem snes9x2010 snes9x snes9x2005 mgba gpsp beetle_pce_fast beetle_pce fbneo fbalpha2012 mame2010 mame2015 mupen64plus_next parallel_n64 beetle_ngp race stella2014 stella melonds melondsds cap32 crocods flycast"
 V100_CORES="cap32 crocods deva_adventures fbalpha2012 fbneo fceumm flycast gambatte gearsystem genesis_plus_gx gpsp gtasa ikemen mame2010 mame2015 mednafen_ngp mednafen_pce mednafen_pce_fast melonds melondsds mgba mupen64plus_next nestopia openxeenng parallel_n64 picodrive race sameboy snes9x snes9x2005 snes9x2010 stella stella2014 tgbdual"
 # pacchetto:core come li installano i package.mk di Lakka (cp ..._libretro.so
@@ -506,6 +509,20 @@ ok "  ...dalla v1.2.0 (con pins.txt): solo quelli cambiati da allora, nell'ordin
 git -C "${NR}" tag v1.3.0; nc "docs"; NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.1\ntar=x-v1.3.1.tar\n' > "${T}/ndist/update.txt"
 ( unset GH_TOKEN; notes ); rc=$?
 ok "  ...nessun core cambiato: nessuna riga" '[ "${rc}" = 0 ] && ! grep -q "Cores updated" "${T}/nnotes.md"'
+# le dipendenze contano per il loro core: liblcf piu' nuova e' easyrpg
+# aggiornato, anche col Player allo stesso commit; una dipendenza appena
+# messa fra i pin no
+echo "easyrpg https://x/Player 7777777777777777777777777777777777777777 -" >> "${NR}/cores/pins.txt"; pc "pins: easyrpg"
+git -C "${NR}" tag v1.3.1
+echo "+liblcf https://x/liblcf 8888888888888888888888888888888888888888 -" >> "${NR}/cores/pins.txt"; pc "pins: liblcf con easyrpg"
+NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.2\ntar=x-v1.3.2.tar\n' > "${T}/ndist/update.txt"
+( unset GH_TOKEN; notes ); rc=$?
+ok "  ...una dipendenza appena entrata fra i pin: nessun core aggiornato" '[ "${rc}" = 0 ] && grep -qx "Changes since v1.3.1:" "${T}/nnotes.md" && ! grep -q "Cores updated" "${T}/nnotes.md"'
+git -C "${NR}" tag v1.3.2
+sed -i 's/^+liblcf .*/+liblcf https:\/\/x\/liblcf 9999999999999999999999999999999999999999 -/' "${NR}/cores/pins.txt"; pc "cores: 1 core all'upstream"
+NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.3\ntar=x-v1.3.3.tar\n' > "${T}/ndist/update.txt"
+( unset GH_TOKEN; notes ); rc=$?
+ok "  ...la dipendenza cambiata: aggiornato il suo core, lei non e' un core" '[ "${rc}" = 0 ] && grep -qx "\*\*Cores updated\*\* to a newer upstream commit since v1.3.2 (1): easyrpg." "${T}/nnotes.md"'
 
 echo "ci-apt.sh (apt sul runner, con limite di tempo)"
 FA="${T}/fakeapt"; rm -rf "${FA}"; mkdir -p "${FA}"
@@ -533,6 +550,46 @@ apt_run "ok errore ok"; rc=$?
 ok "ci-apt: install fallito, si riparte da update" '[ "${rc}" = 0 ] && [ "$(cat "${FA}/n")" = 4 ]'
 apt_run "errore"; rc=$?
 ok "ci-apt: tre tentativi falliti, esce 1 con ::error" '[ "${rc}" = 1 ] && [ "$(cat "${FA}/n")" = 3 ] && grep -q "^::error title=apt::zstd squashfs-tools non installati" "${FA}/out"'
+
+echo "cores-bump.sh: i core alla punta dell'upstream, con le loro dipendenze"
+# un git finto per ls-remote: la punta di <repository> <ref> dalla tabella
+# FG_REMOTE ("giu": il repository non risponde); il resto al git vero
+FG="${T}/fakegit"; mkdir -p "${FG}" "${T}/cb/tools" "${T}/cb/cores"
+cat > "${FG}/git" <<'EOF'
+#!/bin/bash
+if [ "$1" = ls-remote ]; then
+	t="$(awk -v s="$2" -v r="$3" '$1 == s && $2 == r { print $3; exit }' "${FG_REMOTE}")"
+	case "${t}" in
+		giu) echo "fatal: unable to access '$2'" >&2; exit 128 ;;
+		'')  exit 0 ;;
+		*)   printf '%s\t%s\n' "${t}" "$3" ;;
+	esac
+	exit 0
+fi
+exec /usr/bin/git "$@"
+EOF
+chmod +x "${FG}/git"
+cp "${O}/tools/cores-bump.sh" "${T}/cb/tools/"
+h40() { printf "%040d" 0 | tr 0 "$1"; }
+pl() { printf '%-20s %-56s %s %s\n' "$1" "$2" "$(h40 "$3")" "${4:--}"; }
+{ echo "# commento"; pl fceumm https://x/fceumm 1; pl dosbox_svn https://x/dosbox-svn 2 libretro
+  pl easyrpg https://x/Player 3; pl +liblcf https://x/liblcf 4; pl mgba https://x/mgba 5; } > "${T}/cb/cores/pins.txt"
+cp "${T}/cb/cores/pins.txt" "${T}/cb-pins0.txt"
+rem() { printf '%s\n' "https://x/fceumm HEAD $(h40 1)" "https://x/dosbox-svn refs/heads/libretro $(h40 2)" \
+	"https://x/Player HEAD $(h40 "$1")" "https://x/liblcf HEAD $2" "https://x/mgba HEAD $(h40 "$3")" > "${T}/cb-remote"; }
+cbump() { ( export PATH="${FG}:${PATH}" FG_REMOTE="${T}/cb-remote"; bash "${T}/cb/tools/cores-bump.sh" "$@" ) > "${T}/cb.out" 2> "${T}/cb.err"; }
+rem 3 "$(h40 4)" 5; cbump --out "${T}/cb-new.txt"; rc=$?
+ok "nessun upstream nuovo: pin identici (anche colonne e rami), nessun core" '[ "${rc}" = 0 ] && cmp -s "${T}/cb-new.txt" "${T}/cb-pins0.txt" && [ ! -s "${T}/cb.out" ] && grep -q "0 core cambiati" "${T}/cb.err"'
+rem 3 "$(h40 6)" 7; cbump --out "${T}/cb-new.txt"; rc=$?
+ok "solo la dipendenza nuova: il suo core fra i cambiati, la dipendenza in coda" '[ "${rc}" = 0 ] && [ "$(cat "${T}/cb.out")" = "easyrpg $(h40 3) $(h40 3) +liblcf $(h40 4) $(h40 6)
+mgba $(h40 5) $(h40 7)" ]'
+ok "  ...nel file: la riga della dipendenza col commit nuovo, ancora sotto il core" '[ "$(grep -A1 "^easyrpg " "${T}/cb-new.txt" | tail -1)" = "$(pl +liblcf https://x/liblcf 6)" ] && grep -qx "$(pl mgba https://x/mgba 7)" "${T}/cb-new.txt" && [ "$(wc -l < "${T}/cb-new.txt")" = 6 ]'
+cbump --cores "mgba fceumm" --out "${T}/cb-new.txt"; rc=$?
+ok "--cores senza easyrpg: la sua dipendenza resta com'era" '[ "${rc}" = 0 ] && [ "$(cat "${T}/cb.out")" = "mgba $(h40 5) $(h40 7)" ] && grep -qx "$(pl +liblcf https://x/liblcf 4)" "${T}/cb-new.txt"'
+rem 8 giu 5; cbump --out "${T}/cb-new.txt"; rc=$?
+ok "il repository della dipendenza non risponde: il gruppo resta tutto (anche il Player nuovo)" '[ "${rc}" = 0 ] && [ ! -s "${T}/cb.out" ] && cmp -s "${T}/cb-new.txt" "${T}/cb-pins0.txt" && grep -q "+liblcf: https://x/liblcf non risponde o HEAD non esiste: resta 4444444, e easyrpg con lei" "${T}/cb.err"'
+rem 8 "$(h40 4)" 5; cbump --cores easyrpg --write; rc=$?
+ok "--write: il core nuovo, la dipendenza uguale, il resto intatto" '[ "${rc}" = 0 ] && [ "$(cat "${T}/cb.out")" = "easyrpg $(h40 3) $(h40 8)" ] && [ "$(diff "${T}/cb-pins0.txt" "${T}/cb/cores/pins.txt" | grep -c "^[<>]")" = 2 ] && grep -qx "$(pl easyrpg https://x/Player 8)" "${T}/cb/cores/pins.txt"'
 
 echo "pins-merge (job cores)"
 CD="${T}/coresdist"; rm -rf "${CD}"; mkdir -p "${CD}" "${REPO}/cores"
@@ -567,12 +624,13 @@ fceumm            https://github.com/libretro/libretro-fceumm          aaaaaaa00
 mgba              https://github.com/mgba-emu/mgba                     bbbbbbb0000000000000000000000000000000000 -
 snes9x            https://github.com/libretro/snes9x                   dddddddd111111111111111111111111111111111 -
 EOF
-pm() { : > "${PG}/out.txt"; ( cd "${PG}/run" && unset GITHUB_ACTIONS && export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 && DEFAULT_BRANCH=main GITHUB_OUTPUT="${PG}/out.txt" PINS_RETRY_SLEEP=0 bash tools/ci-build.sh pins-merge "$@" ) > "${PG}/run.out" 2>&1; }
+mkdir -p "${PG}/tmp"
+pm() { : > "${PG}/out.txt"; ( cd "${PG}/run" && unset GITHUB_ACTIONS && export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 TMPDIR="${PG}/tmp" && DEFAULT_BRANCH=main GITHUB_OUTPUT="${PG}/out.txt" PINS_RETRY_SLEEP=0 bash tools/ci-build.sh pins-merge "$@" ) > "${PG}/run.out" 2>&1; }
 opins() { git -C "${PG}/origin.git" show main:cores/pins.txt; }
 pm "${CD}" "${T}/pins-new.txt"; rc=$?
 ok "pins-merge: fceumm al nuovo, snes9x (non compilato) resta, mgba uguale" '[ "${rc}" = 0 ] && opins | grep -q "^fceumm .* aaaaaaa0000000000000000000000000000000000 -" && opins | grep -q "^snes9x .* cccccccc111111111111111111111111111111111 -" && opins | grep -q "^# commento"'
 ok "  ...sopra il commit arrivato intanto sul ramo, non al posto" '[ "$(git -C "${PG}/origin.git" log --format=%s -2 main | tr "\n" "|")" = "cores: 1 core all'"'"'upstream|intanto|" ] && [ "$(git -C "${PG}/origin.git" show main:README | tr "\n" " ")" = "uno due " ]'
-ok "  ...da github-actions, changed=true, niente worktree rimasti" '[ "$(git -C "${PG}/origin.git" log -1 --format=%an main)" = "github-actions[bot]" ] && [ "$(sed -n "s/^changed=//p" "${PG}/out.txt")" = true ] && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ]'
+ok "  ...da github-actions, changed=true, niente worktree ne' temporanei rimasti" '[ "$(git -C "${PG}/origin.git" log -1 --format=%an main)" = "github-actions[bot]" ] && [ "$(sed -n "s/^changed=//p" "${PG}/out.txt")" = true ] && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ] && [ -z "$(ls -A "${PG}/tmp")" ]'
 h="$(git -C "${PG}/origin.git" rev-parse main)"
 pm "${CD}" "${T}/pins-new.txt"; rc=$?
 ok "pins-merge di nuovo: niente da cambiare, niente commit" '[ "${rc}" = 0 ] && [ "$(git -C "${PG}/origin.git" rev-parse main)" = "${h}" ] && [ "$(sed -n "s/^changed=//p" "${PG}/out.txt")" = false ]'
@@ -593,8 +651,31 @@ ok "push rifiutato una volta: riprova dalla punta e passa" '[ "${rc}" = 0 ] && g
 echo sempre > "${PG}/origin.git/rifiuta"
 sed -i 's/aaaaaaa0000000000000000000000000000000000/eeeeeee0000000000000000000000000000000000/' "${T}/pins-new.txt"
 pm "${CD}" "${T}/pins-new.txt"; rc=$?
-ok "push sempre rifiutato: esce 1 dopo 3 tentativi, niente worktree rimasti" '[ "${rc}" = 1 ] && grep -q "tentativo 3 di 3" "${PG}/run.out" && grep -q "non riuscito dopo 3 tentativi" "${PG}/run.out" && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ]'
+ok "push sempre rifiutato: esce 1 dopo 3 tentativi, niente worktree ne' temporanei rimasti" '[ "${rc}" = 1 ] && grep -q "tentativo 3 di 3" "${PG}/run.out" && grep -q "non riuscito dopo 3 tentativi" "${PG}/run.out" && [ "$(git -C "${PG}/run" worktree list | wc -l)" = 1 ] && [ -z "$(ls -A "${PG}/tmp")" ]'
 rm -f "${PG}/origin.git/rifiuta"
+# un core con una dipendenza pinnata: le righe del gruppo si spostano insieme
+gt clone -q "${PG}/origin.git" "${PG}/c"
+printf '%-17s %-52s %s -\n' easyrpg https://github.com/EasyRPG/Player 7777777777777777777777777777777777777777 \
+	+liblcf https://github.com/EasyRPG/liblcf 8888888888888888888888888888888888888888 >> "${PG}/c/cores/pins.txt"
+printf '%-17s %-52s %s -\n' zx https://x/zx 1212121212121212121212121212121212121212 >> "${PG}/c/cores/pins.txt"
+gt -C "${PG}/c" commit -qam "pins: easyrpg e liblcf" && gt -C "${PG}/c" push -q origin HEAD:main
+opins | sed 's/ 7777777777777777777777777777777777777777 / 9999999999999999999999999999999999999999 /; s/ 8888888888888888888888888888888888888888 / abababababababababababababababababababab /' > "${T}/pins-new-g.txt"
+mkdir -p "${T}/cd3"; echo "core=easyrpg commit=9999999999999999999999999999999999999999 site=x lakka=x sysroot=x date=x deps=liblcf@abababababababababababababababababababab" > "${T}/cd3/built.txt"
+pm "${T}/cd3" "${T}/pins-new-g.txt"; rc=$?
+ok "pins-merge: easyrpg e la sua dipendenza insieme, la dipendenza ancora sotto di lui" '[ "${rc}" = 0 ] && [ "$(opins | grep -A1 "^easyrpg " | awk "{ print \$1, \$3 }" | tr "\n" " ")" = "easyrpg 9999999999999999999999999999999999999999 +liblcf abababababababababababababababababababab " ] && opins | grep -q "^zx .* 1212121212121212121212121212121212121212 -" && [ "$(opins | wc -l)" = 7 ] && grep -q "easyrpg: 9999999 +liblcf abababa" "${PG}/run.out"'
+# solo la dipendenza nuova (il Player uguale): si sposta lei
+opins | sed 's/ abababababababababababababababababababab / cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd /' > "${T}/pins-new-g.txt"
+pm "${T}/cd3" "${T}/pins-new-g.txt"; rc=$?
+ok "  ...solo la dipendenza cambiata: si sposta lei" '[ "${rc}" = 0 ] && opins | grep -q "^+liblcf .* cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd -" && opins | grep -q "^easyrpg .* 9999999999999999999999999999999999999999 -"'
+# intanto sul ramo il gruppo ha preso un'altra dipendenza: i pin della corsa
+# non la conoscono, il gruppo resta com'e'
+gt -C "${PG}/c" pull -q origin main 2>/dev/null
+sed -i '/^+liblcf /a +libextra         https://x/libextra                                   3434343434343434343434343434343434343434 -' "${PG}/c/cores/pins.txt"
+gt -C "${PG}/c" commit -qam "pins: un'altra dipendenza" && gt -C "${PG}/c" push -q origin HEAD:main
+h="$(git -C "${PG}/origin.git" rev-parse main)"
+sed 's/ cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd / efefefefefefefefefefefefefefefefefefefef /' "${T}/pins-new-g.txt" > "${T}/pins-new-g2.txt"
+pm "${T}/cd3" "${T}/pins-new-g2.txt"; rc=$?
+ok "  ...il gruppo cambiato sul ramo durante la corsa: resta, nessun commit" '[ "${rc}" = 0 ] && [ "$(git -C "${PG}/origin.git" rev-parse main)" = "${h}" ] && grep -q "easyrpg: sul ramo il gruppo e.\{0,2\} cambiato" "${PG}/run.out" && opins | grep -q "^+libextra "'
 
 echo "cores (job cores): il .so deve venire dal commit del pin"
 CW="${T}/cw"; rm -rf "${CW}"; mkdir -p "${CW}/lakka-rf35h" "${CW}/lakka-rf35h-build"
@@ -632,6 +713,55 @@ ok "  ...mgba fallito, con la riga del resoconto" 'grep -q "^== mgba: mgba falli
 ok "  ...e il perche' dal suo log (core_why): la patch gia' applicata, il comando" 'grep -q "^Reversed (or previously applied) patch detected" "${CW}/cores/failed.txt" && grep -qF "comando: cat \${i} | patch" "${CW}/cores/failed.txt"'
 ok "  ...un'annotazione per fallito, col perche'" 'grep -q "^::warning title=Core mgba::== mgba: mgba fallito (uscita 2)" "${T}/cores.out" && grep -q "^::warning title=Core gambatte::== gambatte: compilato da install_pkg/gambatte-9fe223d" "${T}/cores.out" && ! grep -q "title=Core fceumm::" "${T}/cores.out"'
 ok "  ...nella notice i riusciti col commit provato (core@sha)" 'grep -q "^::notice title=Core::riusciti: fceumm@1111111 ; falliti: " "${T}/cores.out"'
+
+echo "cores con una dipendenza pinnata (easyrpg e +liblcf)"
+SE=4444444444444444444444444444444444444444; SL=5555555555555555555555555555555555555555
+cat > "${REPO}/cores/pins.txt" <<EOF
+fceumm    https://github.com/libretro/libretro-fceumm    ${SF} -
+easyrpg   https://github.com/EasyRPG/Player              ${SE} -
++liblcf   https://github.com/EasyRPG/liblcf              ${SL} -
+mgba      https://github.com/mgba-emu/mgba               ${SM} -
+EOF
+# build-in-docker finto: gli argomenti in args.txt, il resoconto secondo
+# ${T}/dmode (ok, depfail, depold, corefail)
+cat > "${CW}/lakka-rf35h/build-in-docker.sh" <<EOF
+#!/bin/bash
+t="${CW}/lakka-rf35h-build"
+printf '%s\n' "\$@" > "${T}/args.txt"
+rm -rf "\${t}"/build-rf35h-* "\${t}/target/cores"
+mkdir -p "\${t}/target/cores/fceumm" "\${t}/target/cores/easyrpg"
+cp "${T}/so.fceumm" "\${t}/target/cores/fceumm/fceumm_libretro.so"
+cp "${T}/so.fceumm" "\${t}/target/cores/easyrpg/easyrpg_libretro.so"
+r="\${t}/build-rf35h-20261009-010000-pacchetti.txt"
+echo "fceumm ok: fceumm_libretro.so (install_pkg/fceumm-${SF})" > "\${r}"
+case "\$(cat "${T}/dmode")" in
+	ok)       echo "liblcf ok: dipendenza, nessun core (install_pkg/liblcf-${SL})" >> "\${r}"
+	          echo "easyrpg ok: easyrpg_libretro.so (install_pkg/easyrpg-${SE})" >> "\${r}" ;;
+	depfail)  echo "liblcf fallito (uscita 2)    log: x" >> "\${r}"
+	          echo "easyrpg fallito (uscita 2)    log: y" >> "\${r}"
+	          printf '%s\n' "src/lcf/reader.cpp:12:1: error: lcf rotta" "*********** FAILED COMMAND ***********" "ninja" > "\${t}/build-rf35h-20261009-010000-liblcf-fallito.log"
+	          printf '%s\n' "src/game.cpp:1:1: error: dal core" > "\${t}/build-rf35h-20261009-010000-easyrpg-fallito.log" ;;
+	depold)   echo "liblcf ok: dipendenza, nessun core (install_pkg/liblcf-92c4450a1bc1acb58bd02bbb99b57e5036919cdf)" >> "\${r}"
+	          echo "easyrpg ok: easyrpg_libretro.so (install_pkg/easyrpg-${SE})" >> "\${r}" ;;
+	corefail) echo "liblcf ok: dipendenza, nessun core (install_pkg/liblcf-${SL})" >> "\${r}"
+	          echo "easyrpg fallito (uscita 1)    log: y" >> "\${r}"
+	          printf '%s\n' "src/game_system.h:699:14: error: has no member" > "\${t}/build-rf35h-20261009-010000-easyrpg-fallito.log" ;;
+esac
+echo "mgba fallito (uscita 2)    log: z" >> "\${r}"
+exit 1
+EOF
+dcores() { echo "$1" > "${T}/dmode"; ( export W="${CW}" RF35H_CONTAINER=x RF35H_SYSROOT_VERSION=v1.4.0 GITHUB_ACTIONS=true; bash "${CB}" cores "${2:-fceumm easyrpg mgba}" > "${T}/cores.out" 2>&1 ); }
+dcores ok; rc=$?
+ok "cores: la dipendenza si compila prima del suo core, una volta sola" '[ "${rc}" = 0 ] && [ "$(sed -n 2p "${T}/args.txt")" = "fceumm liblcf easyrpg mgba" ]'
+ok "  ...easyrpg riuscito, con la dipendenza al commit provato" 'grep -q "^core=easyrpg commit=${SE} .* deps=liblcf@${SL}$" "${CW}/cores/built.txt" && ! grep -q "^core=liblcf" "${CW}/cores/built.txt" && grep -q "^::notice title=Core::riusciti: fceumm@1111111 easyrpg@4444444+liblcf@5555555 ; falliti: mgba" "${T}/cores.out"'
+dcores ok "easyrpg easyrpg"; rc=$?
+ok "  ...lo stesso core due volte: la dipendenza resta una" '[ "$(sed -n 2p "${T}/args.txt")" = "liblcf easyrpg easyrpg" ]'
+dcores depfail; rc=$?
+ok "la dipendenza non compila: easyrpg fallito, col perche' di liblcf" 'grep -q "^== easyrpg: la dipendenza liblcf (liblcf 5555555) non compila: liblcf fallito (uscita 2)" "${CW}/cores/failed.txt" && grep -q "^src/lcf/reader.cpp:12:1: error: lcf rotta" "${CW}/cores/failed.txt" && ! grep -q "dal core" "${CW}/cores/failed.txt" && ! grep -q "^core=easyrpg" "${CW}/cores/built.txt" && grep -q "^core=fceumm" "${CW}/cores/built.txt"'
+dcores depold; rc=$?
+ok "la dipendenza compilata da un'altra versione: easyrpg fallito" 'grep -q "^== easyrpg: la dipendenza liblcf e. compilata da install_pkg/liblcf-92c4450a1bc1acb58bd02bbb99b57e5036919cdf, non dal commit del pin 5555555" "${CW}/cores/failed.txt" && ! grep -q "^core=easyrpg" "${CW}/cores/built.txt"'
+dcores corefail; rc=$?
+ok "la dipendenza compila e il core no: il perche' e' del core" 'grep -q "^== easyrpg: easyrpg fallito (uscita 1)" "${CW}/cores/failed.txt" && grep -q "has no member" "${CW}/cores/failed.txt" && ! grep -q "^core=easyrpg" "${CW}/cores/built.txt"'
 
 echo "build-lakka-rf35h.sh --build-packages: il log del fallito e' solo suo"
 # scripts/clean e scripts/build finti: "lungo" compila con 600 righe che

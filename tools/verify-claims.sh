@@ -399,7 +399,7 @@ chk "core: il pin cambia solo se il core compila a quel commit" "grep -qF 'non d
 # Nessuna resta a scripts/unpack, che le applicherebbe senza quelle regole.
 pp_ok() {
 	local c pd n=0
-	for c in $(awk '$2 ~ /^https?:/ && $2 !~ /\/debianita22\// { print $1 }' "$O/cores/pins.txt"); do
+	for c in $(awk '$1 !~ /^\+/ && $2 ~ /^https?:/ && $2 !~ /\/debianita22\// { print $1 }' "$O/cores/pins.txt"); do
 		pd="$W/packages/lakka/libretro_cores/$c"
 		if compgen -G "$pd/patches/*.patch" > /dev/null; then return 1; fi
 		[ -d "$pd/patches-lakka" ] || continue
@@ -409,6 +409,20 @@ pp_ok() {
 	[ "$n" -ge 1 ]
 }
 chk "core: le patch di Lakka dei core pinnati le applica pre_patch" "pp_ok"
+# Le dipendenze pinnate di un core (pins.txt, "+<pacchetto>" sotto di lui:
+# liblcf di easyrpg, 9/10/2026) hanno il loro commit nel package.mk come i
+# core, e cores.yml le prova e le sposta insieme al core
+deps_ok() {
+	local c site sha pm n=0
+	while read -r c site sha _; do
+		c="${c#+}"
+		pm="$(find "$W/projects/Rockchip" "$W/packages" -path "*/$c/package.mk" 2> /dev/null | head -1)"
+		[ -n "$pm" ] && grep -q "^PKG_VERSION=\"$sha\"" "$pm" && grep -q "^PKG_SITE=\"$site\"" "$pm" || return 1
+		n=$((n + 1))
+	done < <(grep -E '^\+[a-z0-9_]+ +https?://' "$O/cores/pins.txt")
+	[ "$n" -ge 1 ] && grep -qF 'deps_of "${p}"' "$O/tools/ci-build.sh" && grep -q 'pin_block' "$O/tools/ci-build.sh"
+}
+chk "core: dipendenze pinnate nell'albero, provate e spostate col core" "deps_ok"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir

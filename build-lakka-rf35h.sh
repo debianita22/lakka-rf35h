@@ -146,7 +146,9 @@ Uso: ./build-lakka-rf35h.sh [opzioni]
                      che mancano), niente immagine: la prova dei core a un
                      commit nuovo (cores.yml). I .so finiscono in
                      target/cores/<pacchetto>/; chi non compila non ferma
-                     gli altri, e il resoconto e' in build-rf35h-*-pacchetti.txt
+                     gli altri, e il resoconto e' in build-rf35h-*-pacchetti.txt.
+                     Un pacchetto che non e' un core (una dipendenza, liblcf)
+                     va bene se compila
   -h, --help         questo messaggio
 EOF
 }
@@ -943,6 +945,10 @@ if [ -n "${BUILD_PACKAGES}" ]; then
 			echo "${p} installato in piu' versioni (${dirs}): non si sa quale .so prendere" >> "${REPORT}"
 			rm -rf "${WORKDIR}/target/cores/${p}"
 			PK_FAILED="${PK_FAILED} ${p}"
+		elif [ "${n}" -eq 0 ] && [ ! -f "${WORKDIR}/packages/lakka/libretro_cores/${p}/package.mk" ]; then
+			# non un core: la dipendenza pinnata di uno (liblcf di easyrpg,
+			# cores/pins.txt), che vale se compila
+			echo "${p} ok: dipendenza, nessun core (install_pkg/${dirs:-nessuna})" >> "${REPORT}"
 		elif [ "${n}" -eq 0 ]; then
 			echo "${p} compilato ma nessun *_libretro.so installato" >> "${REPORT}"
 			PK_FAILED="${PK_FAILED} ${p}"
