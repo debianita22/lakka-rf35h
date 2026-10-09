@@ -29,7 +29,7 @@ mame                 https://github.com/libretro/mame                         e8
 scummvm              https://github.com/libretro/scummvm                      fcbce3ae815269dacdc309092bc92ccc6d3e13bb -
 mame2015             https://github.com/libretro/mame2015-libretro            7adbf440d5f554097f58f8c6ebb673adc4320a31 -
 mame2010             https://github.com/libretro/mame2010-libretro            dff8aadd1c3f38215af3955746d6e19abe0ddcea -
-same_cdi             https://github.com/libretro/same_cdi                     7ee1d8e9cb4307b7cd44ee1dd757e9b3f48f41d5 -
+same_cdi             https://github.com/libretro/same_cdi                     ff9bb99a50d518aef6d2add1c49b7c44447e3e78 -
 vice                 https://github.com/libretro/vice-libretro                f63b56688f3133a2bb17499db9eebb7ab81df5f5 -
 dolphin              https://github.com/libretro/dolphin                      114977f115757b1d5506da93c825188233813ec1 -
 ppsspp               https://github.com/hrydgard/ppsspp                       d74f16ef51a9ae100dfffacb4126264f2d524bdd -
@@ -99,7 +99,7 @@ desmume_2015         https://github.com/libretro/desmume2015                  42
 dice                 https://github.com/mittonk/dice-libretro                 ab766aa25c6ed970ece28f2df5be7daa26b9e439 -
 dinothawr            https://github.com/libretro/Dinothawr                    62d3e1ecf85f0feea01cad6809a80303a87e8a28 -
 dirksimple           https://github.com/icculus/DirkSimple                    d5d75f97af34690010166a786ee41e15dd142c15 -
-dosbox               https://github.com/libretro/dosbox-libretro              b7b24262c282c0caef2368c87323ff8c381b3102 -
+dosbox               https://github.com/libretro/dosbox-libretro              a563bb5e9753f207d74e9d8c417d793b784fa4be -
 dosbox_core          https://github.com/realnc/dosbox-core                    7bcf083e8309660e2c598d6f7d5982d3851f2178 libretro
 dosbox_pure          https://github.com/libretro/dosbox-pure                  cdaea10ce8cac231bc341ca05d4c5e4e5fe0fbd5 -
 dosbox_svn           https://github.com/libretro/dosbox-svn                   46a3164fc0f1e808ae56143d81698b00fb6b4781 libretro
