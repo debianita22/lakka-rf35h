@@ -6605,3 +6605,15 @@ coi workflow di main uguali a quelli del commit, il tag si crea. Quindi:
 
 Prove: test-ci-build 141 (avviso e non errore; 403 con le due strade; 403 coi
 workflow uguali: solo il messaggio di gh).
+
+hatari e vbam (notte del 9/10): l'upstream di entrambi non ha piu' il
+Makefile del core (hatari: Makefile.libretro; VBA-M: src/libretro/Makefile),
+il core si fa col loro CMake (ENABLE_LIBRETRO). In
+integration/cores-build-layout-rf35h.patch un make_target che finche' quel
+Makefile c'e' fa quello di sempre, altrimenti configura il solo core
+(hatari: ENABLE_HATARI e ENABLE_TOOLS spenti; VBA-M: wx, SDL, Qt, link,
+ffmpeg, Lua spenti) con TARGET_CMAKE_OPTS di LibreELEC e lo costruisce con
+ninja; makeinstall prende il .so dove c'e'. Compilano al primo giro (run
+37865500377, pin a82e014 e 33b3bda in 30725ec). Dei 22: 19 all'upstream.
+Restano (issue #5): easyrpg (liblcf va portato avanti con lui: serve un pin
+di gruppo, da proporre), dosbox e same_cdi (da decidere con l'utente).
