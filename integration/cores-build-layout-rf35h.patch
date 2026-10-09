@@ -46,6 +46,47 @@ diff -ruN a/packages/lakka/libretro_cores/fbneo/package.mk b/packages/lakka/libr
  makeinstall_target() {
    mkdir -p ${INSTALL}/usr/lib/libretro
      cp -v src/burner/libretro/fbneo_libretro.so ${INSTALL}/usr/lib/libretro/
+diff -ruN a/packages/lakka/libretro_cores/hatari/package.mk b/packages/lakka/libretro_cores/hatari/package.mk
+--- a/packages/lakka/libretro_cores/hatari/package.mk	2026-10-09 02:31:37.534402754 +0200
++++ b/packages/lakka/libretro_cores/hatari/package.mk	2026-10-09 02:31:55.316935017 +0200
+@@ -3,7 +3,7 @@
+ PKG_LICENSE="GPLv2"
+ PKG_SITE="https://github.com/libretro/hatari"
+ PKG_URL="${PKG_SITE}.git"
+-PKG_DEPENDS_TARGET="toolchain"
++PKG_DEPENDS_TARGET="toolchain cmake:host ninja:host zlib"
+ PKG_LONGDESC="New rebasing of Hatari based on Mercurial upstream. Tries to be a shallow fork for easy upstreaming later on."
+ PKG_TOOLCHAIN="make"
+ 
+@@ -15,7 +15,28 @@
+   fi
+ }
+ 
++# rf35h: da ottobre 2026 libretro/hatari non ha piu' Makefile.libretro: il
++# core si fa col CMake di Hatari (ENABLE_LIBRETRO), senza l'emulatore SDL e
++# gli strumenti, con le opzioni di TARGET_CMAKE_OPTS come i pacchetti cmake.
++# Ai commit di prima, quello di sempre. Si compila in .${TARGET_NAME}: la
++# radice ha un CMakeLists.txt.
++make_target() {
++  if [ -f "${PKG_BUILD}/Makefile.libretro" ]; then
++    make ${PKG_MAKE_OPTS_TARGET}
++  else
++    cmake ${CMAKE_GENERATOR_NINJA} ${TARGET_CMAKE_OPTS} \
++          -DENABLE_LIBRETRO=ON -DENABLE_HATARI=OFF -DENABLE_TOOLS=OFF \
++          -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
++          "${PKG_BUILD}"
++    ninja ${NINJA_OPTS}
++  fi
++}
++
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
++  if [ -f ../hatari_libretro.so ]; then
+     cp -v ../hatari_libretro.so ${INSTALL}/usr/lib/libretro/
++  else
++    cp -v "$(find . -name hatari_libretro.so -print -quit)" ${INSTALL}/usr/lib/libretro/hatari_libretro.so
++  fi
+ }
 diff -ruN a/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk b/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk
 --- a/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk	2026-10-08 21:34:32.884400982 +0200
 +++ b/packages/lakka/libretro_cores/higan_sfc_balanced/package.mk	2026-10-08 21:34:47.426496811 +0200
@@ -132,5 +173,46 @@ diff -ruN a/packages/lakka/libretro_cores/tic80/package.mk b/packages/lakka/libr
 +    cp -v bin/tic80_libretro.so ${INSTALL}/usr/lib/libretro/
 +  else
      cp -v lib/tic80_libretro.so ${INSTALL}/usr/lib/libretro/
++  fi
+ }
+diff -ruN a/packages/lakka/libretro_cores/vbam/package.mk b/packages/lakka/libretro_cores/vbam/package.mk
+--- a/packages/lakka/libretro_cores/vbam/package.mk	2026-10-09 02:31:37.626402752 +0200
++++ b/packages/lakka/libretro_cores/vbam/package.mk	2026-10-09 02:31:55.317079070 +0200
+@@ -3,13 +3,36 @@
+ PKG_LICENSE="GPLv2"
+ PKG_SITE="https://github.com/visualboyadvance-m/visualboyadvance-m"
+ PKG_URL="${PKG_SITE}.git"
+-PKG_DEPENDS_TARGET="toolchain"
++PKG_DEPENDS_TARGET="toolchain cmake:host ninja:host zlib"
+ PKG_LONGDESC="VBA-M with libretro integration"
+ PKG_TOOLCHAIN="make"
+ 
+ PKG_MAKE_OPTS_TARGET="-C ../src/libretro/"
+ 
++# rf35h: da ottobre 2026 VBA-M non ha piu' src/libretro/Makefile: il core
++# si fa col CMake di VBA-M (ENABLE_LIBRETRO) senza le interfacce wx, SDL e
++# Qt, con le opzioni di TARGET_CMAKE_OPTS come i pacchetti cmake. Ai commit
++# di prima, quello di sempre. Si compila in .${TARGET_NAME}: la radice ha un
++# CMakeLists.txt.
++make_target() {
++  if [ -f "${PKG_BUILD}/src/libretro/Makefile" ]; then
++    make ${PKG_MAKE_OPTS_TARGET}
++  else
++    cmake ${CMAKE_GENERATOR_NINJA} ${TARGET_CMAKE_OPTS} \
++          -DENABLE_LIBRETRO=ON -DENABLE_WX=OFF -DENABLE_SDL=OFF -DENABLE_QT=OFF \
++          -DENABLE_LINK=OFF -DENABLE_FFMPEG=OFF -DENABLE_LUA=OFF \
++          -DENABLE_ONLINEUPDATES=OFF -DENABLE_WERROR=OFF -DBUILD_TESTING=OFF \
++          -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
++          "${PKG_BUILD}"
++    ninja ${NINJA_OPTS} vbam_libretro
++  fi
++}
++
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
++  if [ -f ../src/libretro/vbam_libretro.so ]; then
+     cp -v ../src/libretro/vbam_libretro.so ${INSTALL}/usr/lib/libretro/
++  else
++    cp -v "$(find . -name vbam_libretro.so -print -quit)" ${INSTALL}/usr/lib/libretro/vbam_libretro.so
 +  fi
  }
