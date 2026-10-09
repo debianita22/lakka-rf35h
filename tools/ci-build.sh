@@ -1176,25 +1176,45 @@ cmd_coretest() {
 }
 
 # Job cores, dopo la build: i core compilati (compiled.txt) si aprono come in
-# RetroArch? cmd_coretest sull'albero della build: le librerie del sysroot
-# della toolchain e il RetroArch di install_pkg (le sue NEEDED, precaricate).
+# RetroArch? cmd_coretest su una radice come quella dell'immagine: /usr/lib
+# fatta di link ai file che ogni pacchetto installa (install_pkg/*/usr/lib,
+# quello che va nell'immagine), e il RetroArch di install_pkg (le sue NEEDED,
+# precaricate). Non il sysroot della toolchain, che serve a compilare: nella
+# prima corsa (9/10/2026, run 37979316735) li' mancavano libz, glib e
+# libstdc++ (questa sta in toolchain/<target>/lib64), e nemmeno mgba si apriva.
 # Chi compila ma non si carica va fra i falliti col perche' (il pin resta,
 # l'issue lo dice); un avviso (crash chiuso senza contenuto) e' solo
 # un'annotazione. Prima che ci fosse, il pin del dosbox nuovo e' passato e la
 # v1.4.1 ne ha uno che non si apre. RF35H_CORETEST=no: senza il test (le prove
 # di questo script); CORETEST_ROOT e CORETEST_RA al posto di quelli dell'albero.
 cores_load() {
-	local out="$1" t="${W}/${TREE_NAME}" root ra p so line why
+	local out="$1" t="${W}/${TREE_NAME}" root ra p so line why d n=0
 	local -a sos=()
 	[ -f "${out}/compiled.txt" ] || return 0
 	if [ "${RF35H_CORETEST:-yes}" = no ]; then
 		cat "${out}/compiled.txt" >> "${out}/built.txt"
 		return 0
 	fi
-	root="${CORETEST_ROOT:-$(ls -d "${t}"/build.*/toolchain/*-linux-gnu*/sysroot 2>/dev/null | head -1 || true)}"
 	ra="${CORETEST_RA:-$(ls "${t}"/build.*/install_pkg/retroarch-*/usr/bin/retroarch 2>/dev/null | head -1 || true)}"
-	[ -n "${root}" ] && [ -n "${ra}" ] \
-		|| die "test di caricamento: nell'albero manca il sysroot (${root:-?}) o RetroArch (${ra:-?})"
+	[ -n "${ra}" ] || die "test di caricamento: nell'albero manca il RetroArch di install_pkg"
+	root="${CORETEST_ROOT:-}"
+	if [ -z "${root}" ]; then
+		# fuori da ${out}, che diventa un artifact (seguirebbe i link)
+		root="${W}/coretest-root"
+		rm -rf "${root}"
+		mkdir -p "${root}/usr/lib"
+		ln -s usr/lib "${root}/lib"
+		for d in "${t}"/build.*/install_pkg/*/usr/lib; do
+			[ -d "${d}" ] || continue
+			# un file che due pacchetti installano: resta il primo (e cp non si
+			# ferma per lui)
+			cp -Rs --update=none "${d}/." "${root}/usr/lib/" 2>/dev/null || true
+			n=$((n + 1))
+		done
+		[ -e "${root}/usr/lib/ld-linux-aarch64.so.1" ] \
+			|| die "test di caricamento: in install_pkg nessun ld-linux-aarch64.so.1 (${n} pacchetti con usr/lib)"
+		echo "  radice: usr/lib di ${n} pacchetti di install_pkg, $(find "${root}/usr/lib" -maxdepth 1 -name '*.so*' | wc -l) librerie"
+	fi
 	for p in $(awk '{ print substr($1, 6) }' "${out}/compiled.txt"); do
 		for so in "${t}/target/cores/${p}/"*_libretro.so; do
 			[ -f "${so}" ] && sos+=("${so}")
@@ -1202,6 +1222,7 @@ cores_load() {
 	done
 	say "Core: si caricano come in RetroArch? (rf35h-coretest sotto qemu)"
 	cmd_coretest "${root}" "${ra}" "${out}/coretest" "${sos[@]}" || true
+	[ -n "${CORETEST_ROOT:-}" ] || rm -rf "${root}"
 	while IFS= read -r line; do
 		p="$(awk '{ print substr($1, 6) }' <<< "${line}")"
 		why=""

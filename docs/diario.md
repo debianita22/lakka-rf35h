@@ -6809,8 +6809,9 @@ una libreria condivisa messa prima.
 **In CI**, perche' non ricapiti:
 
 - job cores (cores.yml): dopo la build, `cores_load` apre i core compilati
-  col sysroot della toolchain e il RetroArch di install_pkg. Chi compila ma
-  non si apre va fra i falliti col perche' (il pin resta, l'issue lo dice);
+  con le librerie dell'albero e il RetroArch di install_pkg (quali librerie:
+  vedi sotto, la prima corsa). Chi compila ma non si apre va fra i falliti
+  col perche' (il pin resta, l'issue lo dice);
 - job release (build.yml): check-dist apre ogni core del SYSTEM scaricato.
   Uno che non si apre ferma la release come uno che manca, a meno di
   allow_incomplete; allora va in noload.txt e le note lo nominano
@@ -6829,3 +6830,26 @@ Prove: test-rf35h-coretest.sh (14, core finti: simbolo non risolto, libreria
 mancante, crash in init e deinit, blocco, exit, processo lasciato, API,
 nome vuoto, file scritti fuori), test-ci-build.sh (174: cores_load,
 dist_coretest, noload.txt nelle note).
+
+### La prima corsa in CI: compilano tutti, il test non trova le librerie (9/10/2026)
+
+Run 37979316735 (cores.yml, prova senza pin ne' issue, `cores=dosbox
+dosbox_core scummvm doublecherrygb mgba`, mgba come controllo): tutti e
+cinque compilano con le ricette nuove (scummvm in 17 minuti, col faad di
+libretro-deps e LIBS), ma nessuno "si apre", mgba compreso: `libz.so.1`,
+`libstdc++.so.6`, `libglib-2.0.so.0`, `libFLAC.so.14: cannot open shared
+object file`. Il guasto era la radice del test, non i core: il sysroot della
+toolchain serve a compilare, libstdc++ e libgcc_s stanno in
+toolchain/<target>/lib64, e li' le librerie che servivano non si
+trovavano. I log del job non si leggono da qui (gh rifiuta il redirect), il
+perche' esatto resta da vedere; il controllo ha fatto il suo lavoro.
+
+La radice ora e' quella dell'immagine: `<W>/coretest-root/usr/lib` di link
+(`cp -Rs --update=none`) ai file di `install_pkg/*/usr/lib`, cioe' quello che
+ogni pacchetto mette nell'immagine (ld-linux da glibc, libstdc++ da gcc), poi
+cancellata (fuori da cores/, che diventa un artifact e seguirebbe i link).
+Provato sotto qemu con un install_pkg finto fatto dalla /usr/lib della
+v1.4.1: mgba si apre, il dosbox della v1.4.1 no (g_rec_mutex_init), la
+radice non resta. In test-ci-build.sh (177): un core che vuole una libreria
+che c'e' solo nell'install_pkg di un altro pacchetto si apre, un file in due
+pacchetti non ferma niente, install_pkg senza loader ferma il job.

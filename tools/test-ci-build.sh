@@ -951,7 +951,7 @@ printf '%s\n' "core=fceumm commit=1111111111111111111111111111111111111111 site=
 cl() { : > "${CL}/out/built.txt"; : > "${CL}/out/failed.txt"
 	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
 	  O="${REPO}" W="${CL}/w" TREE_NAME=lakka-rf35h-build GITHUB_ACTIONS=true GITHUB_RUN_ID=7 CORETEST_CC=gcc CORETEST_QEMU="" \
-	  CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${HOST_LIBS}" CORETEST_TIMEOUT=20
+	  CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${CORETEST_LIBPATH:-${HOST_LIBS}}" CORETEST_TIMEOUT=20
 	  cores_load "${CL}/out" ) > "${CL}/run.out" 2>&1; }
 RF35H_CORETEST=yes CORETEST_ROOT=/ CORETEST_RA="${CT}/retroarch" cl; rc=$?
 ok "cores_load: fceumm si apre e va fra i riusciti" '[ "${rc}" = 0 ] && [ "$(cat "${CL}/out/built.txt")" = "core=fceumm commit=1111111111111111111111111111111111111111 site=x" ]'
@@ -959,7 +959,27 @@ ok "  ...mgba compila ma non si apre: fra i falliti, col perche' e il run" 'grep
 RF35H_CORETEST=no cl
 ok "  ...RF35H_CORETEST=no: tutti i compilati fra i riusciti" '[ "$(wc -l < "${CL}/out/built.txt")" = 2 ] && [ ! -s "${CL}/out/failed.txt" ]'
 RF35H_CORETEST=yes cl; rc=$?
-ok "  ...senza sysroot ne' RetroArch nell'albero: si ferma e lo dice" '[ "${rc}" != 0 ] && grep -q "nell.albero manca il sysroot" "${CL}/run.out"'
+ok "  ...senza RetroArch nell'albero: si ferma e lo dice" '[ "${rc}" != 0 ] && grep -q "nell.albero manca il RetroArch di install_pkg" "${CL}/run.out"'
+# la radice dell'albero vero: /usr/lib coi link ai file di install_pkg. Un
+# core che vuole una libreria che c'e' solo li' (libfinta, in un pacchetto suo)
+# si apre; due pacchetti con lo stesso file non fermano niente; la radice poi
+# sparisce (sta fuori da cores/, che diventa un artifact)
+IP="${CL}/w/lakka-rf35h-build/build.X/install_pkg"
+mkdir -p "${IP}/libfinta-1/usr/lib" "${IP}/altra-1/usr/lib" "${IP}/glibc-1/usr/lib" "${IP}/retroarch-1/usr/bin"
+echo 'int finta(void) { return 2; }' > "${CL}/finta.c"
+gcc -shared -fPIC -Wl,-soname,libfinta.so.1 -o "${IP}/libfinta-1/usr/lib/libfinta.so.1.0" "${CL}/finta.c"
+ln -s libfinta.so.1.0 "${IP}/libfinta-1/usr/lib/libfinta.so.1"
+cp "${IP}/libfinta-1/usr/lib/libfinta.so.1.0" "${IP}/altra-1/usr/lib/"
+: > "${IP}/glibc-1/usr/lib/ld-linux-aarch64.so.1"
+cp "${CT}/retroarch" "${IP}/retroarch-1/usr/bin/"
+gcc -shared -fPIC -O0 -w -I"${O}/tools/libretro" -DCASO=1 -o "${CL}/w/lakka-rf35h-build/target/cores/fceumm/fceumm_libretro.so" "${CT}/core.c" \
+	-Wl,--no-as-needed "${IP}/libfinta-1/usr/lib/libfinta.so.1"
+RF35H_CORETEST=yes CORETEST_LIBPATH="${CL}/w/coretest-root/usr/lib:${HOST_LIBS}" cl; rc=$?
+ok "  ...radice da install_pkg: il core con la libreria di un altro pacchetto si apre" '[ "${rc}" = 0 ] && grep -q "^core=fceumm " "${CL}/out/built.txt" && grep -q "radice: usr/lib di 3 pacchetti di install_pkg" "${CL}/run.out" && grep -q "^ok      fceumm_libretro.so" "${CL}/out/coretest/coretest.txt"'
+ok "  ...e la radice non resta" '[ ! -e "${CL}/w/coretest-root" ]'
+rm -f "${IP}/glibc-1/usr/lib/ld-linux-aarch64.so.1"
+RF35H_CORETEST=yes CORETEST_LIBPATH="${CL}/w/coretest-root/usr/lib:${HOST_LIBS}" cl; rc=$?
+ok "  ...install_pkg senza il loader: si ferma e lo dice" '[ "${rc}" != 0 ] && grep -q "in install_pkg nessun ld-linux-aarch64.so.1" "${CL}/run.out"'
 
 echo "check-dist: i core che non si aprono fermano la release"
 # dist_coretest con un cmd_coretest finto: le righe di un test con due NO
