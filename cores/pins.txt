@@ -105,8 +105,8 @@ dosbox_pure          https://github.com/libretro/dosbox-pure                  cd
 dosbox_svn           https://github.com/libretro/dosbox-svn                   46a3164fc0f1e808ae56143d81698b00fb6b4781 libretro
 doublecherrygb       https://github.com/TimOelrichs/doublecherryGB-libretro   03f58ca3dfb4b716f7e66a0e0467f9e85ef82abb -
 doukutsu_rs          https://github.com/DrGlaucous/doukutsu-rs-libretro       2e6504e46179561869e976a22f73d8ebb65a7d5c -
-easyrpg              https://github.com/EasyRPG/Player                        78328fa29f465315291e161130e6682f69410370 -
-+liblcf              https://github.com/EasyRPG/liblcf                        92c4450a1bc1acb58bd02bbb99b57e5036919cdf -
+easyrpg              https://github.com/EasyRPG/Player                        0de2a9ab466a133ac6e192a84bd761a1d81f5f14 -
++liblcf              https://github.com/EasyRPG/liblcf                        6854310c3432e553fd4ae672ce861899c80c3bd0 -
 emux_sms             https://github.com/libretro/emux                         3e558cb15157fcb1944846a845547d369605c963 -
 ep128emu             https://github.com/libretro/ep128emu-core                6af5d03de220e6effcd0ffcd99e0fb8e8c77cc9e core
 fake_08              https://github.com/jtothebell/fake-08                    814991a2571ad3970e386cef48f3b148aa1c27b9 -
