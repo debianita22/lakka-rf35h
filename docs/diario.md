@@ -6853,3 +6853,11 @@ v1.4.1: mgba si apre, il dosbox della v1.4.1 no (g_rec_mutex_init), la
 radice non resta. In test-ci-build.sh (177): un core che vuole una libreria
 che c'e' solo nell'install_pkg di un altro pacchetto si apre, un file in due
 pacchetti non ferma niente, install_pkg senza loader ferma il job.
+
+Seconda corsa (run 37982143806, stessi core, e0ec099): tutti e cinque
+compilano e si aprono, senza avvisi: dosbox@a563bb5, dosbox_core@7bcf083,
+doublecherrygb@03f58ca e mgba@143adf5 in un job (9 minuti), scummvm@fcbce3a
+nell'altro (17). Le correzioni dei quattro core reggono anche sulla
+toolchain vera (gcc 16, gold), non solo nelle prove fatte qui. Note della
+v1.4.2 in docs/release-notes/v1.4.2.md; la descrizione di allow_incomplete
+in build.yml dice anche dei core che non si aprono.

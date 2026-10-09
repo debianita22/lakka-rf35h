@@ -75,7 +75,7 @@ on:
         type: string
         default: ""
       allow_incomplete:
-        description: "Pubblica anche se mancano core o giochi (non compilati): le console che aggiornano li perdono"
+        description: "Pubblica anche se mancano core o giochi (non compilati) o un core non si apre: le console che aggiornano li perdono"
         type: boolean
         default: false
       publish_from:
