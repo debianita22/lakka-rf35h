@@ -113,7 +113,7 @@ genesis_plus_gx_wide https://github.com/libretro/Genesis-Plus-GX-Wide         b7
 geolith              https://github.com/libretro/geolith-libretro             194024931935eff2092e36fc4f8e53e62ed11097 -
 gme                  https://github.com/libretro/libretro-gme                 1562f6207a066e9807243c89648d1cb44e411971 -
 gw_libretro          https://github.com/libretro/gw-libretro                  91d599b951e7bfe7e040347f58667cba20074adc -
-hatari               https://github.com/libretro/hatari                       7008194d3f951a157997f67a820578f56f7feee0 -
+hatari               https://github.com/libretro/hatari                       a82e014ce2b05fc7724add284febba3816e4112a -
 higan_sfc            https://gitlab.com/higan/higan                           d3f592013a27cb78f17d84f90a6be6cf6f6af1d1 libretro
 higan_sfc_balanced   https://github.com/libretro/nSide                        5b2b5da3a9654d88b2e51fb7a1637808ac601a18 -
 jaxe                 https://github.com/kurtjd/jaxe                           c767afd785e01a15bcd575a2d93b737add82b675 -
@@ -167,7 +167,7 @@ tic80                https://github.com/libretro/TIC-80                       14
 tyrquake             https://github.com/libretro/tyrquake                     e57bb11597e8a00380f30f2627d219da960cf69a -
 uae4arm              https://github.com/Chips-fr/uae4arm-rpi                  fc1cb90afd6b5c6d9bb933d111c4c99c90f37688 -
 uzem                 https://github.com/libretro/libretro-uzem                d991ee94547c8294abc1c4cb73d63116aa58b5bc -
-vbam                 https://github.com/visualboyadvance-m/visualboyadvance-m ea8b08fe75e2c88ee07435a0dff39d5ceefb5e5f -
+vbam                 https://github.com/visualboyadvance-m/visualboyadvance-m 33b3bda42667bcf6d727ed616ab2636d460585bd -
 vecx                 https://github.com/libretro/libretro-vecx                8f671cc9d737f2890c3ce19e177e2984dcae121f -
 vircon32             https://github.com/vircon32/vircon32-libretro            dd78c5cea1fcaa382b7492d0d813d6c1534914d7 -
 virtualjaguar        https://github.com/libretro/virtualjaguar-libretro       dbed6843a22e3fdbbbfada23d4663e8bdee4bc16 -
