@@ -28,6 +28,54 @@ diff -ruN a/packages/lakka/libretro_cores/citra/package.mk b/packages/lakka/libr
  
  if [ "${OPENGL_SUPPORT}" = "yes" ]; then
    PKG_DEPENDS_TARGET+=" ${OPENGL}"
+diff -ruN a/packages/lakka/libretro_cores/dosbox/package.mk b/packages/lakka/libretro_cores/dosbox/package.mk
+--- a/packages/lakka/libretro_cores/dosbox/package.mk	2026-10-09 08:20:01.378021737 +0200
++++ b/packages/lakka/libretro_cores/dosbox/package.mk	2026-10-09 08:20:18.558965449 +0200
+@@ -3,17 +3,42 @@
+ PKG_LICENSE="GPLv2"
+ PKG_SITE="https://github.com/libretro/dosbox-libretro"
+ PKG_URL="${PKG_SITE}.git"
+-PKG_DEPENDS_TARGET="toolchain"
++# rf35h: le librerie di dosbox_core. Dal 27/9/2026 (a563bb5) l'upstream e'
++# dosbox-core con le aggiunte di DOSBox Pure (ZIP, menu, mappatura dei
++# tasti), col suo Makefile in libretro/: si costruisce come il dosbox_core di
++# Lakka. Finche' c'e' il Makefile.libretro di prima, come prima.
++PKG_DEPENDS_TARGET="toolchain SDL_net libvorbis flac libsndfile opusfile mpg123"
+ PKG_LONGDESC="libretro wrapper for the DOSBox emulator"
+ PKG_TOOLCHAIN="make"
+ 
+ PKG_MAKE_OPTS_TARGET="-f Makefile.libretro"
+ 
+ pre_make_target() {
+-  CXXFLAGS+=" -std=gnu++11"
++  if [ -f "${PKG_BUILD}/Makefile.libretro" ]; then
++    CXXFLAGS+=" -std=gnu++11"
++  fi
++}
++
++make_target() {
++  local dynarec=""
++  if [ -f "${PKG_BUILD}/Makefile.libretro" ]; then
++    make ${PKG_MAKE_OPTS_TARGET}
++    return
++  fi
++  case "${ARCH}" in
++    aarch64) dynarec="WITH_DYNAREC=arm64" ;;
++    arm) dynarec="WITH_DYNAREC=arm" ;;
++    x86_64) dynarec="WITH_DYNAREC=x86_64" ;;
++    i386) dynarec="WITH_DYNAREC=x86" ;;
++  esac
++  make -C libretro BUNDLED_SDL=0 BUNDLED_AUDIO_CODECS=0 BUNDLED_LIBSNDFILE=0 ${dynarec}
+ }
+ 
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
++  if [ -f libretro/dosbox_libretro.so ]; then
++    cp -v libretro/dosbox_libretro.so ${INSTALL}/usr/lib/libretro/
++  else
+     cp -v dosbox_libretro.so ${INSTALL}/usr/lib/libretro/
++  fi
+ }
 diff -ruN a/packages/lakka/libretro_cores/fbneo/package.mk b/packages/lakka/libretro_cores/fbneo/package.mk
 --- a/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:32.874544413 +0200
 +++ b/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:47.426373875 +0200
@@ -158,6 +206,36 @@ diff -ruN a/packages/lakka/libretro_cores/mgba_fork/package.mk b/packages/lakka/
 -    cp -v ../mgba_libretro.so ${INSTALL}/usr/lib/libretro/mgba_fork_libretro.so
 +    cp -v mgba_libretro.so ${INSTALL}/usr/lib/libretro/mgba_fork_libretro.so
  }
+diff -ruN a/packages/lakka/libretro_cores/same_cdi/package.mk b/packages/lakka/libretro_cores/same_cdi/package.mk
+--- a/packages/lakka/libretro_cores/same_cdi/package.mk	2026-10-09 08:20:01.383952063 +0200
++++ b/packages/lakka/libretro_cores/same_cdi/package.mk	2026-10-09 08:20:27.450965978 +0200
+@@ -24,13 +24,23 @@
+     ;;
+ esac
+ 
++# rf35h: dal 3/8/2026 (68a9991) l'upstream non ha piu' GENie: un Makefile
++# fisso (Makefile.libretro e Makefile.common) che prende CC, CXX e AR
++# dall'ambiente e porta le sue librerie (zlib, expat, flac e sqlite tolti o
++# sostituiti da libretro-common). Finche' c'e' scripts/genie.lua, come prima.
+ pre_make_target() {
+-  PKG_MAKE_OPTS_TARGET+=" OVERRIDE_CC=${CC} OVERRIDE_CXX=${CXX} OVERRIDE_LD=${LD}"
+-  sed -i scripts/genie.lua \
+-      -e 's|-static-libstdc++||g'
++  if [ -f scripts/genie.lua ]; then
++    PKG_MAKE_OPTS_TARGET+=" OVERRIDE_CC=${CC} OVERRIDE_CXX=${CXX} OVERRIDE_LD=${LD}"
++    sed -i scripts/genie.lua \
++        -e 's|-static-libstdc++||g'
++  fi
+ }
+ 
+ make_target() {
++  if [ ! -f scripts/genie.lua ]; then
++    make -f Makefile.libretro platform=unix
++    return
++  fi
+   unset DISTRO
+   [ "${ARCH}" = "aarch64" ] && export ARCHOPTS="-D__aarch64__ -DASMJIT_BUILD_X86"
+   make ${PKG_MAKE_OPTS_TARGET}
 diff -ruN a/packages/lakka/libretro_cores/tic80/package.mk b/packages/lakka/libretro_cores/tic80/package.mk
 --- a/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:32.950544417 +0200
 +++ b/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:47.426537735 +0200

@@ -1,0 +1,1 @@
+Superata: l'upstream ha tolto Lua e sol2 il 4/8/2026 (173081f): il 3rdparty/sol2/sol/sol.hpp che la patch correggeva non c'e' piu'.

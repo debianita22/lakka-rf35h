@@ -1,0 +1,1 @@
+Superata: l'upstream ha tolto GENie il 3/8/2026 (68a9991): non ci sono piu' genie.make, scripts.c e toolchain.lua da adattare alla compilazione incrociata, e il Makefile nuovo prende CC e CXX dall'ambiente.

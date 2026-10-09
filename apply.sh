@@ -184,9 +184,10 @@ cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 # nella radice; higan_sfc_balanced e tic80: il .so con un altro nome o in
 # un'altra cartella; beetle_psx: un gitlink senza URL; citra: glslang senza
 # SPIRV-Tools; mgba_fork: senza Makefile.libretro, col CMake di mGBA; hatari
-# e vbam: col loro CMake se il Makefile del core non c'e' piu'): i
-# package.mk di Lakka adattati in modo da andare sia al commit pinnato sia a
-# quelli nuovi. Prima del giro dei pin, che in fondo ai package.mk con patch
+# e vbam: col loro CMake se il Makefile del core non c'e' piu'; dosbox: rifatto
+# su dosbox-core, da libretro/ come dosbox_core; same_cdi: senza GENie, il suo
+# Makefile fisso): i package.mk di Lakka adattati in modo da andare sia al
+# commit pinnato sia a quelli nuovi. Prima del giro dei pin, che in fondo ai package.mk con patch
 # aggiunge cores/pre-patch.sh.
 # Una riga "+<pacchetto>" subito sotto un core e' una sua dipendenza pinnata
 # (liblcf di easyrpg): stesso trattamento, nel package.mk che LibreELEC
