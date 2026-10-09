@@ -256,20 +256,29 @@ jobs:
       - name: Issue per i core falliti
         env:
           CORES: ${{ needs.setup.outputs.cores }}
+        # L'elenco si somma fra le corse (ci-build.sh issue-merge): una corsa
+        # su alcuni core cambia solo le loro righe. Prima ogni corsa
+        # riscriveva l'issue coi suoi soli falliti, e una prova a mano su tre
+        # core buoni chiudeva l'issue dei 22.
         run: |
           num="$(gh issue list --state open --search 'Core che non compilano in:title' --json number,title \
             --jq '[.[] | select(.title | startswith("Core che non compilano"))][0].number // empty')"
-          if [ ! -s cores-out/failed.txt ]; then
+          : > issue-old.txt
+          if [ -n "${num}" ]; then
+            gh issue view "${num}" --json body --jq .body | awk '/^```/ { f = !f; next } f' > issue-old.txt
+          fi
+          ./tools/ci-build.sh issue-merge issue-old.txt cores-out/failed.txt "${CORES}" > issue-new.txt
+          if [ ! -s issue-new.txt ]; then
             if [ -n "${num}" ]; then gh issue close "${num}" --comment "Tutti i core compilano (run ${GITHUB_RUN_ID})."; fi
             exit 0
           fi
-          n="$(grep -c '^==' cores-out/failed.txt)"
+          n="$(grep -c '^==' issue-new.txt)"
           title="Core che non compilano all'upstream: ${n}"
           # shellcheck disable=SC2016
           body="$(printf '%s\n\n```\n%s\n```\n\n%s\n' \
-            "Run ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}: questi core, alla punta del loro upstream, non compilano. Restano al commit vecchio in cores/pins.txt." \
-            "$(cat cores-out/failed.txt)" \
-            "Il log completo e' fra gli artifact del run (log-cores-<gruppo>.tar.zst, il gruppo e' nel nome del job). Quando l'upstream li sistema, il lunedi' dopo riprovano da soli; a mano: Run workflow con il nome del core.")"
+            "Questi core, alla punta del loro upstream, non compilano: restano al commit vecchio in cores/pins.txt. Per ognuno, il motivo dell'ultima prova ([run N]); l'ultima corsa: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}." \
+            "$(cat issue-new.txt)" \
+            "Il log completo e' fra gli artifact di quel run (log-cores-<gruppo>.tar.zst, il gruppo e' nel nome del job). Quando l'upstream li sistema, il lunedi' dopo riprovano da soli; a mano: Run workflow con il nome del core.")"
           if [ -n "${num}" ]; then
             gh issue edit "${num}" --title "${title}" --body "${body}"
           else

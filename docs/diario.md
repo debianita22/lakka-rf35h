@@ -6571,3 +6571,37 @@ usa il minizip che porta dentro la sua zlib, e compila (run 37846544248, pin
 riscriverla: mgba_fork tolto, gli altri cinque lasciati coi motivi del run
 prima. Dei 22: 17 all'upstream; restano easyrpg (liblcf), hatari e vbam
 (CMake), dosbox (dosbox-core), same_cdi (senza GENie).
+
+## v1.4.0 pubblicata, e il 403 del tag rivisto (9/10/2026)
+
+La build della v1.4.0 (run 37781617173, 0dc6872) e' finita alle 22:31 UTC
+in due parti: 498 passi, 174 core, nessuno escluso, img.gz 987 MB, tar
+1013 MB, sysroot-v1.4.0 salvato. Il job Release si e' fermato su `gh release
+create: HTTP 403: Resource not accessible by integration`, lo stesso errore
+della v1.3.1, ma 0dc6872 non tocca i workflow (note e diario). Su main pero',
+durante la build, era cambiato cores.yml (62d1aaf, l'issue che si somma).
+Riportato su main il cores.yml di 0dc6872 (73809e3) e rilanciato il solo
+job Release (Re-run failed jobs, via API), la v1.4.0 e' uscita alle 00:21
+UTC: latest, non pre-release, tag su 0dc6872, quattro file. Poi cores.yml
+rimesso com'era.
+
+La spiegazione dell'8/10 (vale "il commit stesso modifica i workflow") era
+sbagliata, e anche "i workflow sono diversi da quelli di main", che allora
+avevo escluso con la v1.3.0: con gli eventi di push di GitHub, alla
+pubblicazione della v1.3.0 (01:16:59 UTC dell'8/10) main era gia' b3c49f3,
+coi workflow diversi da e563026, eppure il tag si e' creato; ma c'erano due
+rami (ci-test/allcores e ci-test/kernel-tune) coi workflow identici a quelli
+di e563026. La regola esatta di GitHub resta da capire; quello che si sa:
+coi workflow di main uguali a quelli del commit, il tag si crea. Quindi:
+
+- `touches_workflows` (il commit li modifica) sostituito da
+  `workflows_unlike_main` (diversi da main, letto adesso);
+- `cmd_version`: non si ferma piu', avvisa (stdout e annotazione);
+- `cmd_publish`: prova sempre; se gh risponde 403 e i workflow non sono
+  quelli di main, il messaggio dice le due strade (il tag dal proprietario,
+  o i workflow di main riportati per il tempo della pubblicazione), poi Re-run
+  failed jobs;
+- nella guida: durante una build di release, niente cambi ai workflow su main.
+
+Prove: test-ci-build 141 (avviso e non errore; 403 con le due strade; 403 coi
+workflow uguali: solo il messaggio di gh).

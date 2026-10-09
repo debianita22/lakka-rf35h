@@ -291,7 +291,8 @@ case "$1 ${2:-}" in
 		case "${4:-}" in HEAD^{commit}|"${FAKE_SHA}"^{commit}) echo "${FAKE_SHA}" ;; *) exit 1 ;; esac ;;
 	"fetch "*) ;;
 	"merge-base --is-ancestor") [ "${FAKE_ON_MAIN:-yes}" = yes ] ;;
-	"diff-tree "*) [ -z "${FAKE_TOUCHES_WF:-}" ] || echo ".github/workflows/build.yml" ;;
+	# i workflow del commit uguali a quelli di main? (FAKE_WF_DIFF: no)
+	"diff --quiet") [ -z "${FAKE_WF_DIFF:-}" ] ;;
 	"ls-remote --tags") [ -z "${FAKE_LS_REMOTE:-}" ] || printf '%b\n' "${FAKE_LS_REMOTE}" ;;
 	*) echo "git finto: $*" >&2; exit 2 ;;
 esac
@@ -313,6 +314,7 @@ case "$*" in
 		printf '%b\n' "${FAKE_RUN}" ;;
 	"api --paginate repos/"*"/actions/runs/"*"/artifacts?per_page=100 "*) [ -z "${FAKE_RUN_ART:-}" ] || echo "${FAKE_RUN_ART}" ;;
 	"release create "*)
+		[ -z "${FAKE_CREATE_403:-}" ] || { echo "HTTP 403: Resource not accessible by integration (https://api.github.com/repos/o/r/releases)" >&2; exit 1; }
 		[ -z "${FAKE_CREATE_FAIL:-}" ] || { echo "HTTP 422: ${FAKE_CREATE_FAIL} (https://api.github.com/repos/o/r/releases)" >&2; exit 1; } ;;
 	"api -X DELETE "*|"release upload "*|"release edit "*) ;;
 	*) echo "gh finto: $*" >&2; exit 2 ;;
@@ -383,12 +385,15 @@ FAKE_RUN="" IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "publish_from di un run che non c'e': si ferma" '[ "${rc}" != 0 ] && grep -q "il run 555 non si legge" "${T}/run.out"'
 FAKE_ON_MAIN=no FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "publish_from di una build fuori da main: si ferma" '[ "${rc}" != 0 ] && grep -q "non e. su main" "${T}/run.out"'
-# un commit che modifica .github/workflows: il GITHUB_TOKEN non puo' crearne il tag
-FAKE_TOUCHES_WF=1 vers workflow_dispatch branch main v1.3.1 false; rc=$?
-ok "Run workflow da un commit che modifica i workflow: si ferma subito" '[ "${rc}" != 0 ] && grep -q "modifica .github/workflows" "${T}/run.out" && grep -q "git push origin ${SHA}:refs/tags/v1.3.1" "${T}/run.out"'
-FAKE_TOUCHES_WF=1 vers push tag v1.3.1; rc=$?
+# un commit coi workflow diversi da quelli di main: il GITHUB_TOKEN non puo'
+# crearne il tag (v1.4.0)
+FAKE_WF_DIFF=1 vers workflow_dispatch branch main v1.3.1 false; rc=$?
+ok "Run workflow da un commit coi workflow diversi da main: va, con un avviso" '[ "${rc}" = 0 ] && [ "$(outv publish)" = true ] && grep -q "attenzione: i .github/workflows di ${SHA:0:12} non sono piu. quelli di main" "${T}/run.out"'
+vers workflow_dispatch branch main v1.3.1 false; rc=$?
+ok "  ...coi workflow uguali a main: va, senza avviso" '[ "${rc}" = 0 ] && [ "$(outv publish)" = true ] && ! grep -q "attenzione" "${T}/run.out"'
+FAKE_WF_DIFF=1 vers push tag v1.3.1; rc=$?
 ok "  ...con il push del tag invece: va (il tag c'e')" '[ "${rc}" = 0 ] && [ "$(outv publish)" = true ]'
-FAKE_TOUCHES_WF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
+FAKE_WF_DIFF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "  ...publish_from con il tag gia' creato sul commit della build: va" '[ "${rc}" = 0 ] && [ "$(outv from)" = 555 ]'
 FAKE_LS_REMOTE="1111111111111111111111111111111111111111\trefs/tags/v1.3.1" FAKE_RUN="${RUNOK}" FAKE_RUN_ART=99 IN_PUBLISH_FROM=555 vers workflow_dispatch branch main v1.3.1; rc=$?
 ok "publish_from con il tag su un altro commit: si ferma" '[ "${rc}" != 0 ] && grep -q "il tag v1.3.1 esiste gia" "${T}/run.out"'
@@ -428,9 +433,13 @@ FAKE_RELEASES="556 false" pub v1.2.0; rc=$?
 ok "release gia' pubblicata: si ferma, niente cancellato" '[ "${rc}" != 0 ] && ! called DELETE && ! called "release create"'
 FAKE_GITHUB_SHA=ffffffffffffffffffffffffffffffffffffffff RF35H_BUILD_SHA="${SHA}" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
 ok "publish_from: tag sul commit della build, non su quello del run" '[ "${rc}" = 0 ] && seq_ok true && called "release create v1.3.1 --repo o/r --draft --target ${SHA}"'
-FAKE_TOUCHES_WF=1 FAKE_LATEST=v1.3.0 RF35H_FROM_RUN=555 pub v1.3.1; rc=$?
-ok "commit che modifica i workflow, senza tag: si ferma prima di gh, con il da farsi" '[ "${rc}" != 0 ] && grep -q "git push origin ${SHA}:refs/tags/v1.3.1" "${T}/run.out" && grep -q "publish_from 555" "${T}/run.out" && ! called "release create"'
-FAKE_TOUCHES_WF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
+FAKE_WF_DIFF=1 FAKE_LATEST=v1.3.0 RF35H_FROM_RUN=555 pub v1.3.1; rc=$?
+ok "workflow cambiati su main durante la build: si prova (a volte GitHub lo permette, v1.3.0)" '[ "${rc}" = 0 ] && seq_ok true'
+FAKE_WF_DIFF=1 FAKE_CREATE_403=1 FAKE_LATEST=v1.3.0 RF35H_FROM_RUN=555 pub v1.3.1; rc=$?
+ok "  ...e se gh risponde 403: si ferma col 403 e le due strade" '[ "${rc}" != 0 ] && grep -q "HTTP 403: Resource not accessible by integration" "${T}/run.out" && grep -q "git push origin ${SHA}:refs/tags/v1.3.1" "${T}/run.out" && grep -q "git checkout ${SHA:0:12} -- .github/workflows" "${T}/run.out" && grep -q "publish_from 555" "${T}/run.out" && ! called "release upload"'
+FAKE_CREATE_403=1 FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
+ok "  ...un 403 coi workflow uguali a main: solo il messaggio di gh" '[ "${rc}" != 0 ] && grep -q "HTTP 403" "${T}/run.out" && ! grep -q "git checkout" "${T}/run.out"'
+FAKE_WF_DIFF=1 FAKE_LS_REMOTE="${SHA}\trefs/tags/v1.3.1" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
 ok "  ...con il tag gia' creato sul commit: pubblica" '[ "${rc}" = 0 ] && seq_ok true'
 FAKE_CREATE_FAIL="Validation Failed" FAKE_LATEST=v1.3.0 pub v1.3.1; rc=$?
 ok "gh release create fallito: si ferma con il messaggio di gh" '[ "${rc}" != 0 ] && grep -q "gh release create: HTTP 422: Validation Failed" "${T}/run.out" && ! called "release upload"'

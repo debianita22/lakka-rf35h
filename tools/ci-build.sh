@@ -683,12 +683,21 @@ on_default_branch() {
 	git -C "${O}" merge-base --is-ancestor "${c}" "refs/remotes/origin/${DEFAULT_BRANCH}"
 }
 
-# Il commit $1 modifica file di .github/workflows (rispetto al suo genitore,
-# o ai suoi genitori se e' un merge)? Il GITHUB_TOKEN non ha il permesso
-# "workflows": non puo' creare un tag (ne' quindi una release) su un commit
-# cosi', anche se e' gia' sul ramo principale.
-touches_workflows() {
-	[ -n "$(git -C "${O}" diff-tree --no-commit-id --name-only -r -m "$1" -- .github/workflows 2>/dev/null)" ]
+# I .github/workflows del commit $1 sono diversi da quelli del ramo principale
+# di origin, letto adesso? Allora il GITHUB_TOKEN, che non ha il permesso
+# "workflows", puo' non riuscire a creare il tag (ne' quindi la release) su
+# quel commit: HTTP 403 "Resource not accessible by integration". Visto con
+# la v1.4.0 (9/10/2026): il commit della build (0dc6872) non toccava i
+# workflow, ma durante la build su main era cambiato cores.yml (62d1aaf), e il
+# job Release si e' fermato li'; riportato su main il cores.yml di 0dc6872,
+# lo stesso job rilanciato ha pubblicato. La regola esatta di GitHub non e'
+# questa: la v1.3.0 (e563026) e' passata con main gia' diverso, ma c'erano
+# rami (ci-test/*) coi suoi stessi workflow; la v1.3.1 (b3c49f3) no. Quindi
+# non si ferma niente in anticipo: si prova, e se gh risponde 403 il messaggio
+# dice le due strade. Esce 2 se main non si legge.
+workflows_unlike_main() {
+	git -C "${O}" fetch -q --no-tags origin "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" || return 2
+	! git -C "${O}" diff --quiet "$1" "refs/remotes/origin/${DEFAULT_BRANCH}" -- .github/workflows
 }
 
 # Il commit del tag $1 su origin, vuoto se il tag non c'e': il ^{} di un tag
@@ -794,16 +803,17 @@ cmd_version() {
 			tag="$(tag_commit "${version}")" || fail "Versione" "origin non risponde (git ls-remote)"
 			if [ -n "${tag}" ]; then
 				# con publish_from il tag puo' esserci gia', ma sul commit della
-				# build (vedi sotto: va creato a mano se quel commit cambia i
-				# workflow)
+				# build (vedi sotto: va creato a mano se i suoi workflow non
+				# sono piu' quelli di main)
 				[ -n "${from}" ] && [ "${tag}" = "${bsha}" ] \
 					|| fail "Versione" "il tag ${version} esiste gia': per ricostruirlo si fa push del tag, oppure un'altra versione"
-			elif touches_workflows "${bsha}"; then
-				# Il GITHUB_TOKEN non puo' creare un ref su un commit che modifica
-				# .github/workflows (HTTP 403 "Resource not accessible by
-				# integration"): la v1.3.1, su b3c49f3, e' arrivata in fondo e si
-				# e' fermata li' tre volte. Meglio saperlo subito.
-				fail "Versione" "il commit ${bsha:0:12} modifica .github/workflows: il job Release non potrebbe creare il tag ${version} (403). Fai la release da un commit dopo, che non tocca i workflow (le note della versione), oppure crea prima il tag: git push origin ${bsha}:refs/tags/${version} (un push del tag fa partire la build da solo)"
+			elif workflows_unlike_main "${bsha}"; then
+				# Il GITHUB_TOKEN potrebbe non creare il tag
+				# (workflows_unlike_main): un avviso, non un errore. Da Run
+				# workflow su main non succede (il commit e' la punta); con
+				# publish_from di una build vecchia si'.
+				echo "attenzione: i .github/workflows di ${bsha:0:12} non sono piu' quelli di ${DEFAULT_BRANCH}" >&2
+				note warning "Versione" "i .github/workflows di ${bsha:0:12} non sono piu' quelli di ${DEFAULT_BRANCH}: il job Release potrebbe non riuscire a creare il tag ${version} (403). Se succede, il suo messaggio dice cosa fare; per evitarlo, crea prima il tag (git push origin ${bsha}:refs/tags/${version})"
 			fi
 		fi
 		rels="$(release_ids "${version}")" || fail "Versione" "elenco delle release illeggibile"
@@ -842,11 +852,14 @@ cmd_version() {
 # v1.3.1 si e' fermata due volte su "gh release create" senza un perche'
 # leggibile.
 gh_step() {
-	local what="$1" out
+	local what="$1" out hint=""
 	shift
 	if ! out="$("$@" 2>&1)"; then
 		printf '%s\n' "${out}" >&2
-		fail "Pubblica" "${what}: $(printf '%s\n' "${out}" | grep -v '^[[:space:]]*$' | tail -n 5)"
+		if [ -n "${GH_403_HINT:-}" ] && grep -q 'HTTP 403' <<< "${out}"; then
+			hint=" -- ${GH_403_HINT}"
+		fi
+		fail "Pubblica" "${what}: $(printf '%s\n' "${out}" | grep -v '^[[:space:]]*$' | tail -n 5)${hint}"
 	fi
 	[ -z "${out}" ] || printf '%s\n' "${out}"
 }
@@ -868,8 +881,13 @@ cmd_publish() {
 	if [ -n "${tag}" ] && [ "${tag}" != "${sha}" ]; then
 		fail "Pubblica" "il tag ${VERSION} e' su ${tag:0:12}, la build su ${sha:0:12}: non pubblico"
 	fi
-	if [ -z "${tag}" ] && touches_workflows "${sha}"; then
-		fail "Pubblica" "il commit ${sha:0:12} modifica .github/workflows: il GITHUB_TOKEN non puo' creare il tag ${VERSION} (403). Crea il tag (git push origin ${sha}:refs/tags/${VERSION}; ferma la build che il push fa partire), poi Run workflow con version ${VERSION} e publish_from ${RF35H_FROM_RUN:-${GITHUB_RUN_ID:-<il run della build>}}"
+	# durante la build qualcuno puo' aver cambiato i workflow su main: allora il
+	# tag puo' non crearsi (workflows_unlike_main). Si prova lo stesso; se gh
+	# risponde 403, il messaggio (GH_403_HINT, in gh_step) dice le due strade
+	# (la v1.4.0 e' uscita con la seconda, 9/10/2026)
+	GH_403_HINT=""
+	if [ -z "${tag}" ] && workflows_unlike_main "${sha}"; then
+		GH_403_HINT="su ${DEFAULT_BRANCH} i .github/workflows non sono piu' quelli di ${sha:0:12}, e il GITHUB_TOKEN non puo' creare il tag ${VERSION}. Due strade, poi Re-run failed jobs di questo run (o Run workflow con version ${VERSION} e publish_from ${RF35H_FROM_RUN:-${GITHUB_RUN_ID:-<il run della build>}}): 1) il tag dal proprietario, git push origin ${sha}:refs/tags/${VERSION} (ferma la build che il push fa partire); 2) su ${DEFAULT_BRANCH}, per il tempo della pubblicazione, git checkout ${sha:0:12} -- .github/workflows, commit e push, poi si rimettono"
 	fi
 	# Una release gia' pubblicata con questo tag ferma tutto. Le bozze sono di
 	# un tentativo fallito (il job rilanciato, o un run di prima della stessa

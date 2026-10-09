@@ -810,6 +810,13 @@ Workflows in [`.github/workflows`](../.github/workflows):
   that run's ID builds nothing: the *Release* job publishes that run's files
   (kept 14 days) with the current scripts, and the release still points at
   the commit that was built.
+- **If *Release* fails with HTTP 403** (*Resource not accessible by
+  integration*): `GITHUB_TOKEN` could not create the tag. It happens when the
+  workflows on the default branch changed after the build started, so don't
+  push workflow changes while a release builds. Either push the tag yourself
+  (`git push origin <commit>:refs/tags/<version>`), or put the default
+  branch's `.github/workflows` back to the built commit's for the time of
+  publishing; then *Re-run failed jobs*. The error message lists both.
 
 All 162 cores of the default set are pinned in `cores/pins.txt` (package,
 repository, commit, branch): `apply.sh` writes them into the Lakka packages,
