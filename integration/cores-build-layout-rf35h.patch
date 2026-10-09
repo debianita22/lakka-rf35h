@@ -30,17 +30,18 @@ diff -ruN a/packages/lakka/libretro_cores/citra/package.mk b/packages/lakka/libr
    PKG_DEPENDS_TARGET+=" ${OPENGL}"
 diff -ruN a/packages/lakka/libretro_cores/dosbox/package.mk b/packages/lakka/libretro_cores/dosbox/package.mk
 --- a/packages/lakka/libretro_cores/dosbox/package.mk	2026-10-09 08:20:01.378021737 +0200
-+++ b/packages/lakka/libretro_cores/dosbox/package.mk	2026-10-09 08:20:18.558965449 +0200
-@@ -3,17 +3,42 @@
++++ b/packages/lakka/libretro_cores/dosbox/package.mk	2026-10-09 20:59:24.504057672 +0200
+@@ -3,17 +3,46 @@
  PKG_LICENSE="GPLv2"
  PKG_SITE="https://github.com/libretro/dosbox-libretro"
  PKG_URL="${PKG_SITE}.git"
 -PKG_DEPENDS_TARGET="toolchain"
-+# rf35h: le librerie di dosbox_core. Dal 27/9/2026 (a563bb5) l'upstream e'
++# rf35h: le librerie di dosbox_core (con fluidsynth, glib e dbus: vedi il suo
++# pre_make_target). Dal 27/9/2026 (a563bb5) l'upstream e'
 +# dosbox-core con le aggiunte di DOSBox Pure (ZIP, menu, mappatura dei
 +# tasti), col suo Makefile in libretro/: si costruisce come il dosbox_core di
 +# Lakka. Finche' c'e' il Makefile.libretro di prima, come prima.
-+PKG_DEPENDS_TARGET="toolchain SDL_net libvorbis flac libsndfile opusfile mpg123"
++PKG_DEPENDS_TARGET="toolchain SDL_net libvorbis flac libsndfile opusfile mpg123 fluidsynth glib dbus"
  PKG_LONGDESC="libretro wrapper for the DOSBox emulator"
  PKG_TOOLCHAIN="make"
  
@@ -50,6 +51,9 @@ diff -ruN a/packages/lakka/libretro_cores/dosbox/package.mk b/packages/lakka/lib
 -  CXXFLAGS+=" -std=gnu++11"
 +  if [ -f "${PKG_BUILD}/Makefile.libretro" ]; then
 +    CXXFLAGS+=" -std=gnu++11"
++  else
++    # come dosbox_core: quello che usa il libfluidsynth.a di Lakka
++    LDFLAGS+=" -Wl,--push-state,--no-as-needed -lglib-2.0 -ldbus-1 -lsndfile -Wl,--pop-state"
 +  fi
 +}
 +
@@ -75,6 +79,64 @@ diff -ruN a/packages/lakka/libretro_cores/dosbox/package.mk b/packages/lakka/lib
 +  else
      cp -v dosbox_libretro.so ${INSTALL}/usr/lib/libretro/
 +  fi
+ }
+diff -ruN a/packages/lakka/libretro_cores/dosbox_core/package.mk b/packages/lakka/libretro_cores/dosbox_core/package.mk
+--- a/packages/lakka/libretro_cores/dosbox_core/package.mk	2026-10-09 20:58:17.447540273 +0200
++++ b/packages/lakka/libretro_cores/dosbox_core/package.mk	2026-10-09 21:08:20.719967922 +0200
+@@ -4,7 +4,8 @@
+ PKG_SITE="https://github.com/realnc/dosbox-core"
+ PKG_URL="${PKG_SITE}.git"
+ PKG_GIT_CLONE_BRANCH="libretro"
+-PKG_DEPENDS_TARGET="toolchain SDL_net libvorbis flac libsndfile opusfile mpg123"
++# rf35h: fluidsynth glib dbus, vedi pre_make_target
++PKG_DEPENDS_TARGET="toolchain SDL_net libvorbis flac libsndfile opusfile mpg123 fluidsynth glib dbus"
+ PKG_LONGDESC="A DOSBox core for use in RetroArch and other libretro frontends"
+ PKG_TOOLCHAIN="make"
+ 
+@@ -20,6 +21,19 @@
+   PKG_MAKE_OPTS_TARGET+=" WITH_DYNAREC=x86"
+ fi
+ 
++# rf35h: la MIDI del core e' fluidsynth, che il Makefile chiede a pkg-config
++# senza --static: nel link arriva solo -lfluidsynth, e il linker prende il
++# libfluidsynth.a di Lakka (statico, usa glib, dbus e libsndfile; quello senza
++# glib che il Makefile compila in deps_bin non lo trova: pkg-config mette il
++# sysroot davanti al suo percorso). Il .so non si apriva in RetroArch
++# (undefined symbol: g_rec_mutex_init, v1.4.0 e v1.4.1). Qui le tre
++# librerie, e fluidsynth fra le dipendenze (prima c'era solo se un altro
++# pacchetto l'aveva gia' costruito). In LDFLAGS vengono prima di
++# -lfluidsynth: con --as-needed ld.bfd le scarterebbe, da qui --no-as-needed.
++pre_make_target() {
++  LDFLAGS+=" -Wl,--push-state,--no-as-needed -lglib-2.0 -ldbus-1 -lsndfile -Wl,--pop-state"
++}
++
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
+     cp -v ${PKG_BUILD}/libretro/dosbox_core_libretro.so ${INSTALL}/usr/lib/libretro
+diff -ruN a/packages/lakka/libretro_cores/doublecherrygb/package.mk b/packages/lakka/libretro_cores/doublecherrygb/package.mk
+--- a/packages/lakka/libretro_cores/doublecherrygb/package.mk	2026-10-09 20:58:17.462734846 +0200
++++ b/packages/lakka/libretro_cores/doublecherrygb/package.mk	2026-10-09 20:59:24.504752961 +0200
+@@ -5,9 +5,19 @@
+ PKG_URL="${PKG_SITE}.git"
+ PKG_DEPENDS_TARGET="toolchain"
+ PKG_LONGDESC="libretro gameboy core with up to 16 players support and buildtin Pokemon Distribution Events - hardfork from tgbdual-libretro"
+-PKG_TOOLCHAIN="cmake"
++# rf35h: col Makefile del core invece che col CMakeLists.txt, a cui mancano
++# file_path_io.c, retro_dirent.c ed encoding_utf.c di libretro-common: il .so
++# del CMake non si apriva in RetroArch (undefined symbol: path_is_valid, v1.4.0
++# e v1.4.1). Col CMakeLists.txt nella radice LibreELEC compila in
++# .${TARGET_NAME}: si torna nella radice, dove sta il Makefile.
++PKG_TOOLCHAIN="make"
++PKG_MAKE_OPTS_TARGET="platform=unix"
++
++pre_make_target() {
++  cd "${PKG_BUILD}"
++}
+ 
+ makeinstall_target() {
+   mkdir -p ${INSTALL}/usr/lib/libretro
+-    cp -v DoubleCherryGB_libretro.so ${INSTALL}/usr/lib/libretro/
++    cp -v ${PKG_BUILD}/DoubleCherryGB_libretro.so ${INSTALL}/usr/lib/libretro/
  }
 diff -ruN a/packages/lakka/libretro_cores/fbneo/package.mk b/packages/lakka/libretro_cores/fbneo/package.mk
 --- a/packages/lakka/libretro_cores/fbneo/package.mk	2026-10-08 21:34:32.874544413 +0200
@@ -236,6 +298,48 @@ diff -ruN a/packages/lakka/libretro_cores/same_cdi/package.mk b/packages/lakka/l
    unset DISTRO
    [ "${ARCH}" = "aarch64" ] && export ARCHOPTS="-D__aarch64__ -DASMJIT_BUILD_X86"
    make ${PKG_MAKE_OPTS_TARGET}
+diff -ruN a/packages/lakka/libretro_cores/scummvm/package.mk b/packages/lakka/libretro_cores/scummvm/package.mk
+--- a/packages/lakka/libretro_cores/scummvm/package.mk	2026-10-09 20:58:17.454056102 +0200
++++ b/packages/lakka/libretro_cores/scummvm/package.mk	2026-10-09 20:59:24.504571196 +0200
+@@ -3,17 +3,22 @@
+ PKG_LICENSE="GPLv2"
+ PKG_SITE="https://github.com/libretro/scummvm"
+ PKG_URL="${PKG_SITE}.git"
+-PKG_DEPENDS_TARGET="toolchain curl fluidsynth flac libvorbis zlib faad2 freetype"
++# rf35h: glib dbus libsndfile alsa-lib per fluidsynth (pre_make_target), senza
++# faad2 (USE_SYSTEM_faad=0)
++PKG_DEPENDS_TARGET="toolchain curl fluidsynth flac libvorbis zlib freetype glib dbus libsndfile alsa-lib"
+ PKG_LONGDESC="ScummVM with libretro backend."
+ PKG_TOOLCHAIN="make"
+ 
++# rf35h: USE_SYSTEM_faad=0, il faad di libretro-deps compilato col core. Il
++# faad2 di Lakka e' statico e senza -fPIC: ld.bfd non lo mette in un .so
++# (R_AARCH64_ADR_PREL_PG_HI21 contro stderr).
+ PKG_MAKE_OPTS_TARGET="all \
+                       USE_CLOUD=1 \
+                       USE_SYSTEM_fluidsynth=1 \
+                       USE_SYSTEM_FLAC=1 \
+                       USE_SYSTEM_vorbis=1 \
+                       USE_SYSTEM_z=1 \
+-                      USE_SYSTEM_faad=1 \
++                      USE_SYSTEM_faad=0 \
+                       USE_SYSTEM_freetype=1"
+ 
+ pre_make_target() {
+@@ -24,6 +29,13 @@
+   else
+     PKG_MAKE_OPTS_TARGET+=" platform=${TARGET_NAME}"
+   fi
++  # rf35h: il Makefile mette le librerie di sistema (-lfluidsynth, -lvorbis...)
++  # in LDFLAGS, che nel link sta prima degli oggetti: da una libreria statica,
++  # il libfluidsynth.a di Lakka, non prende niente. E con USE_SYSTEM_vorbis
++  # manca libvorbisfile. Il .so non si apriva in RetroArch (undefined symbol:
++  # fluid_synth_pitch_bend, v1.4.0 e v1.4.1). LIBS sta dopo gli oggetti:
++  # fluidsynth con quello che usa (glib, dbus, libsndfile, alsa) e vorbisfile.
++  export LIBS="-lfluidsynth -lglib-2.0 -ldbus-1 -lsndfile -lasound -lvorbisfile"
+ }
+ 
+ makeinstall_target() {
 diff -ruN a/packages/lakka/libretro_cores/tic80/package.mk b/packages/lakka/libretro_cores/tic80/package.mk
 --- a/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:32.950544417 +0200
 +++ b/packages/lakka/libretro_cores/tic80/package.mk	2026-10-08 21:34:47.426537735 +0200

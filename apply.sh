@@ -187,7 +187,13 @@ cp -r "$O"/packages/rf35h-utils "$RK/packages/"
 # e vbam: col loro CMake se il Makefile del core non c'e' piu'; dosbox: rifatto
 # su dosbox-core, da libretro/ come dosbox_core; same_cdi: senza GENie, il suo
 # Makefile fisso): i package.mk di Lakka adattati in modo da andare sia al
-# commit pinnato sia a quelli nuovi. Prima del giro dei pin, che in fondo ai package.mk con patch
+# commit pinnato sia a quelli nuovi. Nella stessa patch i core che compilavano
+# ma RetroArch non apriva (v1.4.1, tools/rf35h-coretest.c): dosbox e
+# dosbox_core senza glib, dbus e libsndfile del libfluidsynth.a di Lakka,
+# scummvm che da quel .a non prendeva niente (e senza libvorbisfile; il faad
+# di Lakka, statico e non -fPIC, non entra in un .so: quello di libretro-deps),
+# DoubleCherryGB col CMake a cui mancano file di libretro-common (col suo
+# Makefile). Prima del giro dei pin, che in fondo ai package.mk con patch
 # aggiunge cores/pre-patch.sh.
 # Una riga "+<pacchetto>" subito sotto un core e' una sua dipendenza pinnata
 # (liblcf di easyrpg): stesso trattamento, nel package.mk che LibreELEC

@@ -6736,3 +6736,96 @@ File: Lakka-RK3326.aarch64-Next-v1.4.1-rf35h.img.gz 1038257924 byte,
 SHA256SUMS, update.txt. Il contenuto di update.txt e SHA256SUMS da qui non
 si legge (gh rifiuta il redirect a release-assets.githubusercontent.com):
 lo hanno scritto e controllato i job.
+
+## v1.4.1 alla prova: quattro core che compilano e non si aprono (9/10/2026)
+
+La v1.4.1 scaricata da qui (con curl: segue il redirect a
+release-assets.githubusercontent.com che gh rifiuta): sha256 dei file e
+update.txt tornano, il SYSTEM e' quello atteso, e il rf35h-update della
+v1.4.0 (con le variabili RF35H_* sulle cartelle di prova) arriva a "ready" e
+installa. Sul sistema niente da dire. Sui core si': che un core compili non
+vuol dire che RetroArch lo apra, e fino a oggi nessuno lo provava.
+
+**tools/rf35h-coretest.c** apre ogni core come RetroArch, ciascuno in un
+processo a parte (crash e blocchi non fermano gli altri): dlopen con
+RTLD_NOW, i 25 simboli retro_* (RetroArch li vuole tutti), retro_api_version,
+set_environment, get_system_info, retro_init, le callback (dopo retro_init,
+come RetroArch: Mesen ne ha bisogno), retro_deinit. Nessun contenuto.
+L'ambiente risponde come RetroArch all'avvio: log, cartelle temporanee,
+lingua, opzioni di ogni versione con GET_VARIABLE che da' il valore
+predefinito (cap32, b2 e i VICE vanno in crash se e' NULL). Un crash dice
+fase, segnale, funzione e indirizzo; un crash solo in retro_deinit dopo un
+avvio buono e' un avviso. In CI gira sotto qemu-aarch64 col loader della
+radice e `--preload` delle NEEDED di RetroArch (libm, libstdc++, GLES): un
+core che conta su quelle, come sulla console, passa. libretro.h e' quello di
+RetroArch 69a4f0e (MIT), in tools/libretro/.
+
+Sulla v1.4.1: 166 ok, 4 avvisi (craft, numero, tyrquake, vitaquake2: crash
+in retro_deinit senza contenuto, che RetroArch non fa), 4 che non si aprono:
+
+| core | errore | nella v1.4.0 | simboli mancanti |
+|---|---|---|---|
+| dosbox | undefined symbol: g_rec_mutex_init | no, il dosbox vecchio si apriva | 54: 28 di glib, 16 di dbus, 10 di libsndfile |
+| dosbox_core | lo stesso | si' | gli stessi 54 |
+| scummvm | undefined symbol: fluid_synth_pitch_bend | si' | 46: 32 di fluidsynth, 7 di faad, 7 di libvorbisfile |
+| DoubleCherryGB | undefined symbol: path_is_valid | si' | 10 di libretro-common |
+
+I simboli mancanti, contati con nm contro le librerie della chiusura NEEDED
+del core e di RetroArch, e cercati in ogni libreria dell'immagine:
+
+- **dosbox, dosbox_core**: il Makefile chiede fluidsynth a pkg-config senza
+  `--static`, e arriva solo `-lfluidsynth`. Il fluidsynth senza glib che il
+  Makefile compila in deps_bin non lo trova (pkg-config mette il sysroot
+  davanti al suo percorso), e il linker prende il libfluidsynth.a di Lakka:
+  statico, con glib, dbus e libsndfile, che nel link non ci sono. Correzione:
+  `-Wl,--push-state,--no-as-needed -lglib-2.0 -ldbus-1 -lsndfile
+  -Wl,--pop-state` in LDFLAGS (nel link vengono prima di `-lfluidsynth`, e
+  con `--as-needed` ld.bfd le scarterebbe; gold no, ma Lakka puo' cambiare
+  linker), e fluidsynth, glib, dbus fra le dipendenze: fluidsynth prima non
+  c'era, il .so lo trovava solo se un altro pacchetto l'aveva gia' costruito.
+- **scummvm**: il Makefile mette le librerie di sistema in LDFLAGS, che nel
+  link sta prima degli oggetti: da una libreria statica non prende niente.
+  E con `USE_SYSTEM_vorbis` manca libvorbisfile. Correzione: `LIBS` (dopo gli
+  oggetti, il Makefile per unix non lo tocca) con fluidsynth, quello che usa
+  (glib, dbus, libsndfile, alsa) e vorbisfile. Il faad di Lakka invece non
+  si puo' usare: e' statico e senza -fPIC (faad2 non ha `+pic`), e provato
+  con un faad2 2.11.2 compilato cosi' ld.bfd lo rifiuta in un .so
+  (R_AARCH64_ADR_PREL_PG_HI21 contro stderr), gold fa un .so con TEXTREL.
+  `USE_SYSTEM_faad=0`: il faad di libretro-deps, compilato col core
+  (provato come C23 con gli errori di gcc 14: compila).
+- **DoubleCherryGB**: il CMakeLists.txt non ha file_path_io.c, retro_dirent.c
+  ed encoding_utf.c di libretro-common, il Makefile del core si'. Correzione:
+  `PKG_TOOLCHAIN="make"`, `platform=unix`, e `cd ${PKG_BUILD}` (col
+  CMakeLists.txt nella radice LibreELEC compila in `.${TARGET_NAME}`, come per
+  fbneo). Provato: compilato col Makefile (gcc 13 di Ubuntu) si apre sotto
+  qemu sulla radice della v1.4.1, "DoubleCherryGB" v0.19.0.
+
+Le tre correzioni sono in integration/cores-build-layout-rf35h.patch;
+apply.sh su un Lakka pulito al commit pinnato e verify-claims (250 verifiche,
+4 nuove; le 3 sui core falliscono sull'albero di prima). Il push-state con
+gold e bfd, e lo scarto di `--as-needed` con bfd, provati con un .a che usa
+una libreria condivisa messa prima.
+
+**In CI**, perche' non ricapiti:
+
+- job cores (cores.yml): dopo la build, `cores_load` apre i core compilati
+  col sysroot della toolchain e il RetroArch di install_pkg. Chi compila ma
+  non si apre va fra i falliti col perche' (il pin resta, l'issue lo dice);
+- job release (build.yml): check-dist apre ogni core del SYSTEM scaricato.
+  Uno che non si apre ferma la release come uno che manca, a meno di
+  allow_incomplete; allora va in noload.txt e le note lo nominano
+  ("In the image but RetroArch cannot load them").
+- i due job installano qemu-user e gcc-aarch64-linux-gnu (ci-apt.sh).
+
+Provato a mano sulla radice della v1.4.1 (dist_coretest con il vero
+cmd_coretest): la release si sarebbe fermata su quei quattro, in 10 secondi.
+Le prime corse lasciavano file fuori: np2kai scrive np2.cfg nella cartella
+corrente, e RACE senza contenuto prende la cartella dei salvataggi per il
+gioco, toglie l'ultima estensione e aggiunge .ngf (con rf35h-coretest.XXXXXX:
+`/tmp/rf35h-coretest.ngf`; visto con `qemu-aarch64 -d strace`). Ora ogni
+core gira in `<cartella delle prove>/libretro`, cartella corrente e cartelle
+di sistema, e il nome della cartella delle prove non ha punti.
+Prove: test-rf35h-coretest.sh (14, core finti: simbolo non risolto, libreria
+mancante, crash in init e deinit, blocco, exit, processo lasciato, API,
+nome vuoto, file scritti fuori), test-ci-build.sh (174: cores_load,
+dist_coretest, noload.txt nelle note).

@@ -426,8 +426,14 @@ chk "core: dipendenze pinnate nell'albero, provate e spostate col core" "deps_ok
 # Compilare non basta: la v1.4.1 aveva quattro core compilati che RetroArch
 # non apriva. tools/rf35h-coretest.c li apre come RetroArch, sotto qemu: nel
 # job cores (un core che non si apre non cambia pin) e nella release (la
-# ferma, a meno di allow_incomplete).
+# ferma, a meno di allow_incomplete). I quattro, corretti nella patch di layout
+# (9/10/2026): dosbox e dosbox_core senza le librerie del libfluidsynth.a di
+# Lakka, scummvm che da quel .a non prendeva niente, DoubleCherryGB col CMake.
 chk "core: test di caricamento nel job cores e nella release" "grep -q '^cmd_coretest()' '$O/tools/ci-build.sh' && sed -n '/^cmd_cores() {/,/^}/p' '$O/tools/ci-build.sh' | grep -q '^\s*cores_load ' && sed -n '/^cmd_check_dist() {/,/^}/p' '$O/tools/ci-build.sh' | grep -q 'dist_coretest ' && grep -q 'ci-apt.sh .*qemu-user gcc-aarch64-linux-gnu' '$O/.github/workflows/cores.yml' && grep -q 'ci-apt.sh .*qemu-user gcc-aarch64-linux-gnu' '$O/.github/workflows/build.yml'"
+LC="$W/packages/lakka/libretro_cores"
+chk "core: dosbox e dosbox_core con glib, dbus e libsndfile" "( for c in dosbox dosbox_core; do grep -qF -- '--no-as-needed -lglib-2.0 -ldbus-1 -lsndfile' \"$LC/\${c}/package.mk\" && grep -q '^PKG_DEPENDS_TARGET=\".* fluidsynth glib dbus\"' \"$LC/\${c}/package.mk\" || exit 1; done )"
+chk "core: scummvm, fluidsynth dopo gli oggetti e il faad suo" "grep -qF 'export LIBS=\"-lfluidsynth -lglib-2.0 -ldbus-1 -lsndfile -lasound -lvorbisfile\"' '$LC/scummvm/package.mk' && grep -q 'USE_SYSTEM_faad=0' '$LC/scummvm/package.mk' && ! grep -q 'USE_SYSTEM_faad=1' '$LC/scummvm/package.mk'"
+chk "core: DoubleCherryGB col suo Makefile" "grep -q '^PKG_TOOLCHAIN=\"make\"' '$LC/doublecherrygb/package.mk' && sed -n '/^pre_make_target() {/,/^}/p' '$LC/doublecherrygb/package.mk' | grep -qF 'cd \"\${PKG_BUILD}\"'"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
