@@ -261,12 +261,15 @@ jobs:
           ls -la
 
       # Di nuovo sui file scaricati, quelli che si pubblicano: re3 e core rotti
-      # nel SYSTEM, poi i core di CORES_DEFAULT e i giochi. Un'immagine a cui
-      # manca qualcosa (--keep-going) toglierebbe quel core a ogni console che
-      # aggiorna: si ferma qui, a meno di allow_incomplete.
+      # nel SYSTEM, poi i core di CORES_DEFAULT e i giochi, poi ogni core del
+      # SYSTEM aperto come fa RetroArch (rf35h-coretest sotto qemu: per questo
+      # qemu-user e il compilatore aarch64). Un'immagine a cui manca qualcosa
+      # (--keep-going) toglierebbe quel core a ogni console che aggiorna, uno
+      # che non si carica e' come mancante: si ferma qui, a meno di
+      # allow_incomplete.
       - name: Strumenti
         timeout-minutes: 15
-        run: ./tools/ci-apt.sh squashfs-tools
+        run: ./tools/ci-apt.sh squashfs-tools qemu-user gcc-aarch64-linux-gnu
       - name: re3, core rotti, core e giochi mancanti
         run: ./tools/ci-build.sh check-dist dist
 

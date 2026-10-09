@@ -31,6 +31,10 @@
 #                               in cores/pins.txt, commit e push
 #   ci-build.sh issue-merge OLD F "a b"  job cores: l'elenco dei falliti per
 #                               l'issue, dal vecchio (OLD) e da questa corsa
+#   ci-build.sh coretest R RA D core.so...  ogni core si apre come in RetroArch?
+#                               (rf35h-coretest sotto qemu, con le librerie
+#                               della radice R e quelle del RetroArch RA); in D
+#                               il risultato (anche cores e check-dist lo usano)
 #
 # Perche' a parti: un job dei runner gratuiti dura al massimo 6 ore e la build
 # da zero (toolchain, llvm per l'host, Mesa, kernel, 162 core) ne chiede di
@@ -547,6 +551,33 @@ incomplete() {
 	echo "mancano: ${m:-niente}; lasciati fuori dalla build: ${f:-niente}"
 }
 
+# Job release: ogni core del SYSTEM (estratto in <radice>) si apre come in
+# RetroArch, con le librerie e il RetroArch dell'immagine (cmd_coretest, i
+# file in <cartella>). La v1.4.1 e' uscita con quattro core che compilavano e
+# non si aprivano (dosbox e dosbox_core senza glib, scummvm senza fluidsynth,
+# DoubleCherryGB senza parte di libretro-common): un core che non si apre
+# ferma la release, come uno che manca, a meno di allow_incomplete; allora
+# finisce in <dist>/noload.txt ("<file> <perche'>"), che le note della release
+# nominano. Un avviso (crash chiuso senza contenuto) no. RF35H_CORETEST=no in
+# check-dist: senza (le immagini finte delle prove).
+dist_coretest() {
+	local root="$1" d="$2" dist="$3" nolist
+	: > "${dist}/noload.txt"
+	if cmd_coretest "${root}" "${root}/usr/bin/retroarch" "${d}" "${root}/usr/lib/libretro/"*_libretro.so; then
+		echo "  ok: $(grep -c '^ok' "${d}/coretest.txt") core si aprono$(grep -q '^avviso' "${d}/coretest.txt" && echo ", $(grep -c '^avviso' "${d}/coretest.txt") con un avviso")"
+		return 0
+	fi
+	nolist="$(awk '$1 == "NO" { printf "%s%s", (n++ ? ", " : ""), $2 }' "${d}/coretest.txt")"
+	sed -n -E 's/^NO +//p' "${d}/coretest.txt" > "${dist}/noload.txt"
+	if [ "${RF35H_ALLOW_INCOMPLETE:-false}" = true ]; then
+		note warning "Core che non si aprono" "${nolist}. Pubblicata lo stesso: allow_incomplete"
+		summ "- core che non si aprono, pubblicata con allow_incomplete: ${nolist}"
+		return 0
+	fi
+	note error "Core che non si aprono" "${nolist}: in RetroArch \"Failed to open libretro core\". Correggerli, o Run workflow con allow_incomplete"
+	die "core che non si aprono: ${nolist}"
+}
+
 # Il job release (build.yml), sui file scaricati in <d> prima di pubblicarli:
 # re3 e core rotti come in collect (un artifact si puo' anche sostituire), poi
 # la completezza. Un'immagine a cui mancano core o giochi aggiornerebbe ogni
@@ -565,8 +596,13 @@ cmd_check_dist() {
 		note warning "cores.txt" "diverso dai core del SYSTEM: vale il SYSTEM"
 		cp "${chk}/cores.txt" "${d}/cores.txt"
 	fi
-	rm -rf "${chk}"
 	echo "  ok, $(wc -l < "${d}/cores.txt") core libretro, nessuno vuoto o troncato"
+	if [ "${RF35H_CORETEST:-yes}" != no ]; then
+		say "Core: si caricano come in RetroArch? (rf35h-coretest sotto qemu)"
+		unsquashfs -n -no-xattrs -d "${chk}/root" "${chk}/SYSTEM" > /dev/null || die "SYSTEM non si estrae"
+		dist_coretest "${chk}/root" "${chk}/coretest" "${d}"
+	fi
+	rm -rf "${chk}"
 
 	say "Dimensioni: ogni file sotto i 2 GiB"
 	local big
@@ -1080,6 +1116,107 @@ core_why() {
 	} | cut -c1-180
 }
 
+# Il test di caricamento dei core (tools/rf35h-coretest.c): ogni core aperto
+# come lo apre RetroArch (dlopen con tutti i simboli risolti, i 25 retro_*,
+# retro_init, retro_deinit), sotto qemu-aarch64, con le librerie dell'albero
+# <radice> (il SYSTEM della release, o il sysroot della build dei core) e
+# quelle che RetroArch ha gia' caricato: le NEEDED di <retroarch>, precaricate.
+# Un core che conta su libm o libstdc++ di RetroArch va, come sulla console;
+# uno che chiama glib senza averla fra le sue librerie no (dosbox della v1.4.1:
+# compilava, e sulla console non si apriva).
+# In <dir>: coretest.txt (una riga per core: ok, avviso, NO), coretest.err, il
+# log di ogni core in log/. Un'annotazione per NO (errore) e per avviso. Esce
+# 0 se nessun NO, 1 se no; muore se il test stesso non parte.
+# CORETEST_CC (aarch64-linux-gnu-gcc), CORETEST_QEMU ("qemu-aarch64 -L
+# <radice>"; vuota: sull'host), CORETEST_LOADER (il loader della radice),
+# CORETEST_LIBPATH (/usr/lib), CORETEST_TIMEOUT (secondi per core): le prove
+# lo fanno girare sull'host, con core finti.
+cmd_coretest() {
+	local root="${1:?radice aarch64}" ra="${2:?binario di RetroArch}" d="${3:?cartella}" bin pre loader rc l
+	local -a run
+	shift 3
+	[ "$#" -gt 0 ] || die "coretest: nessun core"
+	[ -f "${ra}" ] || die "coretest: manca ${ra}"
+	mkdir -p "${d}"
+	bin="${d}/rf35h-coretest"
+	"${CORETEST_CC:-aarch64-linux-gnu-gcc}" -O2 -Wall -I"${O}/tools/libretro" -o "${bin}" "${O}/tools/rf35h-coretest.c" -ldl \
+		|| die "coretest: rf35h-coretest non compila (${CORETEST_CC:-aarch64-linux-gnu-gcc})"
+	pre="$(readelf -d "${ra}" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | tr '\n' ' ')"
+	pre="${pre% }"
+	loader="${CORETEST_LOADER:-}"
+	if [ -z "${loader}" ]; then
+		for l in "${root}/usr/lib/ld-linux-aarch64.so.1" "${root}/lib/ld-linux-aarch64.so.1"; do
+			[ -e "${l}" ] && { loader="${l}"; break; }
+		done
+		[ -n "${loader}" ] || die "coretest: nessun ld-linux-aarch64.so.1 in ${root}"
+	fi
+	if [ -n "${CORETEST_QEMU+x}" ]; then
+		read -r -a run <<< "${CORETEST_QEMU}"
+	else
+		run=(qemu-aarch64 -L "${root}")
+	fi
+	run+=("${loader}" --library-path "${CORETEST_LIBPATH:-/usr/lib}")
+	[ -z "${pre}" ] || run+=(--preload "${pre}")
+	set +e
+	"${run[@]}" "${bin}" -t "${CORETEST_TIMEOUT:-300}" -l "${d}/log" "$@" > "${d}/coretest.txt" 2> "${d}/coretest.err"
+	rc=$?
+	set -e
+	if [ "${rc}" -gt 1 ]; then
+		cat "${d}/coretest.err" >&2
+		die "coretest: il test non e' partito (uscita ${rc})"
+	fi
+	sed 's/^/  /' "${d}/coretest.txt"
+	while IFS= read -r l; do
+		case "${l}" in
+			NO\ *)     note error "Core $(awk '{ print $2 }' <<< "${l}")" "non si carica: $(sed -E 's/^NO +[^ ]+ //' <<< "${l}")" ;;
+			avviso\ *) note warning "Core $(awk '{ print $2 }' <<< "${l}")" "parte, ma chiuso senza contenuto: $(sed -E 's/^avviso +[^ ]+ //' <<< "${l}")" ;;
+		esac
+	done < "${d}/coretest.txt"
+	return "${rc}"
+}
+
+# Job cores, dopo la build: i core compilati (compiled.txt) si aprono come in
+# RetroArch? cmd_coretest sull'albero della build: le librerie del sysroot
+# della toolchain e il RetroArch di install_pkg (le sue NEEDED, precaricate).
+# Chi compila ma non si carica va fra i falliti col perche' (il pin resta,
+# l'issue lo dice); un avviso (crash chiuso senza contenuto) e' solo
+# un'annotazione. Prima che ci fosse, il pin del dosbox nuovo e' passato e la
+# v1.4.1 ne ha uno che non si apre. RF35H_CORETEST=no: senza il test (le prove
+# di questo script); CORETEST_ROOT e CORETEST_RA al posto di quelli dell'albero.
+cores_load() {
+	local out="$1" t="${W}/${TREE_NAME}" root ra p so line why
+	local -a sos=()
+	[ -f "${out}/compiled.txt" ] || return 0
+	if [ "${RF35H_CORETEST:-yes}" = no ]; then
+		cat "${out}/compiled.txt" >> "${out}/built.txt"
+		return 0
+	fi
+	root="${CORETEST_ROOT:-$(ls -d "${t}"/build.*/toolchain/*-linux-gnu*/sysroot 2>/dev/null | head -1 || true)}"
+	ra="${CORETEST_RA:-$(ls "${t}"/build.*/install_pkg/retroarch-*/usr/bin/retroarch 2>/dev/null | head -1 || true)}"
+	[ -n "${root}" ] && [ -n "${ra}" ] \
+		|| die "test di caricamento: nell'albero manca il sysroot (${root:-?}) o RetroArch (${ra:-?})"
+	for p in $(awk '{ print substr($1, 6) }' "${out}/compiled.txt"); do
+		for so in "${t}/target/cores/${p}/"*_libretro.so; do
+			[ -f "${so}" ] && sos+=("${so}")
+		done
+	done
+	say "Core: si caricano come in RetroArch? (rf35h-coretest sotto qemu)"
+	cmd_coretest "${root}" "${ra}" "${out}/coretest" "${sos[@]}" || true
+	while IFS= read -r line; do
+		p="$(awk '{ print substr($1, 6) }' <<< "${line}")"
+		why=""
+		for so in "${t}/target/cores/${p}/"*_libretro.so; do
+			why="$(awk -v f="${so##*/}" '$1 == "NO" && $2 == f { sub(/^NO +[^ ]+ /, ""); print; exit }' "${out}/coretest/coretest.txt")"
+			[ -z "${why}" ] || break
+		done
+		if [ -n "${why}" ]; then
+			echo "== ${p}: compila, ma non si carica come in RetroArch: ${why} [run ${GITHUB_RUN_ID:-?}]" >> "${out}/failed.txt"
+		else
+			echo "${line}" >> "${out}/built.txt"
+		fi
+	done < "${out}/compiled.txt"
+}
+
 # Job cores: i core dati, al commit nuovo dei loro pin, con lo script di build
 # in --build-packages (stesso overlay, stesse verifiche, stessi flag della
 # release), sull'albero di una build finita. Una prova, non un'uscita: i .so
@@ -1174,8 +1311,9 @@ cmd_cores() {
 			n=$((n + 1))
 		done
 		[ "${n}" -gt 0 ] || { echo "== ${p}: nessun _libretro.so" >> "${out}/failed.txt"; continue; }
-		echo "core=${p} commit=${sha} site=${site} lakka=${lakka} sysroot=${RF35H_SYSROOT_VERSION} date=$(date -u +%Y%m%d)${dpins:+ deps=${dpins}}" >> "${out}/built.txt"
+		echo "core=${p} commit=${sha} site=${site} lakka=${lakka} sysroot=${RF35H_SYSROOT_VERSION} date=$(date -u +%Y%m%d)${dpins:+ deps=${dpins}}" >> "${out}/compiled.txt"
 	done
+	cores_load "${out}"
 	echo; echo "riusciti:"; cut -d' ' -f1,2 "${out}/built.txt" | sed 's/^/  /' || true
 	echo "falliti:"; grep '^==' "${out}/failed.txt" | sed 's/^/  /' || true
 	# riusciti come <core>@<commit>: con dry_run (o su un altro ramo) il commit
@@ -1297,5 +1435,6 @@ case "${1:-}" in
 	merge-cores)  cmd_merge_cores "${2:-}" "${3:-}" "${4:-}" ;;
 	pins-merge)   cmd_pins_merge "${2:-}" "${3:-}" ;;
 	issue-merge)  cmd_issue_merge "${2:-}" "${3:-}" "${4:-}" ;;
+	coretest)     shift; cmd_coretest "$@" ;;
 	*) awk 'NR > 1 && /^#$/ && ++n == 2 { exit } NR > 1' "$0" >&2; exit 2 ;;
 esac

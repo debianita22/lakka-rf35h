@@ -1,7 +1,7 @@
 #!/bin/bash
 # ci-release-notes.sh <dist> - le note di una release (build.yml), in inglese
 # come il README. Legge update.txt, cores.txt e dropped.txt che tools/ci-build.sh
-# collect ha messo in <dist>, e missing.txt di check-dist.
+# collect ha messo in <dist>, e missing.txt e noload.txt di check-dist.
 set -euo pipefail
 D="${1:?uso: ci-release-notes.sh <cartella con update.txt>}"
 O="$(cd "$(dirname "$0")/.." && pwd)"
@@ -160,10 +160,15 @@ if [ -s "${D}/dropped.txt" ]; then
 	grep -oE '^  [A-Za-z0-9_.+-]+' "${D}/dropped.txt" | sed 's/^ */- /'
 fi
 # pubblicata incompleta apposta (allow_incomplete): cosa manca rispetto al
-# set di sempre
+# set di sempre, e i core che ci sono ma RetroArch non apre (noload.txt di
+# check-dist, "<file> <perche'>")
 if [ -s "${D}/missing.txt" ]; then
 	echo
 	echo "Missing compared with a complete build: $(sed 's/ .*//' "${D}/missing.txt" | tr '\n' ' ' | sed 's/ $//; s/ /, /g')."
+fi
+if [ -s "${D}/noload.txt" ]; then
+	echo
+	echo "In the image but RetroArch cannot load them: $(sed 's/ .*//; s/_libretro\.so$//' "${D}/noload.txt" | tr '\n' ' ' | sed 's/ $//; s/ /, /g')."
 fi
 
 cat <<EOF

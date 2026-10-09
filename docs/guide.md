@@ -784,7 +784,7 @@ Workflows in [`.github/workflows`](../.github/workflows):
 |---|---|---|
 | Check (`check.yml`) | push to `main`, pull requests, manual | `tools/ci-check.sh` (shellcheck, actionlint, Python syntax, patch hunk counts, `tools/test-*.sh`) and a dry run on the pinned Lakka commit |
 | Build (`build.yml`) | tag `v*`, *Run workflow*, push to `ci-test/**` | the full image in the same Ubuntu 24.04 container, in up to eight jobs of at most 6 hours each |
-| Cores (`cores.yml`) | every Monday, manual | asks each core's upstream for its branch tip, test-builds the changed cores on the latest finished build's tree (the `sysroot-<version>` artifact), commits the new pins (`cores/pins.txt`) of the cores that built, so the next release has them, and keeps an issue for those that did not |
+| Cores (`cores.yml`) | every Monday, manual | asks each core's upstream for its branch tip, test-builds the changed cores on the latest finished build's tree (the `sysroot-<version>` artifact), opens each one the way RetroArch does, commits the new pins (`cores/pins.txt`) of the cores that built and opened, so the next release has them, and keeps an issue for those that did not |
 | Upstream (`upstream.yml`) | every Monday, manual | a newer Linux 7.2.y whose signature (kernel.org keys), SHA-256 and kernel patches (fuzz 0) check out gets a `ci-test/kernel-<version>` branch, a test build and an issue; Lakka `devel` moving past the pinned commit gets an issue. Merging and releasing stay manual |
 
 - **Release**: `git tag v1.0.0 && git push origin v1.0.0`, or *Run workflow*
@@ -827,6 +827,17 @@ MAME, alone; the others in groups of 12) and moves the pin of each core that
 builds, so a core that stops building upstream stays at its last good commit
 while the others move on, and the next release ships the new ones.
 
+Building is not enough: a core can build and still fail to load (v1.4.1
+shipped four, missing symbols of libraries they were never linked to). After
+the build, `cores.yml` opens every core like RetroArch does,
+with `tools/rf35h-coretest.c` under qemu and the libraries of the build tree:
+`dlopen`, the 25 libretro functions, `retro_init` and `retro_deinit` without
+content, core options answered with their defaults. A core that does not
+open keeps its old pin and goes into the issue with the reason (the missing
+symbol, or the signal and the function where it crashed). A crash only in
+`retro_deinit`, after a good start, is a warning: some cores do that when
+closed without content, and RetroArch does not close them that way.
+
 A line starting with `+` right below a core pins one of its dependencies: a
 Lakka package that is not a core but has to match the core's commit. The
 first is `+liblcf` under `easyrpg`: the EasyRPG Player uses new liblcf fields
@@ -851,10 +862,12 @@ pin points to one, is built without Lakka's patches.
 A release contains the `.img.gz`, the `.tar`, `update.txt` (version, file
 name, URL, SHA-256 and size of the `.tar`) and `SHA256SUMS`. Before
 publishing, CI checks the downloaded files again: no re3, no empty or broken
-core, and every core of the default set and every enabled game present. A
-build that lost one (CI builds with `--keep-going`) is not published, unless
+core, every core of the system image opened like RetroArch does (the same
+test, on the image's own libraries and RetroArch), and every core of the
+default set and every enabled game present. A build that lost one (CI builds
+with `--keep-going`), or has one that does not open, is not published, unless
 *Run workflow* is started with *allow_incomplete*: the notes then list what
-is missing.
+is missing and what does not open.
 
 In a fork, CI sets `RF35H_UPDATE_REPO` to the fork, so its images update from
 the fork's own releases.
@@ -971,5 +984,5 @@ port it to 7.2 and add it to the keep list in `apply.sh`.
 | `verify-kernel.sh` | checks that the kernel patches landed in the source |
 | `verify-tarball.sh` | tells whether a tarball with a changed checksum still matches its git tag |
 | `hwdump.sh` | GPIO, GRF and PMIC register dump, for comparison with another OS |
-| `tools/` | verification, CI, rescue and diagnostic scripts; generators of the RetroArch patches |
+| `tools/` | verification, CI, rescue and diagnostic scripts (with the core load test, `rf35h-coretest.c`); generators of the RetroArch patches |
 | `docs/diario.md` | development log (Italian) |

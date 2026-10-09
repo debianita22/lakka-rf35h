@@ -45,6 +45,9 @@ pass=0; fail=0; skip=0
 ok() { if eval "$2"; then pass=$((pass + 1)); echo "  ok    $1"; else fail=$((fail + 1)); echo "  FALLITO $1"; fi; }
 # fuori dalle actions: niente annotazioni, output e riassunti
 unset GITHUB_ACTIONS GITHUB_OUTPUT GITHUB_STEP_SUMMARY GITHUB_ENV
+# il test di caricamento dei core (qemu, compilatore aarch64) solo nelle prove
+# sue, in fondo: le immagini finte hanno core finti
+export RF35H_CORETEST=no
 
 # Un .so finto ma ben fatto: intestazione ELF64 little-endian aarch64 ET_DYN,
 # <n> byte di contenuto, poi la tabella delle sezioni (2 voci da 64 byte), come
@@ -523,6 +526,14 @@ sed -i 's/^+liblcf .*/+liblcf https:\/\/x\/liblcf 999999999999999999999999999999
 NSHA="$(git -C "${NR}" rev-parse HEAD)"; printf 'version=v1.3.3\ntar=x-v1.3.3.tar\n' > "${T}/ndist/update.txt"
 ( unset GH_TOKEN; notes ); rc=$?
 ok "  ...la dipendenza cambiata: aggiornato il suo core, lei non e' un core" '[ "${rc}" = 0 ] && grep -qx "\*\*Cores updated\*\* to a newer upstream commit since v1.3.2 (1): easyrpg." "${T}/nnotes.md"'
+# pubblicata con allow_incomplete e core che non si aprono (noload.txt di
+# check-dist): le note li nominano
+printf 'dosbox_libretro.so dlopen: undefined symbol: g_rec_mutex_init\nDoubleCherryGB_libretro.so dlopen: undefined symbol: path_is_valid\n' > "${T}/ndist/noload.txt"
+( unset GH_TOKEN; notes ); rc=$?
+ok "core che non si aprono (allow_incomplete): nelle note, per nome" '[ "${rc}" = 0 ] && grep -qx "In the image but RetroArch cannot load them: dosbox, DoubleCherryGB." "${T}/nnotes.md"'
+: > "${T}/ndist/noload.txt"; ( unset GH_TOKEN; notes ); rc=$?
+ok "  ...noload.txt vuoto: nessuna riga" '[ "${rc}" = 0 ] && ! grep -q "cannot load" "${T}/nnotes.md"'
+rm -f "${T}/ndist/noload.txt"
 
 echo "ci-apt.sh (apt sul runner, con limite di tempo)"
 FA="${T}/fakeapt"; rm -rf "${FA}"; mkdir -p "${FA}"
@@ -856,6 +867,115 @@ bash "${CB}" issue-merge "${IM}/vuoto" "${IM}/failed" "easyrpg dosbox" > "${IM}/
 ok "  ...senza issue aperta: i falliti di questa corsa" 'cmp -s "${IM}/out3" "${IM}/failed"'
 bash "${CB}" issue-merge "${IM}/old" "${IM}/nessuno" "fceumm" > "${IM}/out4"
 ok "  ...una corsa che non tocca i falliti non li toglie (prima chiudeva l'issue)" 'cmp -s "${IM}/out4" "${IM}/old"'
+
+echo "coretest: ogni core si apre come in RetroArch (sull'host, core finti)"
+# ci-build.sh coretest gira il vero tools/rf35h-coretest.c, compilato col gcc
+# dell'host e lanciato col loader dell'host invece di qemu: i core finti sono
+# per l'host. RetroArch finto: un programma con libm fra le NEEDED, cosi' un
+# core che usa cos() senza dichiarare libm si apre (come hatari con powf).
+CT="${T}/coretest"; mkdir -p "${CT}"
+cp -r "${O}/tools/libretro" "${O}/tools/rf35h-coretest.c" "${REPO}/tools/"
+cat > "${CT}/core.c" <<'EOF'
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#include <libretro.h>
+#if CASO == 2
+void manca_nella_libreria(void);
+#endif
+double (*volatile coseno)(double);
+RETRO_API unsigned retro_api_version(void) { return RETRO_API_VERSION; }
+RETRO_API void retro_set_environment(retro_environment_t cb) { (void)cb; }
+RETRO_API void retro_get_system_info(struct retro_system_info *i) { memset(i, 0, sizeof(*i)); i->library_name = "Finto"; i->library_version = "2"; }
+RETRO_API void retro_init(void)
+{
+#if CASO == 2
+   manca_nella_libreria();
+#elif CASO == 4
+   coseno = cos;
+#endif
+}
+RETRO_API void retro_deinit(void)
+{
+#if CASO == 3
+   *(volatile int *)0 = 1;
+#endif
+}
+RETRO_API void retro_set_video_refresh(retro_video_refresh_t cb) { (void)cb; }
+RETRO_API void retro_set_audio_sample(retro_audio_sample_t cb) { (void)cb; }
+RETRO_API void retro_set_audio_sample_batch(retro_audio_sample_batch_t cb) { (void)cb; }
+RETRO_API void retro_set_input_poll(retro_input_poll_t cb) { (void)cb; }
+RETRO_API void retro_set_input_state(retro_input_state_t cb) { (void)cb; }
+RETRO_API void retro_get_system_av_info(struct retro_system_av_info *i) { memset(i, 0, sizeof(*i)); }
+RETRO_API void retro_set_controller_port_device(unsigned p, unsigned d) { (void)p; (void)d; }
+RETRO_API void retro_reset(void) { }
+RETRO_API void retro_run(void) { }
+RETRO_API size_t retro_serialize_size(void) { return 0; }
+RETRO_API bool retro_serialize(void *d, size_t s) { (void)d; (void)s; return false; }
+RETRO_API bool retro_unserialize(const void *d, size_t s) { (void)d; (void)s; return false; }
+RETRO_API void retro_cheat_reset(void) { }
+RETRO_API void retro_cheat_set(unsigned i, bool e, const char *c) { (void)i; (void)e; (void)c; }
+RETRO_API bool retro_load_game(const struct retro_game_info *g) { (void)g; return false; }
+RETRO_API bool retro_load_game_special(unsigned t, const struct retro_game_info *g, size_t n) { (void)t; (void)g; (void)n; return false; }
+RETRO_API void retro_unload_game(void) { }
+RETRO_API unsigned retro_get_region(void) { return 0; }
+RETRO_API void *retro_get_memory_data(unsigned id) { (void)id; return NULL; }
+RETRO_API size_t retro_get_memory_size(unsigned id) { (void)id; return 0; }
+EOF
+for k in 1:buono 2:nonrisolto 3:crashdeinit 4:usalibm; do
+	gcc -shared -fPIC -O0 -w -I"${O}/tools/libretro" -DCASO="${k%%:*}" -o "${CT}/${k#*:}_libretro.so" "${CT}/core.c"
+done
+printf '#include <math.h>\nint main(int c, char **v) { (void)v; return (int)cos((double)c) > 5; }\n' > "${CT}/ra.c"
+gcc -O0 -o "${CT}/retroarch" "${CT}/ra.c" -lm
+HOST_LD="$(readelf -l /bin/sh | sed -n 's/.*interpreter: \(.*\)\]/\1/p')"
+HOST_LIBS="$(dirname "$(ldd /bin/sh | awk '/libc\.so/ { print $3 }')")"
+ctrun() { ( export GITHUB_ACTIONS=true RF35H_CORETEST=yes CORETEST_CC="${CORETEST_CC:-gcc}" CORETEST_QEMU="" CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${HOST_LIBS}" CORETEST_TIMEOUT=20
+	bash "${CB}" coretest / "${CT}/retroarch" "$@" ) > "${CT}/run.out" 2>&1; }
+ctrun "${CT}/out" "${CT}/buono_libretro.so" "${CT}/nonrisolto_libretro.so" "${CT}/crashdeinit_libretro.so" "${CT}/usalibm_libretro.so"; rc=$?
+ok "coretest: esce 1 se un core non si apre" '[ "${rc}" = 1 ]'
+ok "  ...una riga per core: ok, NO col simbolo non risolto, avviso per il crash alla chiusura" 'grep -q "^ok      buono_libretro.so \"Finto\" 2" "${CT}/out/coretest.txt" && grep -q "^NO      nonrisolto_libretro.so dlopen: .*undefined symbol: manca_nella_libreria" "${CT}/out/coretest.txt" && grep -q "^avviso  crashdeinit_libretro.so" "${CT}/out/coretest.txt"'
+ok "  ...le librerie di RetroArch precaricate: un core che usa libm senza dichiararla si apre" 'grep -q "^ok      usalibm_libretro.so" "${CT}/out/coretest.txt"'
+ok "  ...le annotazioni: errore per chi non si apre, avviso per l'altro" 'grep -q "^::error title=Core nonrisolto_libretro.so::non si carica: dlopen: .*undefined symbol: manca_nella_libreria" "${CT}/run.out" && grep -q "^::warning title=Core crashdeinit_libretro.so::parte, ma chiuso senza contenuto: \"Finto\" 2: retro_deinit: segnale 11" "${CT}/run.out" && ! grep -q "title=Core buono" "${CT}/run.out"'
+ctrun "${CT}/out2" "${CT}/buono_libretro.so" "${CT}/crashdeinit_libretro.so"; rc=$?
+ok "  ...solo ok e avvisi: esce 0" '[ "${rc}" = 0 ]'
+CORETEST_CC=/bin/false ctrun "${CT}/out3" "${CT}/buono_libretro.so"; rc=$?
+ok "  ...il test che non si compila: si ferma, non e' un core fallito" '[ "${rc}" = 1 ] && grep -q "rf35h-coretest non compila" "${CT}/run.out" && [ ! -e "${CT}/out3/coretest.txt" ]'
+
+echo "cores (job cores): chi compila ma non si apre resta al commit vecchio"
+# cores_load sull'albero finto: i core compilati (compiled.txt), i loro .so in
+# target/cores, il sysroot e RetroArch dati da CORETEST_ROOT e CORETEST_RA
+CL="${T}/cl"; mkdir -p "${CL}/w/lakka-rf35h-build/target/cores/fceumm" "${CL}/w/lakka-rf35h-build/target/cores/mgba" "${CL}/out"
+cp "${CT}/buono_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/fceumm/fceumm_libretro.so"
+cp "${CT}/nonrisolto_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/mgba/mgba_libretro.so"
+printf '%s\n' "core=fceumm commit=1111111111111111111111111111111111111111 site=x" "core=mgba commit=3333333333333333333333333333333333333333 site=x" > "${CL}/out/compiled.txt"
+cl() { : > "${CL}/out/built.txt"; : > "${CL}/out/failed.txt"
+	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
+	  O="${REPO}" W="${CL}/w" TREE_NAME=lakka-rf35h-build GITHUB_ACTIONS=true GITHUB_RUN_ID=7 CORETEST_CC=gcc CORETEST_QEMU="" \
+	  CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${HOST_LIBS}" CORETEST_TIMEOUT=20
+	  cores_load "${CL}/out" ) > "${CL}/run.out" 2>&1; }
+RF35H_CORETEST=yes CORETEST_ROOT=/ CORETEST_RA="${CT}/retroarch" cl; rc=$?
+ok "cores_load: fceumm si apre e va fra i riusciti" '[ "${rc}" = 0 ] && [ "$(cat "${CL}/out/built.txt")" = "core=fceumm commit=1111111111111111111111111111111111111111 site=x" ]'
+ok "  ...mgba compila ma non si apre: fra i falliti, col perche' e il run" 'grep -q "^== mgba: compila, ma non si carica come in RetroArch: dlopen: .*undefined symbol: manca_nella_libreria \[run 7\]$" "${CL}/out/failed.txt"'
+RF35H_CORETEST=no cl
+ok "  ...RF35H_CORETEST=no: tutti i compilati fra i riusciti" '[ "$(wc -l < "${CL}/out/built.txt")" = 2 ] && [ ! -s "${CL}/out/failed.txt" ]'
+RF35H_CORETEST=yes cl; rc=$?
+ok "  ...senza sysroot ne' RetroArch nell'albero: si ferma e lo dice" '[ "${rc}" != 0 ] && grep -q "nell.albero manca il sysroot" "${CL}/run.out"'
+
+echo "check-dist: i core che non si aprono fermano la release"
+# dist_coretest con un cmd_coretest finto: le righe di un test con due NO
+DC="${T}/dc"; mkdir -p "${DC}/dist"
+dc() { ( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|die\)() *{/p; /^dist_coretest() {/,/^}/p' "${CB}")"
+	cmd_coretest() { mkdir -p "$3"; printf '%s\n' "${FAKE_CT[@]}" > "$3/coretest.txt"; return "${FAKE_RC}"; }
+	GITHUB_ACTIONS=true; dist_coretest "${DC}/root" "${DC}/ct" "${DC}/dist" ) > "${DC}/out" 2>&1; }
+FAKE_CT=('ok      fceumm_libretro.so "FCEUmm" 1 [0s]' 'NO      dosbox_libretro.so dlopen: undefined symbol: g_rec_mutex_init' 'NO      scummvm_libretro.so dlopen: undefined symbol: fluid_synth_pitch_bend'); FAKE_RC=1
+dc; rc=$?
+ok "dist_coretest: due core che non si aprono, la release si ferma e li nomina" '[ "${rc}" != 0 ] && grep -q "core che non si aprono: dosbox_libretro.so, scummvm_libretro.so" "${DC}/out" && grep -q "^::error title=Core che non si aprono::dosbox_libretro.so, scummvm_libretro.so" "${DC}/out"'
+RF35H_ALLOW_INCOMPLETE=true dc; rc=$?
+ok "  ...con allow_incomplete: pubblicata, con l'avviso" '[ "${rc}" = 0 ] && grep -q "^::warning title=Core che non si aprono::dosbox_libretro.so, scummvm_libretro.so. Pubblicata lo stesso" "${DC}/out"'
+ok "  ...e in noload.txt, per le note, col perche'" '[ "$(cat "${DC}/dist/noload.txt")" = "$(printf "dosbox_libretro.so dlopen: undefined symbol: g_rec_mutex_init\nscummvm_libretro.so dlopen: undefined symbol: fluid_synth_pitch_bend")" ]'
+FAKE_CT=('ok      fceumm_libretro.so "FCEUmm" 1 [0s]' 'avviso  tyrquake_libretro.so "TyrQuake" 1: retro_deinit: segnale 11'); FAKE_RC=0
+dc; rc=$?
+ok "  ...tutti si aprono (uno con un avviso): avanti, noload.txt vuoto" '[ "${rc}" = 0 ] && grep -q "ok: 1 core si aprono, 1 con un avviso" "${DC}/out" && [ -f "${DC}/dist/noload.txt" ] && [ ! -s "${DC}/dist/noload.txt" ]'
 
 if [ "${skip}" = 0 ]; then echo "--- ${pass} ok, ${fail} falliti"; else echo "--- ${pass} ok, ${fail} falliti, ${skip} parti saltate"; fi
 [ "${fail}" = 0 ]

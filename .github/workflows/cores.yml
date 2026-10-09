@@ -158,11 +158,13 @@ jobs:
           cp pins-new/pins-new.txt cores/pins.txt
           git diff --stat -- cores/pins.txt
 
-      # come in build-stage.yml: apt con limiti di tempo (tools/ci-apt.sh)
+      # come in build-stage.yml: apt con limiti di tempo (tools/ci-apt.sh);
+      # qemu-user e gcc-aarch64-linux-gnu per il test di caricamento dei core
+      # (tools/rf35h-coretest.c, ci-build.sh cores_load)
       - name: Spazio su disco
         timeout-minutes: 20
         run: |
-          ./tools/ci-apt.sh zstd squashfs-tools
+          ./tools/ci-apt.sh zstd squashfs-tools qemu-user gcc-aarch64-linux-gnu
           ./tools/ci-build.sh disk
 
       - uses: actions/download-artifact@v8

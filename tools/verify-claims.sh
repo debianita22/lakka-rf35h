@@ -423,6 +423,11 @@ deps_ok() {
 	[ "$n" -ge 1 ] && grep -qF 'deps_of "${p}"' "$O/tools/ci-build.sh" && grep -q 'pin_block' "$O/tools/ci-build.sh"
 }
 chk "core: dipendenze pinnate nell'albero, provate e spostate col core" "deps_ok"
+# Compilare non basta: la v1.4.1 aveva quattro core compilati che RetroArch
+# non apriva. tools/rf35h-coretest.c li apre come RetroArch, sotto qemu: nel
+# job cores (un core che non si apre non cambia pin) e nella release (la
+# ferma, a meno di allow_incomplete).
+chk "core: test di caricamento nel job cores e nella release" "grep -q '^cmd_coretest()' '$O/tools/ci-build.sh' && sed -n '/^cmd_cores() {/,/^}/p' '$O/tools/ci-build.sh' | grep -q '^\s*cores_load ' && sed -n '/^cmd_check_dist() {/,/^}/p' '$O/tools/ci-build.sh' | grep -q 'dist_coretest ' && grep -q 'ci-apt.sh .*qemu-user gcc-aarch64-linux-gnu' '$O/.github/workflows/cores.yml' && grep -q 'ci-apt.sh .*qemu-user gcc-aarch64-linux-gnu' '$O/.github/workflows/build.yml'"
 chk "loader del repository: sha256 verificato"  "( cd '$O/board/loader' && sha256sum -c --quiet known-good.sha256 )"
 # AUTOREMOVE=yes (la CI) cancella la cartella di build di un pacchetto appena
 # nessun job del piano la dichiara in PKG_DEPENDS_UNPACK: ogni get_build_dir
