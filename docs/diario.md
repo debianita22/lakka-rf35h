@@ -6676,7 +6676,7 @@ l'issue #5 scende a 2.
 ## dosbox e same_cdi all'upstream: tutti i 22 (9/10/2026)
 
 **dosbox** (libretro/dosbox-libretro): dal 27/9/2026 (a563bb5) l'upstream e'
-dosbox-core (realnc, d38fcb50) con le aggiunte di DOSBox Pure: ZIP come
+dosbox-core (libretro/dosbox-core al d38fcb50) con le aggiunte di DOSBox Pure: ZIP come
 contenuto senza estrarli (salvataggi in `<nome>.save.zip`), immagini CD e
 floppy dentro lo ZIP, menu di avvio, mappatura automatica dei tasti dal
 database Keyb2Joypad, velocita' della CPU dall'anno del gioco, MIDI SC-55
