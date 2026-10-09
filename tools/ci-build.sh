@@ -551,6 +551,14 @@ incomplete() {
 	echo "mancano: ${m:-niente}; lasciati fuori dalla build: ${f:-niente}"
 }
 
+# rm -rf di un albero estratto o fatto da un utente qualunque (il runner): una
+# cartella senza permesso di scrittura (un SYSTEM che ne ha, una copiata cosi'
+# da install_pkg) fermerebbe rm, e con set -e lo script, a lavoro finito
+rm_tree() {
+	chmod -R u+w "$1" 2>/dev/null || true
+	rm -rf "$1"
+}
+
 # Job release: ogni core del SYSTEM (estratto in <radice>) si apre come in
 # RetroArch, con le librerie e il RetroArch dell'immagine (cmd_coretest, i
 # file in <cartella>). La v1.4.1 e' uscita con quattro core che compilavano e
@@ -602,7 +610,7 @@ cmd_check_dist() {
 		unsquashfs -n -no-xattrs -d "${chk}/root" "${chk}/SYSTEM" > /dev/null || die "SYSTEM non si estrae"
 		dist_coretest "${chk}/root" "${chk}/coretest" "${d}"
 	fi
-	rm -rf "${chk}"
+	rm_tree "${chk}"
 
 	say "Dimensioni: ogni file sotto i 2 GiB"
 	local big
@@ -1201,7 +1209,7 @@ cores_load() {
 	if [ -z "${root}" ]; then
 		# fuori da ${out}, che diventa un artifact (seguirebbe i link)
 		root="${W}/coretest-root"
-		rm -rf "${root}"
+		rm_tree "${root}"
 		mkdir -p "${root}/usr/lib"
 		ln -s usr/lib "${root}/lib"
 		for d in "${t}"/build.*/install_pkg/*/usr/lib; do
@@ -1222,7 +1230,7 @@ cores_load() {
 	done
 	say "Core: si caricano come in RetroArch? (rf35h-coretest sotto qemu)"
 	cmd_coretest "${root}" "${ra}" "${out}/coretest" "${sos[@]}" || true
-	[ -n "${CORETEST_ROOT:-}" ] || rm -rf "${root}"
+	[ -n "${CORETEST_ROOT:-}" ] || rm_tree "${root}"
 	while IFS= read -r line; do
 		p="$(awk '{ print substr($1, 6) }' <<< "${line}")"
 		why=""

@@ -949,7 +949,7 @@ cp "${CT}/buono_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/fceumm/fceu
 cp "${CT}/nonrisolto_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/mgba/mgba_libretro.so"
 printf '%s\n' "core=fceumm commit=1111111111111111111111111111111111111111 site=x" "core=mgba commit=3333333333333333333333333333333333333333 site=x" > "${CL}/out/compiled.txt"
 cl() { : > "${CL}/out/built.txt"; : > "${CL}/out/failed.txt"
-	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
+	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^rm_tree() {/,/^}/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
 	  O="${REPO}" W="${CL}/w" TREE_NAME=lakka-rf35h-build GITHUB_ACTIONS=true GITHUB_RUN_ID=7 CORETEST_CC=gcc CORETEST_QEMU="" \
 	  CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${CORETEST_LIBPATH:-${HOST_LIBS}}" CORETEST_TIMEOUT=20
 	  cores_load "${CL}/out" ) > "${CL}/run.out" 2>&1; }
@@ -970,6 +970,9 @@ echo 'int finta(void) { return 2; }' > "${CL}/finta.c"
 gcc -shared -fPIC -Wl,-soname,libfinta.so.1 -o "${IP}/libfinta-1/usr/lib/libfinta.so.1.0" "${CL}/finta.c"
 ln -s libfinta.so.1.0 "${IP}/libfinta-1/usr/lib/libfinta.so.1"
 cp "${IP}/libfinta-1/usr/lib/libfinta.so.1.0" "${IP}/altra-1/usr/lib/"
+# una cartella senza permesso di scrittura (cp -R la copia cosi'): la radice
+# si cancella lo stesso
+mkdir -p "${IP}/altra-1/usr/lib/sola-lettura"; : > "${IP}/altra-1/usr/lib/sola-lettura/x"; chmod 555 "${IP}/altra-1/usr/lib/sola-lettura"
 : > "${IP}/glibc-1/usr/lib/ld-linux-aarch64.so.1"
 cp "${CT}/retroarch" "${IP}/retroarch-1/usr/bin/"
 gcc -shared -fPIC -O0 -w -I"${O}/tools/libretro" -DCASO=1 -o "${CL}/w/lakka-rf35h-build/target/cores/fceumm/fceumm_libretro.so" "${CT}/core.c" \
