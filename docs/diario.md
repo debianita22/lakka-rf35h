@@ -6708,3 +6708,31 @@ c827998; l'issue #5 si chiude da sola ("Tutti i core compilano"). Dei 22
 rimasti indietro con la v1.4.0, tutti all'upstream: la prossima release li
 ha. Di dosbox cambia il comportamento, non solo la versione: opzioni,
 ZIP e menu sono quelli di dosbox-core e DOSBox Pure.
+
+## v1.4.1 pubblicata (9/10/2026)
+
+L'utente tiene il dosbox nuovo e chiede la release. v1.4.1: rispetto alla
+v1.4.0 cambiano solo i core, il sistema e' lo stesso. Note scritte a mano in
+docs/release-notes/v1.4.1.md (fe4d0be): tutti i core all'upstream, dosbox
+rifatto su dosbox-core con le aggiunte di DOSBox Pure (le impostazioni del
+DOSBox vecchio non restano), same_cdi con disc control, M3U, PAL/NTSC e la
+Digital Video Cartridge, easyrpg con la sua liblcf. Anteprima delle note con
+ci-release-notes.sh prima del push: "Cores updated ... (25)".
+
+Run 37898356945 (Run workflow, version v1.4.1, da main a fe4d0be):
+
+- parte 1: 314 minuti, 365 passi su 498, fermata a tempo (uscita 137);
+  mame:target e rust:host interrotti, rifatti da capo nella parte 2; ccache
+  66% di hit, 6 GB pieni;
+- parte 2: 246 minuti, 498 su 498;
+- Release (17:10-17:13 UTC): check-dist (re3 assente, core interi, 174 core,
+  nessuno fuori), sysroot-v1.4.1 (2,7 GB, la base di cores.yml d'ora in poi),
+  pubblicata latest. Il tag v1.4.1 su fe4d0be l'ha creato il job: main non
+  aveva workflow diversi da quelli della build (nessun push sui workflow
+  durante la build).
+
+File: Lakka-RK3326.aarch64-Next-v1.4.1-rf35h.img.gz 1038257924 byte,
+.tar 1065594880 (System Update chiede circa 2132 MB liberi in /storage),
+SHA256SUMS, update.txt. Il contenuto di update.txt e SHA256SUMS da qui non
+si legge (gh rifiuta il redirect a release-assets.githubusercontent.com):
+lo hanno scritto e controllato i job.
