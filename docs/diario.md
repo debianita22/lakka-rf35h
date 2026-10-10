@@ -6905,7 +6905,7 @@ ccache 72% di hit (6 GB, pieno); sysroot-v1.4.2 (2,7 GB, fino al 7/1/2027),
 d'ora in poi la base di cores.yml.
 
 File: Lakka-RK3326.aarch64-Next-v1.4.2-rf35h.img.gz 1038583859 byte, .tar
-1065922560 (System Update chiede circa 2134 MB liberi), SHA256SUMS,
+1065922560 (System Update chiede circa 2132 MB liberi), SHA256SUMS,
 update.txt. Verificati da qui con curl: sha256 e dimensione del .tar come in
 update.txt e SHA256SUMS, SYSTEM.md5 del .tar OK. Il test di caricamento sul
 SYSTEM scaricato (da root, qui): 170 ok, 4 avvisi, nessun NO; dosbox
