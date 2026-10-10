@@ -6894,3 +6894,23 @@ test-rf35h-coretest.sh 14; le mutazioni le vedono).
 
 Pubblicazione: `publish_from=37984544368`, stessi file della build, il job
 Release con gli script nuovi.
+
+Run 38014149881 (version v1.4.2, publish_from 37984544368, script di
+ce96f8c): check-dist passa (170 core si aprono, i 4 avvisi di sempre,
+higan compreso), note, pubblicata alle 01:47 UTC del 10/10, latest; il tag
+v1.4.2 su 774c40b, il commit della build, l'ha creato il job.
+
+La build (run 37984544368, parte 1): 220 minuti di build, 497 passi su 497,
+ccache 72% di hit (6 GB, pieno); sysroot-v1.4.2 (2,7 GB, fino al 7/1/2027),
+d'ora in poi la base di cores.yml.
+
+File: Lakka-RK3326.aarch64-Next-v1.4.2-rf35h.img.gz 1038583859 byte, .tar
+1065922560 (System Update chiede circa 2134 MB liberi), SHA256SUMS,
+update.txt. Verificati da qui con curl: sha256 e dimensione del .tar come in
+update.txt e SHA256SUMS, SYSTEM.md5 del .tar OK. Il test di caricamento sul
+SYSTEM scaricato (da root, qui): 170 ok, 4 avvisi, nessun NO; dosbox
+"DOSBox" r4494 a563bb5, dosbox_core "DOSBox-core" r4494 7bcf083, scummvm
+"ScummVM" fcbce3ae-2026.3.1git, DoubleCherryGB v0.19.0 03f58ca. Le NEEDED
+sono quelle volute: dosbox e dosbox_core con glib, dbus e libsndfile;
+scummvm con quelle piu' alsa e libvorbisfile (fluidsynth e faad dentro il
+.so); DoubleCherryGB solo libstdc++, libm, libgcc_s, libc.
