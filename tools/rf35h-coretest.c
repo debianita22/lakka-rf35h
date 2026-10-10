@@ -520,6 +520,12 @@ static int run(const char *path, unsigned timeout, const char *logdir)
             p = abs;
          if (chdir(sysdir) < 0)
             perror(sysdir);
+         /* e la casa: sulla console e' /storage, qui quella delle prove (un
+          * core che scrive in $HOME non finisce in quella di chi lancia) */
+         setenv("HOME", sysdir, 1);
+         unsetenv("XDG_CONFIG_HOME");
+         unsetenv("XDG_DATA_HOME");
+         unsetenv("XDG_CACHE_HOME");
          child(p);
       }
       _exit(0);

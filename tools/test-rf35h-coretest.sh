@@ -87,10 +87,16 @@ RETRO_API void retro_init(void)
    {
       /* come np2kai: un file nella cartella corrente; come RACE: la cartella
        * dei salvataggi senza l'ultima estensione, piu' .ngf */
-      const char *sd = NULL;
+      const char *sd = NULL, *home = getenv("HOME");
       char p[4096], *dot;
       FILE *f = fopen("scritto_qui.cfg", "w");
       if (f) fclose(f);
+      /* e uno nella casa */
+      if (home && strlen(home) < sizeof(p) - 16)
+      {
+         snprintf(p, sizeof(p), "%s/.finto.cfg", home);
+         if ((f = fopen(p, "w"))) fclose(f);
+      }
       if (env(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &sd) && sd && strlen(sd) < sizeof(p) - 8)
       {
          strcpy(p, sd);
@@ -187,8 +193,8 @@ c; rc1=$?; c -t 0 "${T}/buono_libretro.so"; rc2=$?; c -x "${T}/buono_libretro.so
 ok "uso sbagliato: esce 2" '[ "${rc1}" = 2 ] && [ "${rc2}" = 2 ] && [ "${rc3}" = 2 ]'
 TMPDIR="${T}/tmpd" ; mkdir -p "${TMPDIR}"; TMPDIR="${TMPDIR}" c "${T}/buono_libretro.so"
 ok "la cartella temporanea dei core non resta" '[ -z "$(ls -A "${T}/tmpd")" ]'
-mkdir -p "${T}/qui" "${T}/tmpq"; ( cd "${T}/qui" && TMPDIR="${T}/tmpq" c ../scrive_libretro.so ); rc=$?
-ok "un core che scrive nella cartella corrente e accanto ai salvataggi: niente resta fuori, il percorso relativo va" '[ "${rc}" = 0 ] && line scrive | grep -q "^ok" && [ -z "$(ls -A "${T}/qui")" ] && [ -z "$(ls -A "${T}/tmpq")" ]'
+mkdir -p "${T}/qui" "${T}/tmpq" "${T}/casa"; ( cd "${T}/qui" && HOME="${T}/casa" TMPDIR="${T}/tmpq" c ../scrive_libretro.so ); rc=$?
+ok "un core che scrive nella cartella corrente, accanto ai salvataggi e in \$HOME: niente resta fuori, il percorso relativo va" '[ "${rc}" = 0 ] && line scrive | grep -q "^ok" && [ -z "$(ls -A "${T}/qui")" ] && [ -z "$(ls -A "${T}/tmpq")" ] && [ -z "$(ls -A "${T}/casa")" ]'
 
 echo "--- ${pass} ok, ${fail} falliti"
 [ "${fail}" = 0 ]

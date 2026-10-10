@@ -949,7 +949,7 @@ cp "${CT}/buono_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/fceumm/fceu
 cp "${CT}/nonrisolto_libretro.so" "${CL}/w/lakka-rf35h-build/target/cores/mgba/mgba_libretro.so"
 printf '%s\n' "core=fceumm commit=1111111111111111111111111111111111111111 site=x" "core=mgba commit=3333333333333333333333333333333333333333 site=x" > "${CL}/out/compiled.txt"
 cl() { : > "${CL}/out/built.txt"; : > "${CL}/out/failed.txt"
-	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^rm_tree() {/,/^}/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
+	( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|say\|die\)() *{/p; /^rm_tree() {/,/^}/p; /^coretest_user() {/,/^}/p; /^cmd_coretest() {/,/^}/p; /^cores_load() {/,/^}/p' "${CB}")"
 	  O="${REPO}" W="${CL}/w" TREE_NAME=lakka-rf35h-build GITHUB_ACTIONS=true GITHUB_RUN_ID=7 CORETEST_CC=gcc CORETEST_QEMU="" \
 	  CORETEST_LOADER="${HOST_LD}" CORETEST_LIBPATH="${CORETEST_LIBPATH:-${HOST_LIBS}}" CORETEST_TIMEOUT=20
 	  cores_load "${CL}/out" ) > "${CL}/run.out" 2>&1; }
@@ -984,14 +984,34 @@ rm -f "${IP}/glibc-1/usr/lib/ld-linux-aarch64.so.1"
 RF35H_CORETEST=yes CORETEST_LIBPATH="${CL}/w/coretest-root/usr/lib:${HOST_LIBS}" cl; rc=$?
 ok "  ...install_pkg senza il loader: si ferma e lo dice" '[ "${rc}" != 0 ] && grep -q "in install_pkg nessun ld-linux-aarch64.so.1" "${CL}/run.out"'
 
+echo "coretest_user: l'utente del test nel passwd della radice"
+# un uid che nel passwd dell'immagine non c'e' (il runner: 1001); id finto,
+# cosi' la prova vale anche lanciata da root
+CU="${T}/cu"; mkdir -p "${CU}/img/etc" "${CU}/fuori"
+printf 'root:x:0:0:Root User:/storage:/bin/sh\nnobody:x:65534:65534:Nobody:/:/bin/sh\n' > "${CU}/img/etc/passwd"
+printf 'root:x:0:\n' > "${CU}/img/etc/group"
+cu() { ( eval "$(sed -n '/^coretest_user() {/,/^}/p' "${CB}")"
+	id() { case "$1" in -u) echo 1001 ;; -g) echo 1002 ;; esac; }
+	coretest_user "$1" ) > /dev/null 2>&1; }
+cu "${CU}/img"; cu "${CU}/img"
+ok "uid assente: una riga sola (anche chiamata due volte), casa /storage, gruppo suo" '[ "$(grep -c "^rf35h-coretest:x:1001:1002:rf35h-coretest:/storage:/bin/sh$" "${CU}/img/etc/passwd")" = 1 ] && [ "$(grep -c "^rf35h-coretest:x:1002:$" "${CU}/img/etc/group")" = 1 ] && grep -q "^nobody:" "${CU}/img/etc/passwd" && [ -d "${CU}/img/storage" ]'
+cu "${CU}/vuota"
+ok "  ...radice senza etc (quella di install_pkg): root e l'utente" 'grep -q "^root:x:0:0:" "${CU}/vuota/etc/passwd" && grep -q "^rf35h-coretest:x:1001:" "${CU}/vuota/etc/passwd" && grep -q "^root:x:0:$" "${CU}/vuota/etc/group"'
+mkdir -p "${CU}/link/etc"; echo "host:x:5:5::/:/bin/sh" > "${CU}/fuori/passwd"; ln -s "${CU}/fuori/passwd" "${CU}/link/etc/passwd"
+cu "${CU}/link"
+ok "  ...un passwd che e' un link: sostituito, il file fuori intatto" '[ ! -L "${CU}/link/etc/passwd" ] && grep -q "^rf35h-coretest:x:1001:" "${CU}/link/etc/passwd" && [ "$(cat "${CU}/fuori/passwd")" = "host:x:5:5::/:/bin/sh" ]'
+( eval "$(sed -n '/^coretest_user() {/,/^}/p' "${CB}")"; id() { echo 0; }; coretest_user "${CU}/img" ) > /dev/null 2>&1
+ok "  ...da root (uid 0, gia' nel passwd): niente di nuovo" '[ "$(grep -c "^rf35h-coretest:" "${CU}/img/etc/passwd")" = 1 ]'
+
 echo "check-dist: i core che non si aprono fermano la release"
 # dist_coretest con un cmd_coretest finto: le righe di un test con due NO
 DC="${T}/dc"; mkdir -p "${DC}/dist"
-dc() { ( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|die\)() *{/p; /^dist_coretest() {/,/^}/p' "${CB}")"
+dc() { ( eval "$(sed -n '/^note() {/,/^}/p; /^\(summ\|die\)() *{/p; /^coretest_user() {/,/^}/p; /^dist_coretest() {/,/^}/p' "${CB}")"
 	cmd_coretest() { mkdir -p "$3"; printf '%s\n' "${FAKE_CT[@]}" > "$3/coretest.txt"; return "${FAKE_RC}"; }
 	GITHUB_ACTIONS=true; dist_coretest "${DC}/root" "${DC}/ct" "${DC}/dist" ) > "${DC}/out" 2>&1; }
 FAKE_CT=('ok      fceumm_libretro.so "FCEUmm" 1 [0s]' 'NO      dosbox_libretro.so dlopen: undefined symbol: g_rec_mutex_init' 'NO      scummvm_libretro.so dlopen: undefined symbol: fluid_synth_pitch_bend'); FAKE_RC=1
 dc; rc=$?
+ok "dist_coretest: l'utente del test nel passwd della radice (higan: getpwuid)" 'awk -F: -v u="$(id -u)" "\$3 == u" "${DC}/root/etc/passwd" | grep -q ":/storage:"'
 ok "dist_coretest: due core che non si aprono, la release si ferma e li nomina" '[ "${rc}" != 0 ] && grep -q "core che non si aprono: dosbox_libretro.so, scummvm_libretro.so" "${DC}/out" && grep -q "^::error title=Core che non si aprono::dosbox_libretro.so, scummvm_libretro.so" "${DC}/out"'
 RF35H_ALLOW_INCOMPLETE=true dc; rc=$?
 ok "  ...con allow_incomplete: pubblicata, con l'avviso" '[ "${rc}" = 0 ] && grep -q "^::warning title=Core che non si aprono::dosbox_libretro.so, scummvm_libretro.so. Pubblicata lo stesso" "${DC}/out"'

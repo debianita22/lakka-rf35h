@@ -6861,3 +6861,36 @@ nell'altro (17). Le correzioni dei quattro core reggono anche sulla
 toolchain vera (gcc 16, gold), non solo nelle prove fatte qui. Note della
 v1.4.2 in docs/release-notes/v1.4.2.md; la descrizione di allow_incomplete
 in build.yml dice anche dei core che non si aprono.
+
+## v1.4.2: il test ferma la release, per l'utente del runner (10/10/2026)
+
+Run 37984544368 (Run workflow, version v1.4.2, da 774c40b): la build sta in
+una parte sola, 3 ore e 46 minuti (20:07-23:53 UTC del 9/10, ccache e stato
+della v1.4.1). Il job Release si ferma in check-dist, al test nuovo: dei 174
+core, due "non si aprono", higan_sfc e higan_sfc_balanced, crash gia' nel
+dlopen in `nall::Path::user()+0x34`, indirizzo 0x20. Gli altri come
+previsto: dosbox, dosbox_core, scummvm e DoubleCherryGB si aprono; gli
+avvisi sono i quattro di sempre (craft, numero, tyrquake, vitaquake2).
+
+0x20 e' pw_dir in un struct passwd a NULL: nall chiede la casa a
+`getpwuid(getuid())` senza guardare se c'e'. Sul runner il test gira come
+uid 1001, che nel /etc/passwd dell'immagine (root, nobody, dbus...) non c'e';
+qui nel container giravo come root. Riprodotto con `setpriv --reuid=1001`
+sotto qemu sulla radice della v1.4.1: crash; con una riga per l'uid 1001 nel
+passwd, si aprono tutti e due. Sulla console RetroArch gira come root: si
+aprono. Un falso positivo del test, non dei core.
+
+Correzione (tools/ci-build.sh, `coretest_user`): nel passwd e nel group della
+radice del test una riga per l'utente e il gruppo del test, con la casa di
+root (/storage); se la radice non li ha (quella di install_pkg del job cores),
+root e l'utente, cosi' non vale piu' il passwd dell'host. Un passwd che e'
+un link si sostituisce, non si segue. In piu' l'harness da' ai core
+`HOME=<cartella delle prove>/libretro` (sulla console e' /storage) e toglie
+XDG_*: chi scrive in $HOME non finisce nella casa di chi lancia il test.
+Prove: coretest_user con un id finto (uid assente, chiamata due volte,
+radice senza etc, passwd come link, root), dist_coretest che lo chiama,
+il core finto che scrive in $HOME (test-ci-build.sh 182,
+test-rf35h-coretest.sh 14; le mutazioni le vedono).
+
+Pubblicazione: `publish_from=37984544368`, stessi file della build, il job
+Release con gli script nuovi.

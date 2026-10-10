@@ -559,6 +559,34 @@ rm_tree() {
 	rm -rf "$1"
 }
 
+# Il test gira come l'utente del runner (uid 1001), che nel passwd
+# dell'immagine non c'e': getpwuid() da' NULL, e higan (nall::Path::user) va
+# in crash gia' nel dlopen. Sulla console RetroArch gira come root, che c'e'.
+# Qui, nel passwd e nel group di <radice>, una riga per l'utente e il gruppo
+# del test, con la casa di root (/storage); se mancano i file, anche root.
+# Solo su radici fatte da noi (il SYSTEM estratto, quella di install_pkg):
+# un passwd che e' un link (fuori dalla radice) si sostituisce, non si segue.
+# Release v1.4.2, run 37984544368: fermata per higan_sfc e higan_sfc_balanced,
+# che sulla console si aprono.
+coretest_user() {
+	local root="$1" u g f
+	u="$(id -u)"; g="$(id -g)"
+	mkdir -p "${root}/etc" "${root}/storage"
+	for f in passwd group; do
+		if [ -L "${root}/etc/${f}" ]; then
+			rm -f "${root}/etc/${f}"
+		fi
+		[ -f "${root}/etc/${f}" ] || case "${f}" in
+			passwd) echo "root:x:0:0:Root User:/storage:/bin/sh" > "${root}/etc/passwd" ;;
+			group)  echo "root:x:0:" > "${root}/etc/group" ;;
+		esac
+	done
+	awk -F: -v u="${u}" '$3 == u { f = 1 } END { exit !f }' "${root}/etc/passwd" \
+		|| echo "rf35h-coretest:x:${u}:${g}:rf35h-coretest:/storage:/bin/sh" >> "${root}/etc/passwd"
+	awk -F: -v g="${g}" '$3 == g { f = 1 } END { exit !f }' "${root}/etc/group" \
+		|| echo "rf35h-coretest:x:${g}:" >> "${root}/etc/group"
+}
+
 # Job release: ogni core del SYSTEM (estratto in <radice>) si apre come in
 # RetroArch, con le librerie e il RetroArch dell'immagine (cmd_coretest, i
 # file in <cartella>). La v1.4.1 e' uscita con quattro core che compilavano e
@@ -571,6 +599,7 @@ rm_tree() {
 dist_coretest() {
 	local root="$1" d="$2" dist="$3" nolist
 	: > "${dist}/noload.txt"
+	coretest_user "${root}"
 	if cmd_coretest "${root}" "${root}/usr/bin/retroarch" "${d}" "${root}/usr/lib/libretro/"*_libretro.so; then
 		echo "  ok: $(grep -c '^ok' "${d}/coretest.txt") core si aprono$(grep -q '^avviso' "${d}/coretest.txt" && echo ", $(grep -c '^avviso' "${d}/coretest.txt") con un avviso")"
 		return 0
@@ -1221,6 +1250,8 @@ cores_load() {
 		done
 		[ -e "${root}/usr/lib/ld-linux-aarch64.so.1" ] \
 			|| die "test di caricamento: in install_pkg nessun ld-linux-aarch64.so.1 (${n} pacchetti con usr/lib)"
+		# passwd e group suoi, non quelli dell'host (qemu -L li cercherebbe li')
+		coretest_user "${root}"
 		echo "  radice: usr/lib di ${n} pacchetti di install_pkg, $(find "${root}/usr/lib" -maxdepth 1 -name '*.so*' | wc -l) librerie"
 	fi
 	for p in $(awk '{ print substr($1, 6) }' "${out}/compiled.txt"); do
