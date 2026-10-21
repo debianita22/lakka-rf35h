@@ -6914,3 +6914,45 @@ SYSTEM scaricato (da root, qui): 170 ok, 4 avvisi, nessun NO; dosbox
 sono quelle volute: dosbox e dosbox_core con glib, dbus e libsndfile;
 scummvm con quelle piu' alsa e libvorbisfile (fluidsynth e faad dentro il
 .so); DoubleCherryGB solo libstdc++, libm, libgcc_s, libc.
+
+## Le issue del 12-19/10: sameboy, kernel 7.2.10 e 7.2.11, poi la v1.4.3 (21/10/2026)
+
+L'utente: "Ci sono issues su GitHub, valuta la risoluzione". Tre aperte,
+tutte del bot; su main intanto due corse settimanali di cores.yml avevano
+portato 25 e 32 core all'upstream (871f4a3, bdec528), aperti col test di
+caricamento.
+
+**#7, sameboy non compila all'upstream** (12 e 19/10). Alla punta del ramo
+libretro di SameBoy (c87d256, v1.0.4) la patch di Lakka
+`sameboy-001-workaround_rgbasm_not_found.patch` non si applica: avvolgeva
+in un `ifneq` le sonde della versione di rgbasm del Makefile in cima, perche'
+senza rgbasm facevano rumore. L'upstream lo ha sistemato a modo suo il 27/9
+(fba93b9, "Muted errors if using prebuilt ROMs an rgbasm is not found":
+gli errori a `$(NULL)`), e il nostro package compila `libretro/` senza
+quel Makefile. Marcatore di solo testo in cores/patches/sameboy/ (8273e3f):
+pre_patch la salta a c87d256 e la applica ancora a 8230189 (provato sui due
+sorgenti veri). Compilato qui con la nostra ricetta e aperto sotto qemu
+sulla radice della v1.4.2: "SameBoy" 1.0.4. cores.yml (run 39619106588,
+`cores=sameboy`): compila e si apre, pin a c87d256 (0ded423), la #7 si
+chiude da sola.
+
+**#6 e #8, kernel 7.2.10 e 7.2.11**: le build di prova dei rami di
+upstream.yml sono verdi (38247607146, 39234817168: 497 passi, 174 core).
+La #6 chiusa come superata dalla #8. Cosa cambia per l'RK3326, dallo
+storico stable di gregkh/linux (711 commit da v7.2.9 a v7.2.11): tre
+correzioni dei power domain Rockchip (una cambia comportamento: un errore
+nel lookup del clock di un dispositivo all'attach non si ignora piu', e
+l'attach fallisce; il rischio piu' concreto, su display e GPU), locking
+della lista dei bridge DRM (il DSI), dwc2 (USB OTG), mac80211/cfg80211.
+Niente in panfrost, VOP, dw_mmc, PMIC rk8xx, codec rk817, pannelli. Le
+correzioni del buffer IIO non toccano gli stick: il joypad li legge in
+polling (`poll-interval`), senza buffer.
+
+Proposto all'utente di provare prima sulla console l'immagine di prova
+(artifact lakka-rf35h-ci-41-ba8b3b7, fino al 2/11); ha scelto "Merge e
+release v1.4.3 ora". Il commit del bot (ba8b3b7) portato su main come
+ad2b16a: il ramo partiva da 871f4a3 e main era andato avanti, il
+fast-forward dell'issue non era piu' possibile. Note in
+docs/release-notes/v1.4.3.md, con il modo di tornare alla v1.4.2
+(`TAG=v1.4.2` in /storage/.config/rf35h/update.conf). Rami
+`ci-test/kernel-7.2.10` e `-7.2.11` da cancellare (dall'utente).
