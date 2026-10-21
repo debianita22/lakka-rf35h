@@ -35,7 +35,7 @@ dolphin              https://github.com/libretro/dolphin                      54
 ppsspp               https://github.com/hrydgard/ppsspp                       85e6653d02aba2722ac8e1f79889317310308596 -
 fbneo                https://github.com/libretro/fbneo                        e3416e79f6d339dc606100aaede0c028982b69f9 -
 gambatte             https://github.com/libretro/gambatte-libretro            d9d6cd06382d1ced30de34d56d3609452323dab1 -
-sameboy              https://github.com/LIJI32/SameBoy                        8230189896a8bb6598574d302ba0ad3658f98ab4 libretro
+sameboy              https://github.com/LIJI32/SameBoy                        c87d2565ea2eef1d342d0828c041ca71b5784aff libretro
 tgbdual              https://github.com/libretro/tgbdual-libretro             0392c9c469e653205e471114c7949c07c83bfce9 -
 fceumm               https://github.com/libretro/libretro-fceumm              ac0d00a7fc01166f84c7bac01d1084ebfd2b865e -
 nestopia             https://github.com/libretro/nestopia                     06a8949e0b3cf60e3a38a374b1426bf40fccb9a0 -
