@@ -1,0 +1,1 @@
+Superata: dal 27/9/2026 (fba93b9, "Muted errors if using prebuilt ROMs an rgbasm is not found") il Makefile in cima manda a $(NULL) gli errori di rgbasm che manca, cio' che la patch evitava; e il package di qui (integration/sameboy-cflags-rf35h.patch) compila libretro/ direttamente, senza quel Makefile.
