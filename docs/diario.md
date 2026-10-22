@@ -6956,3 +6956,17 @@ fast-forward dell'issue non era piu' possibile. Note in
 docs/release-notes/v1.4.3.md, con il modo di tornare alla v1.4.2
 (`TAG=v1.4.2` in /storage/.config/rf35h/update.conf). Rami
 `ci-test/kernel-7.2.10` e `-7.2.11` da cancellare (dall'utente).
+
+Run 39622702137 (version v1.4.3, da 947db8a): parte 1 315 minuti (364 passi
+su 497, fermata a tempo; mame:target e rust:host rifatti), parte 2 155
+minuti (497 su 497), ccache 74%. Release: check-dist e il test di
+caricamento passano (i 4 avvisi di sempre, nessun core che non si apre),
+pubblicata alle 23:24 UTC del 21/10, latest; tag v1.4.3 su 947db8a, creato
+dal job. sysroot-v1.4.3 per cores.yml.
+
+File: img.gz 1039043580 byte, .tar 1066414080. Verificati da qui con curl:
+sha256 e dimensione del .tar come in update.txt e SHA256SUMS, SYSTEM.md5 e
+KERNEL.md5 OK; il KERNEL e' "Linux version 7.2.11" (gcc 16.1.0, binutils
+2.46), i moduli in 7.2.11, os-release VERSION="v1.4.3". Test di
+caricamento sul SYSTEM scaricato: 170 ok, 4 avvisi, nessun NO; sameboy
+"SameBoy" 1.0.4 c87d256. Il kernel resta da provare sulla console.
